@@ -46,10 +46,10 @@ async = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dakera-ai/dakera"
-Documentation = "https://dakera.ai/docs/python-sdk"
-Repository = "https://github.com/dakera-ai/dakera"
-Issues = "https://github.com/dakera-ai/dakera/issues"
+Homepage = "https://dakera.ai"
+Documentation = "https://dakera.ai/docs/python"
+Repository = "https://github.com/dakera-ai/dakera-py"
+Issues = "https://github.com/dakera-ai/dakera-py/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
