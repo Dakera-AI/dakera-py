@@ -72,6 +72,9 @@ target-version = "py38"
 select = ["E", "F", "I", "N", "W", "UP", "ANN", "B", "C4", "SIM"]
 ignore = ["ANN101", "ANN102"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
