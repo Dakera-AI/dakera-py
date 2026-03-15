@@ -5,7 +5,7 @@ Main client class for interacting with Dakera server.
 """
 
 import json
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
 import requests
@@ -13,12 +13,12 @@ import requests
 from dakera.exceptions import (
     AuthenticationError,
     ConnectionError,
+    DakeraError,
     NotFoundError,
     RateLimitError,
     ServerError,
     TimeoutError,
     ValidationError,
-    DakeraError,
 )
 from dakera.models import (
     AccessPatternHint,
@@ -32,7 +32,6 @@ from dakera.models import (
     HybridSearchResult,
     IndexStats,
     NamespaceInfo,
-    QueryResult,
     ReadConsistency,
     SearchResult,
     StalenessConfig,
@@ -107,15 +106,16 @@ class DakeraClient:
         except json.JSONDecodeError:
             body = response.text
 
-        if response.status_code == 200:
-            return body
-        elif response.status_code == 201:
+        if response.status_code == 200 or response.status_code == 201:
             return body
         elif response.status_code == 204:
             return None
         elif response.status_code == 400:
             raise ValidationError(
-                message=body.get("error", "Validation error") if isinstance(body, dict) else str(body),
+                message=(
+                    body.get("error", "Validation error")
+                    if isinstance(body, dict) else str(body)
+                ),
                 status_code=response.status_code,
                 response_body=body,
             )
@@ -127,7 +127,10 @@ class DakeraClient:
             )
         elif response.status_code == 404:
             raise NotFoundError(
-                message=body.get("error", "Resource not found") if isinstance(body, dict) else str(body),
+                message=(
+                    body.get("error", "Resource not found")
+                    if isinstance(body, dict) else str(body)
+                ),
                 status_code=response.status_code,
                 response_body=body,
             )

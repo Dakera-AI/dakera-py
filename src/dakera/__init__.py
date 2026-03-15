@@ -13,52 +13,52 @@ Example usage:
 """
 
 from dakera.client import DakeraClient
+from dakera.exceptions import (
+    ConnectionError,
+    DakeraError,
+    NotFoundError,
+    RateLimitError,
+    ServerError,
+    ValidationError,
+)
 from dakera.models import (
-    # Core types
-    Vector,
-    QueryResult,
-    SearchResult,
-    NamespaceInfo,
-    IndexStats,
+    AccessPatternHint,
+    AgentStats,
+    # Agent types
+    AgentSummary,
+    # Analytics types
+    AnalyticsOverview,
+    ConsolidateResponse,
+    DeduplicateResponse,
+    DistanceMetric,
     Document,
     FullTextSearchResult,
     HybridSearchResult,
+    IndexStats,
+    KnowledgeEdge,
+    KnowledgeGraphResponse,
+    # Knowledge Graph types
+    KnowledgeNode,
+    Memory,
+    NamespaceInfo,
+    QueryResult,
     # Consistency types
     ReadConsistency,
-    DistanceMetric,
+    RecalledMemory,
+    SearchResult,
+    # Session types
+    Session,
     StalenessConfig,
+    # Memory types
+    StoreMemoryRequest,
+    SummarizeResponse,
+    # Core types
+    Vector,
+    WarmCacheRequest,
+    WarmCacheResponse,
     # Cache warming types
     WarmingPriority,
     WarmingTargetTier,
-    AccessPatternHint,
-    WarmCacheRequest,
-    WarmCacheResponse,
-    # Memory types
-    StoreMemoryRequest,
-    Memory,
-    RecalledMemory,
-    ConsolidateResponse,
-    # Session types
-    Session,
-    # Agent types
-    AgentSummary,
-    AgentStats,
-    # Knowledge Graph types
-    KnowledgeNode,
-    KnowledgeEdge,
-    KnowledgeGraphResponse,
-    SummarizeResponse,
-    DeduplicateResponse,
-    # Analytics types
-    AnalyticsOverview,
-)
-from dakera.exceptions import (
-    DakeraError,
-    ConnectionError,
-    NotFoundError,
-    ValidationError,
-    RateLimitError,
-    ServerError,
 )
 
 __version__ = "0.1.0"

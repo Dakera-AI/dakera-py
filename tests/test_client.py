@@ -5,11 +5,11 @@ import responses
 
 from dakera import (
     DakeraClient,
-    Vector,
     Document,
     NotFoundError,
-    ValidationError,
     ServerError,
+    ValidationError,
+    Vector,
 )
 
 

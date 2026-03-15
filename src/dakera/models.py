@@ -4,10 +4,9 @@ Dakera SDK Data Models
 Dataclasses representing Dakera data structures.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
-
 
 # ============================================================================
 # Consistency & Query Types (Turbopuffer-inspired)
