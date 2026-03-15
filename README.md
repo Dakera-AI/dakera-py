@@ -1,5 +1,10 @@
 # Dakera Python SDK
 
+[![CI](https://github.com/dakera-ai/dakera-py/actions/workflows/ci.yml/badge.svg)](https://github.com/dakera-ai/dakera-py/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dakera)](https://pypi.org/project/dakera/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/pypi/pyversions/dakera)](https://pypi.org/project/dakera/)
+
 Official Python client for [Dakera](https://github.com/dakera/dakera) - a high-performance vector database.
 
 ## Installation
@@ -278,6 +283,18 @@ mypy src/dakera
 # Linting
 ruff check src/
 ```
+
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [dakera](https://github.com/dakera-ai/dakera) | Core vector database engine (Rust) |
+| [dakera-js](https://github.com/dakera-ai/dakera-js) | TypeScript/JavaScript SDK |
+| [dakera-go](https://github.com/dakera-ai/dakera-go) | Go SDK |
+| [dakera-mcp](https://github.com/dakera-ai/dakera-mcp) | MCP Server for AI agent memory |
+| [dakera-docs](https://github.com/dakera-ai/dakera-docs) | Documentation |
+| [dakera-deploy](https://github.com/dakera-ai/dakera-deploy) | Deployment configs and Docker Compose |
+| [dakera-cortex](https://github.com/dakera-ai/dakera-cortex) | Flagship demo with AI agents |
 
 ## License
 
