@@ -12,6 +12,7 @@ Example usage:
     >>> results = client.query("my-namespace", vector=[0.1, 0.2, 0.3], top_k=10)
 """
 
+from dakera.async_client import AsyncDakeraClient
 from dakera.client import DakeraClient
 from dakera.exceptions import (
     ConnectionError,
@@ -61,10 +62,11 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __all__ = [
-    # Client
+    # Clients
     "DakeraClient",
+    "AsyncDakeraClient",
     # Models
     "Vector",
     "QueryResult",
