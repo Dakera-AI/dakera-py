@@ -12,7 +12,6 @@ Example usage:
     >>> results = client.query("my-namespace", vector=[0.1, 0.2, 0.3], top_k=10)
 """
 
-from dakera.async_client import AsyncDakeraClient
 from dakera.client import DakeraClient
 
 try:
