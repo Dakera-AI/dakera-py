@@ -13,6 +13,11 @@ Example usage:
 """
 
 from dakera.client import DakeraClient
+
+try:
+    from dakera.async_client import AsyncDakeraClient
+except ImportError:
+    AsyncDakeraClient = None  # type: ignore[assignment,misc]
 from dakera.exceptions import (
     ConnectionError,
     DakeraError,
@@ -61,10 +66,11 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __all__ = [
-    # Client
+    # Clients
     "DakeraClient",
+    "AsyncDakeraClient",
     # Models
     "Vector",
     "QueryResult",
