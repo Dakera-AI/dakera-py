@@ -64,7 +64,10 @@ warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = true
 strict = true
-disable_error_codes = ["no-any-return"]
+
+[[tool.mypy.overrides]]
+module = ["httpx", "httpx.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
