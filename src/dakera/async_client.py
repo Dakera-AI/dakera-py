@@ -25,7 +25,7 @@ Example:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 try:
     import httpx
@@ -88,10 +88,10 @@ class AsyncDakeraClient:
     def __init__(
         self,
         base_url: str,
-        api_key: str | None = None,
+        api_key: Optional[str] = None,
         timeout: float = 30.0,
         max_retries: int = 3,
-        headers: dict[str, str] | None = None,
+        headers: Optional[Dict[str, str]] = None,
     ) -> None:
         """
         Initialize async Dakera client.
@@ -108,7 +108,7 @@ class AsyncDakeraClient:
         self.timeout = timeout
         self.max_retries = max_retries
 
-        default_headers: dict[str, str] = {"Content-Type": "application/json"}
+        default_headers: Dict[str, str] = {"Content-Type": "application/json"}
         if api_key:
             default_headers["Authorization"] = f"Bearer {api_key}"
         if headers:
@@ -136,11 +136,7 @@ class AsyncDakeraClient:
             return None
         if response.status_code == 400:
             raise ValidationError(
-                message=(
-                    body.get("error", "Validation error")
-                    if isinstance(body, dict)
-                    else str(body)
-                ),
+                message=body.get("error", "Validation error") if isinstance(body, dict) else str(body),
                 status_code=response.status_code,
                 response_body=body,
             )
@@ -152,11 +148,7 @@ class AsyncDakeraClient:
             )
         if response.status_code == 404:
             raise NotFoundError(
-                message=(
-                    body.get("error", "Resource not found")
-                    if isinstance(body, dict)
-                    else str(body)
-                ),
+                message=body.get("error", "Resource not found") if isinstance(body, dict) else str(body),
                 status_code=response.status_code,
                 response_body=body,
             )
@@ -184,12 +176,12 @@ class AsyncDakeraClient:
         self,
         method: str,
         path: str,
-        data: dict[str, Any] | None = None,
-        params: dict[str, Any] | None = None,
+        data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Make async HTTP request with retry logic."""
         url = self._url(path)
-        last_exception: Exception | None = None
+        last_exception: Optional[Exception] = None
 
         for attempt in range(self.max_retries):
             try:
@@ -222,8 +214,8 @@ class AsyncDakeraClient:
     async def upsert(
         self,
         namespace: str,
-        vectors: list[VectorInput],
-    ) -> dict[str, Any]:
+        vectors: List[VectorInput],
+    ) -> Dict[str, Any]:
         """Upsert vectors into a namespace."""
         vector_dicts = []
         for v in vectors:
@@ -231,26 +223,22 @@ class AsyncDakeraClient:
                 vector_dicts.append(v.to_dict())
             else:
                 vector_dicts.append(v)
-        return await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/vectors",
-            data={"vectors": vector_dicts},
-        )
+        return await self._request("POST", f"/v1/namespaces/{namespace}/vectors", data={"vectors": vector_dicts})
 
     async def query(
         self,
         namespace: str,
-        vector: list[float],
+        vector: List[float],
         top_k: int = 10,
-        filter: FilterDict | None = None,
+        filter: Optional[FilterDict] = None,
         include_values: bool = False,
         include_metadata: bool = True,
-        distance_metric: DistanceMetric | None = None,
-        consistency: ReadConsistency | None = None,
-        staleness_config: StalenessConfig | None = None,
+        distance_metric: Optional[DistanceMetric] = None,
+        consistency: Optional[ReadConsistency] = None,
+        staleness_config: Optional[StalenessConfig] = None,
     ) -> SearchResult:
         """Query vectors by similarity."""
-        data: dict[str, Any] = {
+        data: Dict[str, Any] = {
             "vector": vector,
             "top_k": top_k,
             "include_values": include_values,
@@ -270,12 +258,12 @@ class AsyncDakeraClient:
     async def delete(
         self,
         namespace: str,
-        ids: list[str] | None = None,
-        filter: FilterDict | None = None,
+        ids: Optional[List[str]] = None,
+        filter: Optional[FilterDict] = None,
         delete_all: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Delete vectors from a namespace."""
-        data: dict[str, Any] = {}
+        data: Dict[str, Any] = {}
         if ids:
             data["ids"] = ids
         if filter:
@@ -287,33 +275,25 @@ class AsyncDakeraClient:
     async def fetch(
         self,
         namespace: str,
-        ids: list[str],
+        ids: List[str],
         include_values: bool = True,
         include_metadata: bool = True,
-    ) -> list[Vector]:
+    ) -> List[Vector]:
         """Fetch vectors by ID."""
         response = await self._request(
             "POST",
             f"/v1/namespaces/{namespace}/fetch",
-            data={
-                "ids": ids,
-                "include_values": include_values,
-                "include_metadata": include_metadata,
-            },
+            data={"ids": ids, "include_values": include_values, "include_metadata": include_metadata},
         )
         return [Vector.from_dict(v) for v in response.get("vectors", [])]
 
     async def batch_query(
         self,
         namespace: str,
-        queries: list[dict[str, Any]],
-    ) -> list[SearchResult]:
+        queries: List[Dict[str, Any]],
+    ) -> List[SearchResult]:
         """Execute multiple queries in a single request."""
-        response = await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/batch-query",
-            data={"queries": queries},
-        )
+        response = await self._request("POST", f"/v1/namespaces/{namespace}/batch-query", data={"queries": queries})
         return [SearchResult.from_dict(r) for r in response.get("results", [])]
 
     # =========================================================================
@@ -323,12 +303,12 @@ class AsyncDakeraClient:
     async def upsert_text(
         self,
         namespace: str,
-        documents: list[TextDocumentInput],
-        model: EmbeddingModel | None = None,
+        documents: List[TextDocumentInput],
+        model: Optional[EmbeddingModel] = None,
     ) -> TextUpsertResponse:
         """Upsert text documents with automatic embedding generation."""
         doc_dicts = [d.to_dict() if isinstance(d, TextDocument) else d for d in documents]
-        data: dict[str, Any] = {"documents": doc_dicts}
+        data: Dict[str, Any] = {"documents": doc_dicts}
         if model:
             data["model"] = model.value
         response = await self._request("POST", f"/v1/namespaces/{namespace}/upsert-text", data=data)
@@ -339,18 +319,13 @@ class AsyncDakeraClient:
         namespace: str,
         text: str,
         top_k: int = 10,
-        filter: FilterDict | None = None,
+        filter: Optional[FilterDict] = None,
         include_text: bool = True,
         include_vectors: bool = False,
-        model: EmbeddingModel | None = None,
+        model: Optional[EmbeddingModel] = None,
     ) -> TextQueryResponse:
         """Query using natural language text with automatic embedding."""
-        data: dict[str, Any] = {
-            "text": text,
-            "top_k": top_k,
-            "include_text": include_text,
-            "include_vectors": include_vectors,
-        }
+        data: Dict[str, Any] = {"text": text, "top_k": top_k, "include_text": include_text, "include_vectors": include_vectors}
         if filter:
             data["filter"] = filter
         if model:
@@ -361,27 +336,19 @@ class AsyncDakeraClient:
     async def batch_query_text(
         self,
         namespace: str,
-        queries: list[str],
+        queries: List[str],
         top_k: int = 10,
-        filter: FilterDict | None = None,
+        filter: Optional[FilterDict] = None,
         include_vectors: bool = False,
-        model: EmbeddingModel | None = None,
+        model: Optional[EmbeddingModel] = None,
     ) -> BatchTextQueryResponse:
         """Batch query using multiple text queries with automatic embedding."""
-        data: dict[str, Any] = {
-            "queries": queries,
-            "top_k": top_k,
-            "include_vectors": include_vectors,
-        }
+        data: Dict[str, Any] = {"queries": queries, "top_k": top_k, "include_vectors": include_vectors}
         if filter:
             data["filter"] = filter
         if model:
             data["model"] = model.value
-        response = await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/batch-query-text",
-            data=data,
-        )
+        response = await self._request("POST", f"/v1/namespaces/{namespace}/batch-query-text", data=data)
         return BatchTextQueryResponse.from_dict(response)
 
     # =========================================================================
@@ -391,59 +358,47 @@ class AsyncDakeraClient:
     async def index_documents(
         self,
         namespace: str,
-        documents: list[DocumentInput],
-    ) -> dict[str, Any]:
+        documents: List[DocumentInput],
+    ) -> Dict[str, Any]:
         """Index documents for full-text search."""
         doc_dicts = [d.to_dict() if isinstance(d, Document) else d for d in documents]
-        return await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/fulltext/index",
-            data={"documents": doc_dicts},
-        )
+        return await self._request("POST", f"/v1/namespaces/{namespace}/fulltext/index", data={"documents": doc_dicts})
 
     async def fulltext_search(
         self,
         namespace: str,
         query: str,
         top_k: int = 10,
-        filter: FilterDict | None = None,
-    ) -> list[FullTextSearchResult]:
+        filter: Optional[FilterDict] = None,
+    ) -> List[FullTextSearchResult]:
         """Perform full-text search."""
-        data: dict[str, Any] = {"query": query, "top_k": top_k}
+        data: Dict[str, Any] = {"query": query, "top_k": top_k}
         if filter:
             data["filter"] = filter
-        response = await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/fulltext/search",
-            data=data,
-        )
+        response = await self._request("POST", f"/v1/namespaces/{namespace}/fulltext/search", data=data)
         return [FullTextSearchResult.from_dict(r) for r in response.get("results", [])]
 
     async def hybrid_search(
         self,
         namespace: str,
-        vector: list[float],
+        vector: List[float],
         query: str,
         top_k: int = 10,
         alpha: float = 0.5,
-        filter: FilterDict | None = None,
-    ) -> list[HybridSearchResult]:
+        filter: Optional[FilterDict] = None,
+    ) -> List[HybridSearchResult]:
         """Perform hybrid search combining vector and full-text."""
-        data: dict[str, Any] = {"vector": vector, "query": query, "top_k": top_k, "alpha": alpha}
+        data: Dict[str, Any] = {"vector": vector, "query": query, "top_k": top_k, "alpha": alpha}
         if filter:
             data["filter"] = filter
-        response = await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/fulltext/hybrid",
-            data=data,
-        )
+        response = await self._request("POST", f"/v1/namespaces/{namespace}/fulltext/hybrid", data=data)
         return [HybridSearchResult.from_dict(r) for r in response.get("results", [])]
 
     # =========================================================================
     # Namespace Operations
     # =========================================================================
 
-    async def list_namespaces(self) -> list[NamespaceInfo]:
+    async def list_namespaces(self) -> List[NamespaceInfo]:
         """List all namespaces."""
         response = await self._request("GET", "/v1/namespaces")
         return [NamespaceInfo.from_dict(ns) for ns in response.get("namespaces", [])]
@@ -456,12 +411,12 @@ class AsyncDakeraClient:
     async def create_namespace(
         self,
         namespace: str,
-        dimensions: int | None = None,
-        index_type: str | None = None,
-        metadata: dict[str, Any] | None = None,
+        dimensions: Optional[int] = None,
+        index_type: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> NamespaceInfo:
         """Create a new namespace."""
-        data: dict[str, Any] = {"name": namespace}
+        data: Dict[str, Any] = {"name": namespace}
         if dimensions:
             data["dimensions"] = dimensions
         if index_type:
@@ -479,7 +434,7 @@ class AsyncDakeraClient:
     # Admin / Stats Operations
     # =========================================================================
 
-    async def health(self) -> dict[str, Any]:
+    async def health(self) -> Dict[str, Any]:
         """Check server health status."""
         return await self._request("GET", "/health")
 
@@ -488,11 +443,11 @@ class AsyncDakeraClient:
         response = await self._request("GET", f"/v1/namespaces/{namespace}/stats")
         return IndexStats.from_dict(response)
 
-    async def compact(self, namespace: str) -> dict[str, Any]:
+    async def compact(self, namespace: str) -> Dict[str, Any]:
         """Trigger compaction for a namespace."""
         return await self._request("POST", f"/v1/namespaces/{namespace}/compact")
 
-    async def flush(self, namespace: str) -> dict[str, Any]:
+    async def flush(self, namespace: str) -> Dict[str, Any]:
         """Flush pending writes for a namespace."""
         return await self._request("POST", f"/v1/namespaces/{namespace}/flush")
 
@@ -505,12 +460,12 @@ class AsyncDakeraClient:
         agent_id: str,
         content: str,
         memory_type: str = "episodic",
-        importance: float | None = None,
-        metadata: dict[str, Any] | None = None,
-        session_id: str | None = None,
-    ) -> dict[str, Any]:
+        importance: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Store a memory for an agent."""
-        data: dict[str, Any] = {"content": content, "memory_type": memory_type}
+        data: Dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
             data["importance"] = importance
         if metadata is not None:
@@ -524,11 +479,11 @@ class AsyncDakeraClient:
         agent_id: str,
         query: str,
         top_k: int = 5,
-        memory_type: str | None = None,
-        min_importance: float | None = None,
-    ) -> list[dict[str, Any]]:
+        memory_type: Optional[str] = None,
+        min_importance: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """Recall memories for an agent."""
-        data: dict[str, Any] = {"query": query, "top_k": top_k}
+        data: Dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
@@ -536,7 +491,7 @@ class AsyncDakeraClient:
         result = await self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
         return result.get("memories", result) if isinstance(result, dict) else result
 
-    async def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
+    async def get_memory(self, agent_id: str, memory_id: str) -> Dict[str, Any]:
         """Get a specific memory."""
         return await self._request("GET", f"/v1/agents/{agent_id}/memories/{memory_id}")
 
@@ -544,12 +499,12 @@ class AsyncDakeraClient:
         self,
         agent_id: str,
         memory_id: str,
-        content: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        memory_type: str | None = None,
-    ) -> dict[str, Any]:
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        memory_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Update an existing memory."""
-        data: dict[str, Any] = {}
+        data: Dict[str, Any] = {}
         if content is not None:
             data["content"] = content
         if metadata is not None:
@@ -558,7 +513,7 @@ class AsyncDakeraClient:
             data["memory_type"] = memory_type
         return await self._request("PUT", f"/v1/agents/{agent_id}/memories/{memory_id}", data=data)
 
-    async def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
+    async def forget(self, agent_id: str, memory_id: str) -> Dict[str, Any]:
         """Delete a memory."""
         return await self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
 
@@ -567,11 +522,11 @@ class AsyncDakeraClient:
         agent_id: str,
         query: str,
         top_k: int = 10,
-        memory_type: str | None = None,
-        min_importance: float | None = None,
-    ) -> list[dict[str, Any]]:
+        memory_type: Optional[str] = None,
+        min_importance: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
         """Search memories for an agent."""
-        data: dict[str, Any] = {"query": query, "top_k": top_k}
+        data: Dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
@@ -582,25 +537,21 @@ class AsyncDakeraClient:
     async def update_importance(
         self,
         agent_id: str,
-        memory_ids: list[str],
+        memory_ids: List[str],
         importance: float,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Update importance of memories."""
-        return await self._request(
-            "PUT",
-            f"/v1/agents/{agent_id}/memories/importance",
-            data={"memory_ids": memory_ids, "importance": importance},
-        )
+        return await self._request("PUT", f"/v1/agents/{agent_id}/memories/importance", data={"memory_ids": memory_ids, "importance": importance})
 
     async def consolidate(
         self,
         agent_id: str,
-        memory_type: str | None = None,
-        threshold: float | None = None,
+        memory_type: Optional[str] = None,
+        threshold: Optional[float] = None,
         dry_run: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Consolidate memories for an agent."""
-        data: dict[str, Any] = {"dry_run": dry_run}
+        data: Dict[str, Any] = {"dry_run": dry_run}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if threshold is not None:
@@ -612,10 +563,10 @@ class AsyncDakeraClient:
         agent_id: str,
         memory_id: str,
         feedback: str,
-        relevance_score: float | None = None,
-    ) -> dict[str, Any]:
+        relevance_score: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """Submit feedback on a memory recall."""
-        data: dict[str, Any] = {"memory_id": memory_id, "feedback": feedback}
+        data: Dict[str, Any] = {"memory_id": memory_id, "feedback": feedback}
         if relevance_score is not None:
             data["relevance_score"] = relevance_score
         return await self._request("POST", f"/v1/agents/{agent_id}/memories/feedback", data=data)
@@ -627,31 +578,31 @@ class AsyncDakeraClient:
     async def start_session(
         self,
         agent_id: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """Start a new session."""
-        data: dict[str, Any] = {"agent_id": agent_id}
+        data: Dict[str, Any] = {"agent_id": agent_id}
         if metadata is not None:
             data["metadata"] = metadata
         return await self._request("POST", "/v1/sessions/start", data=data)
 
-    async def end_session(self, session_id: str) -> dict[str, Any]:
+    async def end_session(self, session_id: str) -> Dict[str, Any]:
         """End a session."""
         return await self._request("POST", f"/v1/sessions/{session_id}/end")
 
-    async def get_session(self, session_id: str) -> dict[str, Any]:
+    async def get_session(self, session_id: str) -> Dict[str, Any]:
         """Get session details."""
         return await self._request("GET", f"/v1/sessions/{session_id}")
 
     async def list_sessions(
         self,
-        agent_id: str | None = None,
-        active_only: bool | None = None,
-        limit: int | None = None,
-        offset: int | None = None,
-    ) -> list[dict[str, Any]]:
+        agent_id: Optional[str] = None,
+        active_only: Optional[bool] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """List sessions."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
         if active_only is not None:
@@ -662,7 +613,7 @@ class AsyncDakeraClient:
             params["offset"] = offset
         return await self._request("GET", "/v1/sessions", params=params)
 
-    async def session_memories(self, session_id: str) -> list[dict[str, Any]]:
+    async def session_memories(self, session_id: str) -> List[Dict[str, Any]]:
         """Get memories for a session."""
         return await self._request("GET", f"/v1/sessions/{session_id}/memories")
 
@@ -670,36 +621,36 @@ class AsyncDakeraClient:
     # Agent Operations
     # =========================================================================
 
-    async def list_agents(self) -> list[dict[str, Any]]:
+    async def list_agents(self) -> List[Dict[str, Any]]:
         """List all agents."""
         return await self._request("GET", "/v1/agents")
 
     async def agent_memories(
         self,
         agent_id: str,
-        memory_type: str | None = None,
-        limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+        memory_type: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Get memories for an agent."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if memory_type is not None:
             params["memory_type"] = memory_type
         if limit is not None:
             params["limit"] = limit
         return await self._request("GET", f"/v1/agents/{agent_id}/memories", params=params)
 
-    async def agent_stats(self, agent_id: str) -> dict[str, Any]:
+    async def agent_stats(self, agent_id: str) -> Dict[str, Any]:
         """Get statistics for an agent."""
         return await self._request("GET", f"/v1/agents/{agent_id}/stats")
 
     async def agent_sessions(
         self,
         agent_id: str,
-        active_only: bool | None = None,
-        limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+        active_only: Optional[bool] = None,
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Get sessions for an agent."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if active_only is not None:
             params["active_only"] = str(active_only).lower()
         if limit is not None:
@@ -713,13 +664,13 @@ class AsyncDakeraClient:
     async def warm_cache(
         self,
         namespace: str,
-        vector_ids: list[str] | None = None,
+        vector_ids: Optional[List[str]] = None,
         priority: WarmingPriority = WarmingPriority.NORMAL,
         target_tier: WarmingTargetTier = WarmingTargetTier.L2,
         background: bool = False,
-        ttl_hint_seconds: int | None = None,
+        ttl_hint_seconds: Optional[int] = None,
         access_pattern: AccessPatternHint = AccessPatternHint.RANDOM,
-        max_vectors: int | None = None,
+        max_vectors: Optional[int] = None,
     ) -> WarmCacheResponse:
         """Warm cache for vectors in a namespace."""
         request = WarmCacheRequest(
@@ -732,11 +683,7 @@ class AsyncDakeraClient:
             access_pattern=access_pattern,
             max_vectors=max_vectors,
         )
-        response = await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/cache/warm",
-            data=request.to_dict(),
-        )
+        response = await self._request("POST", f"/v1/namespaces/{namespace}/cache/warm", data=request.to_dict())
         return WarmCacheResponse.from_dict(response)
 
     # =========================================================================
@@ -746,22 +693,17 @@ class AsyncDakeraClient:
     async def multi_vector_search(
         self,
         namespace: str,
-        positive: list[list[float]],
-        negative: list[list[float]] | None = None,
+        positive: List[List[float]],
+        negative: Optional[List[List[float]]] = None,
         top_k: int = 10,
-        filter: FilterDict | None = None,
+        filter: Optional[FilterDict] = None,
         include_metadata: bool = True,
         include_vectors: bool = False,
-        mmr_lambda: float | None = None,
-        mmr_prefetch_k: int | None = None,
-    ) -> dict[str, Any]:
+        mmr_lambda: Optional[float] = None,
+        mmr_prefetch_k: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Multi-vector search with positive/negative examples."""
-        data: dict[str, Any] = {
-            "positive": positive,
-            "top_k": top_k,
-            "include_metadata": include_metadata,
-            "include_vectors": include_vectors,
-        }
+        data: Dict[str, Any] = {"positive": positive, "top_k": top_k, "include_metadata": include_metadata, "include_vectors": include_vectors}
         if negative is not None:
             data["negative"] = negative
         if filter:
@@ -770,33 +712,24 @@ class AsyncDakeraClient:
             data["mmr_lambda"] = mmr_lambda
         if mmr_prefetch_k is not None:
             data["mmr_prefetch_k"] = mmr_prefetch_k
-        return await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/search/multi-vector",
-            data=data,
-        )
+        return await self._request("POST", f"/v1/namespaces/{namespace}/search/multi-vector", data=data)
 
     async def unified_query(
         self,
         namespace: str,
-        vector: list[float] | None = None,
-        text: str | None = None,
+        vector: Optional[List[float]] = None,
+        text: Optional[str] = None,
         top_k: int = 10,
-        filter: FilterDict | None = None,
+        filter: Optional[FilterDict] = None,
         include_metadata: bool = True,
         include_vectors: bool = False,
-        vector_weight: float | None = None,
-        text_weight: float | None = None,
-        fusion_method: str | None = None,
+        vector_weight: Optional[float] = None,
+        text_weight: Optional[float] = None,
+        fusion_method: Optional[str] = None,
         rerank: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Unified query combining vector and text search."""
-        data: dict[str, Any] = {
-            "top_k": top_k,
-            "include_metadata": include_metadata,
-            "include_vectors": include_vectors,
-            "rerank": rerank,
-        }
+        data: Dict[str, Any] = {"top_k": top_k, "include_metadata": include_metadata, "include_vectors": include_vectors, "rerank": rerank}
         if vector is not None:
             data["vector"] = vector
         if text is not None:
@@ -814,15 +747,15 @@ class AsyncDakeraClient:
     async def aggregate(
         self,
         namespace: str,
-        vector: list[float] | None = None,
-        group_by: str | None = None,
-        metrics: list[str] | None = None,
-        top_k: int | None = None,
-        filter: FilterDict | None = None,
-        top_groups: int | None = None,
-    ) -> dict[str, Any]:
+        vector: Optional[List[float]] = None,
+        group_by: Optional[str] = None,
+        metrics: Optional[List[str]] = None,
+        top_k: Optional[int] = None,
+        filter: Optional[FilterDict] = None,
+        top_groups: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Aggregation query with grouping."""
-        data: dict[str, Any] = {}
+        data: Dict[str, Any] = {}
         if vector is not None:
             data["vector"] = vector
         if group_by is not None:
@@ -840,13 +773,13 @@ class AsyncDakeraClient:
     async def export_vectors(
         self,
         namespace: str,
-        cursor: str | None = None,
-        limit: int | None = None,
-        filter: FilterDict | None = None,
+        cursor: Optional[str] = None,
+        limit: Optional[int] = None,
+        filter: Optional[FilterDict] = None,
         include_vectors: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Export vectors with optional cursor-based pagination."""
-        data: dict[str, Any] = {"include_vectors": include_vectors}
+        data: Dict[str, Any] = {"include_vectors": include_vectors}
         if cursor is not None:
             data["cursor"] = cursor
         if limit is not None:
@@ -858,17 +791,13 @@ class AsyncDakeraClient:
     async def explain_query(
         self,
         namespace: str,
-        vector: list[float],
+        vector: List[float],
         top_k: int = 10,
-        filter: FilterDict | None = None,
+        filter: Optional[FilterDict] = None,
         include_metadata: bool = True,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Explain query execution plan."""
-        data: dict[str, Any] = {
-            "vector": vector,
-            "top_k": top_k,
-            "include_metadata": include_metadata,
-        }
+        data: Dict[str, Any] = {"vector": vector, "top_k": top_k, "include_metadata": include_metadata}
         if filter:
             data["filter"] = filter
         return await self._request("POST", f"/v1/namespaces/{namespace}/query/explain", data=data)
@@ -876,14 +805,14 @@ class AsyncDakeraClient:
     async def upsert_columns(
         self,
         namespace: str,
-        ids: list[str],
-        vectors: list[list[float]],
-        attributes: dict[str, Any] | None = None,
-        ttl_seconds: int | None = None,
-        dimension: int | None = None,
-    ) -> dict[str, Any]:
+        ids: List[str],
+        vectors: List[List[float]],
+        attributes: Optional[Dict[str, Any]] = None,
+        ttl_seconds: Optional[int] = None,
+        dimension: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Column-format upsert for efficient bulk operations."""
-        data: dict[str, Any] = {"ids": ids, "vectors": vectors}
+        data: Dict[str, Any] = {"ids": ids, "vectors": vectors}
         if attributes is not None:
             data["attributes"] = attributes
         if ttl_seconds is not None:
@@ -899,12 +828,12 @@ class AsyncDakeraClient:
     async def knowledge_graph(
         self,
         agent_id: str,
-        memory_id: str | None = None,
-        depth: int | None = None,
-        min_similarity: float | None = None,
-    ) -> dict[str, Any]:
+        memory_id: Optional[str] = None,
+        depth: Optional[int] = None,
+        min_similarity: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """Build a knowledge graph for an agent."""
-        data: dict[str, Any] = {"agent_id": agent_id}
+        data: Dict[str, Any] = {"agent_id": agent_id}
         if memory_id is not None:
             data["memory_id"] = memory_id
         if depth is not None:
@@ -916,13 +845,13 @@ class AsyncDakeraClient:
     async def full_knowledge_graph(
         self,
         agent_id: str,
-        max_nodes: int | None = None,
-        min_similarity: float | None = None,
-        cluster_threshold: float | None = None,
-        max_edges_per_node: int | None = None,
-    ) -> dict[str, Any]:
+        max_nodes: Optional[int] = None,
+        min_similarity: Optional[float] = None,
+        cluster_threshold: Optional[float] = None,
+        max_edges_per_node: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """Build a full knowledge graph for an agent."""
-        data: dict[str, Any] = {"agent_id": agent_id}
+        data: Dict[str, Any] = {"agent_id": agent_id}
         if max_nodes is not None:
             data["max_nodes"] = max_nodes
         if min_similarity is not None:
@@ -936,12 +865,12 @@ class AsyncDakeraClient:
     async def summarize(
         self,
         agent_id: str,
-        memory_ids: list[str] | None = None,
-        target_type: str | None = None,
+        memory_ids: Optional[List[str]] = None,
+        target_type: Optional[str] = None,
         dry_run: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Summarize memories for an agent."""
-        data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
+        data: Dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
         if memory_ids is not None:
             data["memory_ids"] = memory_ids
         if target_type is not None:
@@ -951,12 +880,12 @@ class AsyncDakeraClient:
     async def deduplicate(
         self,
         agent_id: str,
-        threshold: float | None = None,
-        memory_type: str | None = None,
+        threshold: Optional[float] = None,
+        memory_type: Optional[str] = None,
         dry_run: bool = False,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Deduplicate memories for an agent."""
-        data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
+        data: Dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
         if threshold is not None:
             data["threshold"] = threshold
         if memory_type is not None:
@@ -967,48 +896,36 @@ class AsyncDakeraClient:
     # Analytics Operations
     # =========================================================================
 
-    async def analytics_overview(
-        self,
-        period: str | None = None,
-        namespace: str | None = None,
-    ) -> dict[str, Any]:
+    async def analytics_overview(self, period: Optional[str] = None, namespace: Optional[str] = None) -> Dict[str, Any]:
         """Get analytics overview."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if period:
             params["period"] = period
         if namespace:
             params["namespace"] = namespace
         return await self._request("GET", "/v1/analytics/overview", params=params)
 
-    async def analytics_latency(
-        self,
-        period: str | None = None,
-        namespace: str | None = None,
-    ) -> dict[str, Any]:
+    async def analytics_latency(self, period: Optional[str] = None, namespace: Optional[str] = None) -> Dict[str, Any]:
         """Get latency analytics."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if period:
             params["period"] = period
         if namespace:
             params["namespace"] = namespace
         return await self._request("GET", "/v1/analytics/latency", params=params)
 
-    async def analytics_throughput(
-        self,
-        period: str | None = None,
-        namespace: str | None = None,
-    ) -> dict[str, Any]:
+    async def analytics_throughput(self, period: Optional[str] = None, namespace: Optional[str] = None) -> Dict[str, Any]:
         """Get throughput analytics."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if period:
             params["period"] = period
         if namespace:
             params["namespace"] = namespace
         return await self._request("GET", "/v1/analytics/throughput", params=params)
 
-    async def analytics_storage(self, namespace: str | None = None) -> dict[str, Any]:
+    async def analytics_storage(self, namespace: Optional[str] = None) -> Dict[str, Any]:
         """Get storage analytics."""
-        params: dict[str, Any] = {}
+        params: Dict[str, Any] = {}
         if namespace:
             params["namespace"] = namespace
         return await self._request("GET", "/v1/analytics/storage", params=params)
@@ -1017,75 +934,75 @@ class AsyncDakeraClient:
     # Admin Operations
     # =========================================================================
 
-    async def cluster_status(self) -> dict[str, Any]:
+    async def cluster_status(self) -> Dict[str, Any]:
         """Get cluster status."""
         return await self._request("GET", "/v1/admin/cluster/status")
 
-    async def cluster_nodes(self) -> list[dict[str, Any]]:
+    async def cluster_nodes(self) -> List[Dict[str, Any]]:
         """Get cluster nodes."""
         return await self._request("GET", "/v1/admin/cluster/nodes")
 
-    async def optimize_namespace(self, namespace: str) -> dict[str, Any]:
+    async def optimize_namespace(self, namespace: str) -> Dict[str, Any]:
         """Optimize a namespace."""
         return await self._request("POST", f"/v1/admin/namespaces/{namespace}/optimize")
 
-    async def index_stats(self, namespace: str) -> dict[str, Any]:
+    async def index_stats(self, namespace: str) -> Dict[str, Any]:
         """Get admin index stats for a namespace."""
         return await self._request("GET", f"/v1/admin/namespaces/{namespace}/index/stats")
 
-    async def rebuild_indexes(self, namespace: str) -> dict[str, Any]:
+    async def rebuild_indexes(self, namespace: str) -> Dict[str, Any]:
         """Rebuild indexes for a namespace."""
         return await self._request("POST", f"/v1/admin/namespaces/{namespace}/index/rebuild")
 
-    async def cache_stats(self) -> dict[str, Any]:
+    async def cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         return await self._request("GET", "/v1/admin/cache/stats")
 
-    async def cache_clear(self, namespace: str | None = None) -> dict[str, Any]:
+    async def cache_clear(self, namespace: Optional[str] = None) -> Dict[str, Any]:
         """Clear cache."""
         path = f"/v1/admin/cache/clear/{namespace}" if namespace else "/v1/admin/cache/clear"
         return await self._request("POST", path)
 
-    async def get_config(self) -> dict[str, Any]:
+    async def get_config(self) -> Dict[str, Any]:
         """Get server configuration."""
         return await self._request("GET", "/v1/admin/config")
 
-    async def update_config(self, config: dict[str, Any]) -> dict[str, Any]:
+    async def update_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Update server configuration."""
         return await self._request("PUT", "/v1/admin/config", data=config)
 
-    async def get_quotas(self) -> dict[str, Any]:
+    async def get_quotas(self) -> Dict[str, Any]:
         """Get server quotas."""
         return await self._request("GET", "/v1/admin/quotas")
 
-    async def update_quotas(self, quotas: dict[str, Any]) -> dict[str, Any]:
+    async def update_quotas(self, quotas: Dict[str, Any]) -> Dict[str, Any]:
         """Update server quotas."""
         return await self._request("PUT", "/v1/admin/quotas", data=quotas)
 
     async def slow_queries(
         self,
         limit: int = 10,
-        min_duration_ms: int | None = None,
-    ) -> list[dict[str, Any]]:
+        min_duration_ms: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Get slow query log."""
-        params: dict[str, Any] = {"limit": limit}
+        params: Dict[str, Any] = {"limit": limit}
         if min_duration_ms is not None:
             params["min_duration_ms"] = min_duration_ms
         return await self._request("GET", "/v1/admin/slow-queries", params=params)
 
-    async def create_backup(self, include_data: bool = True) -> dict[str, Any]:
+    async def create_backup(self, include_data: bool = True) -> Dict[str, Any]:
         """Create a backup."""
         return await self._request("POST", "/v1/admin/backups", data={"include_data": include_data})
 
-    async def list_backups(self) -> list[dict[str, Any]]:
+    async def list_backups(self) -> List[Dict[str, Any]]:
         """List backups."""
         return await self._request("GET", "/v1/admin/backups")
 
-    async def restore_backup(self, backup_id: str) -> dict[str, Any]:
+    async def restore_backup(self, backup_id: str) -> Dict[str, Any]:
         """Restore from a backup."""
         return await self._request("POST", f"/v1/admin/backups/{backup_id}/restore")
 
-    async def delete_backup(self, backup_id: str) -> dict[str, Any]:
+    async def delete_backup(self, backup_id: str) -> Dict[str, Any]:
         """Delete a backup."""
         return await self._request("DELETE", f"/v1/admin/backups/{backup_id}")
 
@@ -1093,10 +1010,10 @@ class AsyncDakeraClient:
         self,
         namespace: str,
         ttl_seconds: int,
-        strategy: str | None = None,
-    ) -> dict[str, Any]:
+        strategy: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Configure TTL for a namespace."""
-        data: dict[str, Any] = {"namespace": namespace, "ttl_seconds": ttl_seconds}
+        data: Dict[str, Any] = {"namespace": namespace, "ttl_seconds": ttl_seconds}
         if strategy is not None:
             data["strategy"] = strategy
         return await self._request("PUT", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
@@ -1108,38 +1025,38 @@ class AsyncDakeraClient:
     async def create_key(
         self,
         name: str,
-        permissions: list[str] | None = None,
-        expires_at: str | None = None,
-    ) -> dict[str, Any]:
+        permissions: Optional[List[str]] = None,
+        expires_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Create an API key."""
-        data: dict[str, Any] = {"name": name}
+        data: Dict[str, Any] = {"name": name}
         if permissions is not None:
             data["permissions"] = permissions
         if expires_at is not None:
             data["expires_at"] = expires_at
         return await self._request("POST", "/v1/keys", data=data)
 
-    async def list_keys(self) -> list[dict[str, Any]]:
+    async def list_keys(self) -> List[Dict[str, Any]]:
         """List API keys."""
         return await self._request("GET", "/v1/keys")
 
-    async def get_key(self, key_id: str) -> dict[str, Any]:
+    async def get_key(self, key_id: str) -> Dict[str, Any]:
         """Get an API key."""
         return await self._request("GET", f"/v1/keys/{key_id}")
 
-    async def delete_key(self, key_id: str) -> dict[str, Any]:
+    async def delete_key(self, key_id: str) -> Dict[str, Any]:
         """Delete an API key."""
         return await self._request("DELETE", f"/v1/keys/{key_id}")
 
-    async def deactivate_key(self, key_id: str) -> dict[str, Any]:
+    async def deactivate_key(self, key_id: str) -> Dict[str, Any]:
         """Deactivate an API key."""
         return await self._request("POST", f"/v1/keys/{key_id}/deactivate")
 
-    async def rotate_key(self, key_id: str) -> dict[str, Any]:
+    async def rotate_key(self, key_id: str) -> Dict[str, Any]:
         """Rotate an API key."""
         return await self._request("POST", f"/v1/keys/{key_id}/rotate")
 
-    async def key_usage(self, key_id: str) -> dict[str, Any]:
+    async def key_usage(self, key_id: str) -> Dict[str, Any]:
         """Get usage statistics for an API key."""
         return await self._request("GET", f"/v1/keys/{key_id}/usage")
 
@@ -1147,7 +1064,7 @@ class AsyncDakeraClient:
     # Context Manager Support
     # =========================================================================
 
-    async def __aenter__(self) -> AsyncDakeraClient:
+    async def __aenter__(self) -> "AsyncDakeraClient":
         """Enter async context manager."""
         return self
 
