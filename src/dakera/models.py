@@ -820,3 +820,77 @@ VectorValues = List[float]
 VectorInput = Union[Vector, Dict[str, Any]]
 DocumentInput = Union[Document, Dict[str, Any]]
 TextDocumentInput = Union[TextDocument, Dict[str, Any]]
+
+
+# ===========================================================================
+# SSE Streaming Event Types (CE-1)
+# ===========================================================================
+
+
+class OpStatus(str, Enum):
+    """Operation status for ``operation_progress`` events."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class VectorMutationOp(str, Enum):
+    """Vector mutation operation type for ``vectors_mutated`` events."""
+
+    UPSERTED = "upserted"
+    DELETED = "deleted"
+
+
+@dataclass
+class DakeraEvent:
+    """An event received from a Dakera SSE stream.
+
+    The ``type`` field identifies the event variant.  All other fields are
+    optional and populated based on the specific event type:
+
+    - ``namespace_created``: namespace, dimension
+    - ``namespace_deleted``: namespace
+    - ``operation_progress``: operation_id, namespace, op_type, progress,
+      status, message, updated_at
+    - ``job_progress``: job_id, job_type, namespace, progress, status
+    - ``vectors_mutated``: namespace, op, count
+    - ``stream_lagged``: dropped, hint (reconnect to resume)
+
+    Example::
+
+        for event in client.stream_namespace_events("my-ns"):
+            if event.type == "vectors_mutated":
+                print(f"{event.count} vectors {event.op} in {event.namespace}")
+    """
+
+    type: str
+    # namespace_created / namespace_deleted / vectors_mutated / operation_progress
+    namespace: Optional[str] = None
+    # namespace_created
+    dimension: Optional[int] = None
+    # operation_progress
+    operation_id: Optional[str] = None
+    op_type: Optional[str] = None
+    progress: Optional[int] = None
+    status: Optional[str] = None
+    message: Optional[str] = None
+    updated_at: Optional[int] = None
+    # job_progress
+    job_id: Optional[str] = None
+    job_type: Optional[str] = None
+    # vectors_mutated
+    op: Optional[str] = None
+    count: Optional[int] = None
+    # stream_lagged
+    dropped: Optional[int] = None
+    hint: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DakeraEvent":
+        """Create a :class:`DakeraEvent` from a parsed SSE data payload."""
+        import dataclasses
+
+        valid = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})

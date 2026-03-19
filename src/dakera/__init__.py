@@ -34,6 +34,8 @@ from dakera.models import (
     # Analytics types
     AnalyticsOverview,
     ConsolidateResponse,
+    # SSE Streaming types
+    DakeraEvent,
     DeduplicateResponse,
     DistanceMetric,
     Document,
@@ -46,6 +48,7 @@ from dakera.models import (
     KnowledgeNode,
     Memory,
     NamespaceInfo,
+    OpStatus,
     QueryResult,
     # Consistency types
     ReadConsistency,
@@ -59,6 +62,7 @@ from dakera.models import (
     SummarizeResponse,
     # Core types
     Vector,
+    VectorMutationOp,
     WarmCacheRequest,
     WarmCacheResponse,
     # Cache warming types
@@ -66,7 +70,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -108,6 +112,10 @@ __all__ = [
     "DeduplicateResponse",
     # Analytics types
     "AnalyticsOverview",
+    # SSE Streaming types
+    "DakeraEvent",
+    "OpStatus",
+    "VectorMutationOp",
     # Exceptions
     "DakeraError",
     "ConnectionError",
