@@ -1147,7 +1147,7 @@ class AsyncDakeraClient:
     # Context Manager Support
     # =========================================================================
 
-    async def __aenter__(self) -> "AsyncDakeraClient":
+    async def __aenter__(self) -> AsyncDakeraClient:
         """Enter async context manager."""
         return self
 
