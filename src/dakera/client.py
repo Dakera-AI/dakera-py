@@ -5,7 +5,7 @@ Main client class for interacting with Dakera server.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 from urllib.parse import urljoin
 
 import requests
@@ -23,6 +23,7 @@ from dakera.exceptions import (
 from dakera.models import (
     AccessPatternHint,
     BatchTextQueryResponse,
+    DakeraEvent,
     DistanceMetric,
     Document,
     DocumentInput,
@@ -1535,6 +1536,107 @@ class DakeraClient:
     def key_usage(self, key_id: str) -> Dict[str, Any]:
         """Get usage statistics for an API key."""
         return self._request("GET", f"/v1/keys/{key_id}/usage")
+
+    # =========================================================================
+    # SSE Streaming (CE-1)
+    # =========================================================================
+
+    def _parse_sse_block(self, block: str) -> Optional[DakeraEvent]:
+        """Parse a single SSE event block into a :class:`~dakera.models.DakeraEvent`."""
+        data_lines: List[str] = []
+        for line in block.split("\n"):
+            if line.startswith(":"):
+                continue  # SSE comment / heartbeat
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip(" "))
+        if not data_lines:
+            return None
+        try:
+            return DakeraEvent.from_dict(json.loads("\n".join(data_lines)))
+        except Exception:
+            return None
+
+    def stream_namespace_events(
+        self,
+        namespace: str,
+        timeout: Optional[float] = None,
+    ) -> Generator[DakeraEvent, None, None]:
+        """Stream SSE events scoped to *namespace*.
+
+        Opens a long-lived HTTP connection to ``GET /v1/namespaces/{namespace}/events``
+        and yields :class:`~dakera.models.DakeraEvent` objects as they arrive.
+        The generator runs until the connection is closed by the server or the
+        caller breaks out of the loop.
+
+        Requires a Read-scoped API key.
+
+        Args:
+            namespace: The namespace to subscribe to.
+            timeout: Optional read timeout in seconds.  Defaults to no timeout
+                so the connection stays open indefinitely.
+
+        Yields:
+            :class:`~dakera.models.DakeraEvent` — one per SSE event.
+
+        Example::
+
+            for event in client.stream_namespace_events("my-ns"):
+                print(event.type, event)
+                if event.type == "stream_lagged":
+                    break  # reconnect
+        """
+        url = self._url(f"/v1/namespaces/{namespace}/events")
+        yield from self._stream_sse(url, timeout)
+
+    def stream_global_events(
+        self,
+        timeout: Optional[float] = None,
+    ) -> Generator[DakeraEvent, None, None]:
+        """Stream all system events from the global event bus.
+
+        Opens a long-lived HTTP connection to ``GET /ops/events`` and yields
+        :class:`~dakera.models.DakeraEvent` objects as they arrive.
+
+        Requires an Admin-scoped API key.
+
+        Args:
+            timeout: Optional read timeout in seconds.
+
+        Yields:
+            :class:`~dakera.models.DakeraEvent` — one per SSE event.
+        """
+        url = self._url("/ops/events")
+        yield from self._stream_sse(url, timeout)
+
+    def _stream_sse(
+        self,
+        url: str,
+        timeout: Optional[float],
+    ) -> Generator[DakeraEvent, None, None]:
+        """Low-level SSE streaming helper."""
+        headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        response = self._session.get(
+            url,
+            headers=headers,
+            stream=True,
+            timeout=timeout,
+        )
+        # For streaming responses we cannot call _handle_response (it would
+        # buffer the entire body). Instead check the status code directly.
+        if not response.ok:
+            # Consume the (small) error body and delegate to _handle_response.
+            _ = response.content  # buffers the error payload
+            self._handle_response(response)  # always raises
+
+        buffer = ""
+        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+            buffer += chunk
+            # SSE events are separated by a blank line (\n\n)
+            while "\n\n" in buffer:
+                block, buffer = buffer.split("\n\n", 1)
+                event = self._parse_sse_block(block)
+                if event is not None:
+                    yield event
 
     # =========================================================================
     # Context Manager Support

@@ -25,7 +25,7 @@ Example:
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, AsyncGenerator
 
 try:
     import httpx
@@ -48,6 +48,7 @@ from dakera.exceptions import (
 from dakera.models import (
     AccessPatternHint,
     BatchTextQueryResponse,
+    DakeraEvent,
     DistanceMetric,
     Document,
     DocumentInput,
@@ -1142,6 +1143,84 @@ class AsyncDakeraClient:
     async def key_usage(self, key_id: str) -> dict[str, Any]:
         """Get usage statistics for an API key."""
         return await self._request("GET", f"/v1/keys/{key_id}/usage")
+
+    # =========================================================================
+    # SSE Streaming (CE-1)
+    # =========================================================================
+
+    def _parse_sse_block(self, block: str) -> DakeraEvent | None:
+        """Parse a single SSE event block into a :class:`~dakera.models.DakeraEvent`."""
+        data_lines: list[str] = []
+        for line in block.split("\n"):
+            if line.startswith(":"):
+                continue  # SSE comment / heartbeat
+            if line.startswith("data:"):
+                data_lines.append(line[5:].lstrip(" "))
+        if not data_lines:
+            return None
+        try:
+            return DakeraEvent.from_dict(json.loads("\n".join(data_lines)))
+        except Exception:
+            return None
+
+    async def stream_namespace_events(
+        self,
+        namespace: str,
+    ) -> AsyncGenerator[DakeraEvent, None]:
+        """Stream SSE events scoped to *namespace*.
+
+        Opens a long-lived HTTP connection to ``GET /v1/namespaces/{namespace}/events``
+        and yields :class:`~dakera.models.DakeraEvent` objects as they arrive.
+
+        Requires a Read-scoped API key.
+
+        Args:
+            namespace: The namespace to subscribe to.
+
+        Yields:
+            :class:`~dakera.models.DakeraEvent` — one per SSE event.
+
+        Example::
+
+            async for event in client.stream_namespace_events("my-ns"):
+                print(event.type, event)
+        """
+        url = self._url(f"/v1/namespaces/{namespace}/events")
+        async for event in self._stream_sse(url):
+            yield event
+
+    async def stream_global_events(self) -> AsyncGenerator[DakeraEvent, None]:
+        """Stream all system events from the global event bus.
+
+        Opens a long-lived HTTP connection to ``GET /ops/events`` and yields
+        :class:`~dakera.models.DakeraEvent` objects as they arrive.
+
+        Requires an Admin-scoped API key.
+
+        Yields:
+            :class:`~dakera.models.DakeraEvent` — one per SSE event.
+        """
+        url = self._url("/ops/events")
+        async for event in self._stream_sse(url):
+            yield event
+
+    async def _stream_sse(self, url: str) -> AsyncGenerator[DakeraEvent, None]:
+        """Low-level async SSE streaming helper."""
+        headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        async with self._client.stream("GET", url, headers=headers, timeout=None) as response:
+            if not response.is_success:
+                # Read the error body before raising so we have context.
+                await response.aread()
+                self._handle_response(response)  # always raises
+            buffer = ""
+            async for chunk in response.aiter_text():
+                buffer += chunk
+                # SSE events are separated by a blank line (\n\n)
+                while "\n\n" in buffer:
+                    block, buffer = buffer.split("\n\n", 1)
+                    event = self._parse_sse_block(block)
+                    if event is not None:
+                        yield event
 
     # =========================================================================
     # Context Manager Support
