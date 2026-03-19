@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/pypi/pyversions/dakera)](https://pypi.org/project/dakera/)
 
-Official Python client for [Dakera](https://github.com/dakera/dakera) - a high-performance vector database.
+Official Python client for [Dakera](https://dakera.ai) — a high-performance vector database for AI agent memory.
 
 ## Installation
 
@@ -20,10 +20,11 @@ pip install dakera[async]
 
 ## Quick Start
 
+### Synchronous
+
 ```python
 from dakera import DakeraClient
 
-# Connect to Dakera
 client = DakeraClient("http://localhost:3000")
 
 # Upsert vectors
@@ -33,14 +34,31 @@ client.upsert("my-namespace", vectors=[
 ])
 
 # Query similar vectors
-results = client.query(
-    "my-namespace",
-    vector=[0.1, 0.2, 0.3],
-    top_k=10,
-)
-
+results = client.query("my-namespace", vector=[0.1, 0.2, 0.3], top_k=10)
 for result in results.results:
     print(f"{result.id}: {result.score}")
+```
+
+### Async
+
+```python
+import asyncio
+from dakera import AsyncDakeraClient
+
+async def main():
+    async with AsyncDakeraClient("http://localhost:3000") as client:
+        # Upsert vectors
+        await client.upsert("my-namespace", vectors=[
+            {"id": "vec1", "values": [0.1, 0.2, 0.3], "metadata": {"label": "a"}},
+            {"id": "vec2", "values": [0.4, 0.5, 0.6], "metadata": {"label": "b"}},
+        ])
+
+        # Query similar vectors
+        results = await client.query("my-namespace", vector=[0.1, 0.2, 0.3], top_k=10)
+        for result in results.results:
+            print(f"{result.id}: {result.score}")
+
+asyncio.run(main())
 ```
 
 ## Features
@@ -50,8 +68,10 @@ for result in results.results:
 - **Hybrid Search**: Combine vector and text search with configurable weights
 - **Namespace Management**: Create, list, delete namespaces
 - **Metadata Filtering**: Filter queries by metadata fields
+- **Async Support**: `AsyncDakeraClient` built on `httpx` for non-blocking I/O
+- **Agent Memory**: Store, recall, and manage memories for AI agents
 - **Type Hints**: Full type annotation support
-- **Context Manager**: Automatic connection cleanup
+- **Context Manager**: Automatic connection cleanup (sync and async)
 
 ## Usage Examples
 
@@ -183,6 +203,58 @@ results = client.query(
 )
 ```
 
+### Async Operations
+
+Use `AsyncDakeraClient` (requires `pip install dakera[async]`) for non-blocking I/O with `asyncio`:
+
+```python
+import asyncio
+from dakera import AsyncDakeraClient
+
+async def main():
+    async with AsyncDakeraClient("http://localhost:3000") as client:
+        # All methods are coroutines — await each call
+        await client.upsert("my-namespace", vectors=[
+            {"id": "vec1", "values": [0.1, 0.2, 0.3], "metadata": {"category": "A"}},
+        ])
+
+        # Parallel queries with asyncio.gather
+        results_a, results_b = await asyncio.gather(
+            client.query("my-namespace", vector=[0.1, 0.2, 0.3], top_k=5,
+                         filter={"category": {"$eq": "A"}}),
+            client.hybrid_search("my-namespace",
+                                 vector=[0.1, 0.2, 0.3],
+                                 query="machine learning",
+                                 top_k=5, alpha=0.7),
+        )
+
+asyncio.run(main())
+```
+
+#### Async Agent Memory
+
+```python
+import asyncio
+from dakera import AsyncDakeraClient
+
+async def main():
+    async with AsyncDakeraClient("http://localhost:3000") as client:
+        # Store a memory
+        stored = await client.store_memory(
+            "my-agent",
+            "The user prefers concise responses",
+            importance=0.8,
+            metadata={"source": "feedback"},
+        )
+
+        # Recall relevant memories
+        memories = await client.recall("my-agent", "user preferences", top_k=5)
+        for mem in memories:
+            print(f"{mem['id']}: {mem['content']} (score: {mem.get('score', 'N/A')})")
+
+asyncio.run(main())
+```
+
 ### Error Handling
 
 ```python
@@ -208,10 +280,21 @@ except RateLimitError as e:
 ### Context Manager
 
 ```python
+# Synchronous
 with DakeraClient("http://localhost:3000") as client:
     client.upsert("my-namespace", vectors=[...])
     results = client.query("my-namespace", vector=[...])
-# Connection automatically closed
+
+# Async
+import asyncio
+from dakera import AsyncDakeraClient
+
+async def main():
+    async with AsyncDakeraClient("http://localhost:3000") as client:
+        await client.upsert("my-namespace", vectors=[...])
+        results = await client.query("my-namespace", vector=[...])
+
+asyncio.run(main())
 ```
 
 ### Authentication
@@ -242,27 +325,35 @@ client = DakeraClient(
 
 ## API Reference
 
-### DakeraClient
+Both `DakeraClient` (sync) and `AsyncDakeraClient` (async) expose identical interfaces. Async methods are prefixed with `await`.
 
-#### Vector Operations
+### Vector Operations
 - `upsert(namespace, vectors)` - Insert or update vectors
 - `query(namespace, vector, top_k, filter, ...)` - Query similar vectors
 - `delete(namespace, ids, filter, delete_all)` - Delete vectors
 - `fetch(namespace, ids)` - Fetch vectors by ID
 - `batch_query(namespace, queries)` - Execute multiple queries
 
-#### Full-Text Operations
+### Full-Text Operations
 - `index_documents(namespace, documents)` - Index documents
-- `fulltext_search(namespace, query, top_k, filter)` - Text search
-- `hybrid_search(namespace, vector, query, alpha, ...)` - Hybrid search
+- `fulltext_search(namespace, query, top_k, filter)` - BM25 text search
+- `hybrid_search(namespace, vector, query, alpha, ...)` - Hybrid vector + text search
 
-#### Namespace Operations
+### Namespace Operations
 - `list_namespaces()` - List all namespaces
 - `get_namespace(namespace)` - Get namespace info
 - `create_namespace(namespace, dimensions, index_type)` - Create namespace
 - `delete_namespace(namespace)` - Delete namespace
 
-#### Admin Operations
+### Agent Memory Operations
+- `store_memory(agent_id, content, importance, metadata, ...)` - Store a memory
+- `recall(agent_id, query, top_k, ...)` - Recall relevant memories
+- `get_memory(agent_id, memory_id)` - Fetch a specific memory
+- `update_memory(agent_id, memory_id, content, ...)` - Update a memory
+- `forget(agent_id, memory_id)` - Delete a memory
+- `search_memories(agent_id, query, top_k, ...)` - Search memories
+
+### Admin Operations
 - `health()` - Check server health
 - `get_index_stats(namespace)` - Get index statistics
 - `compact(namespace)` - Trigger compaction
@@ -297,7 +388,6 @@ ruff check src/
 | [dakera-dashboard](https://github.com/dakera-ai/dakera-dashboard) | Admin dashboard (Leptos/WASM) |
 | [dakera-docs](https://github.com/dakera-ai/dakera-docs) | Documentation |
 | [dakera-deploy](https://github.com/dakera-ai/dakera-deploy) | Deployment configs and Docker Compose |
-| [dakera-cortex](https://github.com/dakera-ai/dakera-cortex) | Flagship demo with AI agents |
 
 ## License
 
