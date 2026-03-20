@@ -28,13 +28,15 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
+    AgentNetworkEdge,
+    AgentNetworkInfo,
+    AgentNetworkNode,
+    AgentNetworkStats,
     AgentStats,
-    # Agent types
     AgentSummary,
-    # Analytics types
     AnalyticsOverview,
     ConsolidateResponse,
-    # SSE Streaming types
+    CrossAgentNetworkResponse,
     DakeraEvent,
     DeduplicateResponse,
     DistanceMetric,
@@ -44,28 +46,23 @@ from dakera.models import (
     IndexStats,
     KnowledgeEdge,
     KnowledgeGraphResponse,
-    # Knowledge Graph types
     KnowledgeNode,
     Memory,
+    MemoryEvent,
     NamespaceInfo,
     OpStatus,
     QueryResult,
-    # Consistency types
     ReadConsistency,
     RecalledMemory,
     SearchResult,
-    # Session types
     Session,
     StalenessConfig,
-    # Memory types
     StoreMemoryRequest,
     SummarizeResponse,
-    # Core types
     Vector,
     VectorMutationOp,
     WarmCacheRequest,
     WarmCacheResponse,
-    # Cache warming types
     WarmingPriority,
     WarmingTargetTier,
 )
@@ -114,8 +111,15 @@ __all__ = [
     "AnalyticsOverview",
     # SSE Streaming types
     "DakeraEvent",
+    "MemoryEvent",
     "OpStatus",
     "VectorMutationOp",
+    # Cross-agent network types (DASH-A)
+    "AgentNetworkInfo",
+    "AgentNetworkNode",
+    "AgentNetworkEdge",
+    "AgentNetworkStats",
+    "CrossAgentNetworkResponse",
     # Exceptions
     "DakeraError",
     "ConnectionError",
