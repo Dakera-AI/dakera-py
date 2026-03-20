@@ -23,6 +23,8 @@ from dakera.exceptions import (
 from dakera.models import (
     AccessPatternHint,
     BatchTextQueryResponse,
+    ConfigureNamespaceRequest,
+    ConfigureNamespaceResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
     DistanceMetric,
@@ -718,6 +720,31 @@ class DakeraClient:
 
         response = self._request("POST", "/v1/namespaces", data=data)
         return NamespaceInfo.from_dict(response)
+
+    def configure_namespace(
+        self,
+        namespace: str,
+        dimension: int,
+        distance: Optional[DistanceMetric] = None,
+    ) -> ConfigureNamespaceResponse:
+        """
+        Create or update a namespace configuration (upsert semantics).
+
+        Creates the namespace if it does not exist, or updates its distance
+        metric configuration if it already exists.  Replaces the need for
+        separate create + patch calls.  Requires ``Scope::Write``.
+
+        Args:
+            namespace: Namespace name
+            dimension: Vector dimension. Must match existing dimension on updates.
+            distance: Distance metric (default: cosine).
+
+        Returns:
+            ConfigureNamespaceResponse with ``created=True`` if newly created.
+        """
+        req = ConfigureNamespaceRequest(dimension=dimension, distance=distance)
+        response = self._request("PUT", f"/v1/namespaces/{namespace}", data=req.to_dict())
+        return ConfigureNamespaceResponse.from_dict(response)
 
     def delete_namespace(self, namespace: str) -> None:
         """
