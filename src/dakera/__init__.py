@@ -19,8 +19,11 @@ try:
 except ImportError:
     AsyncDakeraClient = None  # type: ignore[assignment,misc]
 from dakera.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
     ConnectionError,
     DakeraError,
+    ErrorCode,
     NotFoundError,
     RateLimitError,
     ServerError,
@@ -70,7 +73,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -134,4 +137,7 @@ __all__ = [
     "ValidationError",
     "RateLimitError",
     "ServerError",
+    "AuthenticationError",
+    "AuthorizationError",
+    "ErrorCode",
 ]
