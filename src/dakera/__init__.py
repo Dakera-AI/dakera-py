@@ -35,12 +35,15 @@ from dakera.models import (
     AgentStats,
     AgentSummary,
     AnalyticsOverview,
+    ConfigureNamespaceRequest,
+    ConfigureNamespaceResponse,
     ConsolidateResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
     DeduplicateResponse,
     DistanceMetric,
     Document,
+    EmbeddingModel,
     FullTextSearchResult,
     HybridSearchResult,
     IndexStats,
@@ -67,7 +70,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.6.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -109,6 +112,10 @@ __all__ = [
     "DeduplicateResponse",
     # Analytics types
     "AnalyticsOverview",
+    # Inference / embedding types (v0.6.0)
+    "EmbeddingModel",
+    "ConfigureNamespaceRequest",
+    "ConfigureNamespaceResponse",
     # SSE Streaming types
     "DakeraEvent",
     "MemoryEvent",

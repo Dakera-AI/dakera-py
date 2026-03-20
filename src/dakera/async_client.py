@@ -48,6 +48,8 @@ from dakera.exceptions import (
 from dakera.models import (
     AccessPatternHint,
     BatchTextQueryResponse,
+    ConfigureNamespaceRequest,
+    ConfigureNamespaceResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
     DistanceMetric,
@@ -473,6 +475,29 @@ class AsyncDakeraClient:
             data["metadata"] = metadata
         response = await self._request("POST", "/v1/namespaces", data=data)
         return NamespaceInfo.from_dict(response)
+
+    async def configure_namespace(
+        self,
+        namespace: str,
+        dimension: int,
+        distance: DistanceMetric | None = None,
+    ) -> ConfigureNamespaceResponse:
+        """Create or update a namespace configuration (upsert semantics).
+
+        Creates the namespace if it does not exist, or updates its distance
+        metric configuration if it already exists.  Requires ``Scope::Write``.
+
+        Args:
+            namespace: Namespace name
+            dimension: Vector dimension. Must match existing dimension on updates.
+            distance: Distance metric (default: cosine).
+
+        Returns:
+            ConfigureNamespaceResponse with ``created=True`` if newly created.
+        """
+        req = ConfigureNamespaceRequest(dimension=dimension, distance=distance)
+        response = await self._request("PUT", f"/v1/namespaces/{namespace}", data=req.to_dict())
+        return ConfigureNamespaceResponse.from_dict(response)
 
     async def delete_namespace(self, namespace: str) -> None:
         """Delete a namespace and all its data."""

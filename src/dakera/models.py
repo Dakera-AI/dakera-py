@@ -162,6 +162,60 @@ class WarmCacheResponse:
 
 
 # ============================================================================
+# Namespace Configuration Types (v0.6.0)
+# ============================================================================
+
+
+@dataclass
+class ConfigureNamespaceRequest:
+    """Request body for ``PUT /v1/namespaces/:namespace`` (upsert semantics).
+
+    Creates the namespace if it does not exist, or updates its configuration
+    if it already exists.  Replaces the separate ``POST /v1/namespaces`` +
+    future ``PATCH`` pattern with a single idempotent call.
+    """
+
+    dimension: int
+    """Vector dimension.  Required on first creation; must match existing
+    dimension on subsequent calls."""
+
+    distance: Optional[DistanceMetric] = None
+    """Distance metric.  Defaults to ``cosine`` when not supplied."""
+
+    def to_dict(self) -> Dict[str, Any]:
+        result: Dict[str, Any] = {"dimension": self.dimension}
+        if self.distance is not None:
+            result["distance"] = self.distance.value
+        return result
+
+
+@dataclass
+class ConfigureNamespaceResponse:
+    """Response from ``PUT /v1/namespaces/:namespace``."""
+
+    namespace: str
+    """Namespace name."""
+
+    dimension: int
+    """Vector dimension."""
+
+    distance: DistanceMetric
+    """Distance metric in use."""
+
+    created: bool
+    """``True`` if the namespace was newly created; ``False`` if it already existed."""
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ConfigureNamespaceResponse":
+        return cls(
+            namespace=data["namespace"],
+            dimension=data["dimension"],
+            distance=DistanceMetric(data.get("distance", "cosine")),
+            created=data.get("created", False),
+        )
+
+
+# ============================================================================
 # Vector Types
 # ============================================================================
 
@@ -440,7 +494,7 @@ class TextUpsertResponse:
     tokens_processed: int
     """Approximate number of tokens processed."""
 
-    model: str
+    model: EmbeddingModel
     """Embedding model used."""
 
     embedding_time_ms: int
@@ -452,7 +506,7 @@ class TextUpsertResponse:
         return cls(
             upserted_count=data.get("upserted_count", 0),
             tokens_processed=data.get("tokens_processed", 0),
-            model=data.get("model", ""),
+            model=EmbeddingModel(data.get("model", EmbeddingModel.MINILM.value)),
             embedding_time_ms=data.get("embedding_time_ms", 0),
         )
 
@@ -464,7 +518,7 @@ class TextQueryResponse:
     results: List[TextSearchResult]
     """Search results."""
 
-    model: str
+    model: EmbeddingModel
     """Embedding model used."""
 
     embedding_time_ms: int
@@ -478,7 +532,7 @@ class TextQueryResponse:
         """Create TextQueryResponse from API response dictionary."""
         return cls(
             results=[TextSearchResult.from_dict(r) for r in data.get("results", [])],
-            model=data.get("model", ""),
+            model=EmbeddingModel(data.get("model", EmbeddingModel.MINILM.value)),
             embedding_time_ms=data.get("embedding_time_ms", 0),
             search_time_ms=data.get("search_time_ms", 0),
         )
@@ -491,7 +545,7 @@ class BatchTextQueryResponse:
     results: List[List[TextSearchResult]]
     """Results for each query."""
 
-    model: str
+    model: EmbeddingModel
     """Embedding model used."""
 
     embedding_time_ms: int
@@ -508,7 +562,7 @@ class BatchTextQueryResponse:
                 [TextSearchResult.from_dict(r) for r in query_results]
                 for query_results in data.get("results", [])
             ],
-            model=data.get("model", ""),
+            model=EmbeddingModel(data.get("model", EmbeddingModel.MINILM.value)),
             embedding_time_ms=data.get("embedding_time_ms", 0),
             search_time_ms=data.get("search_time_ms", 0),
         )
