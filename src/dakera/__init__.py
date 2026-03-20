@@ -36,6 +36,13 @@ from dakera.models import (
     ConsolidateResponse,
     # SSE Streaming types
     DakeraEvent,
+    MemoryEvent,
+    # Cross-agent network types (DASH-A)
+    AgentNetworkInfo,
+    AgentNetworkNode,
+    AgentNetworkEdge,
+    AgentNetworkStats,
+    CrossAgentNetworkResponse,
     DeduplicateResponse,
     DistanceMetric,
     Document,
@@ -114,8 +121,15 @@ __all__ = [
     "AnalyticsOverview",
     # SSE Streaming types
     "DakeraEvent",
+    "MemoryEvent",
     "OpStatus",
     "VectorMutationOp",
+    # Cross-agent network types (DASH-A)
+    "AgentNetworkInfo",
+    "AgentNetworkNode",
+    "AgentNetworkEdge",
+    "AgentNetworkStats",
+    "CrossAgentNetworkResponse",
     # Exceptions
     "DakeraError",
     "ConnectionError",

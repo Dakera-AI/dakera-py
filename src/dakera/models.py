@@ -894,3 +894,160 @@ class DakeraEvent:
 
         valid = {f.name for f in dataclasses.fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in valid})
+
+
+# ===========================================================================
+# DASH-B: Memory Lifecycle Event Types
+# ===========================================================================
+
+
+@dataclass
+class MemoryEvent:
+    """A memory lifecycle event from the DASH-B SSE stream.
+
+    Received from ``GET /v1/events/stream`` (Read scope).
+
+    The ``event_type`` field identifies the operation:
+
+    - ``stored`` — a memory was stored (content, importance, tags present)
+    - ``recalled`` — a memory was recalled (importance present)
+    - ``forgotten`` — a memory was deleted
+    - ``consolidated`` — memories were merged (memory_id is the new memory)
+    - ``importance_updated`` — importance score changed
+    - ``session_started`` — an agent session began (session_id present)
+    - ``session_ended`` — an agent session ended (session_id present)
+    - ``stream_lagged`` — consumer fell behind; some events were dropped
+
+    Example::
+
+        for event in client.stream_memory_events():
+            if event.event_type == "stored":
+                print(f"[{event.agent_id}] stored {event.memory_id}")
+    """
+
+    event_type: str
+    agent_id: str
+    timestamp: int
+    memory_id: Optional[str] = None
+    content: Optional[str] = None
+    importance: Optional[float] = None
+    tags: Optional[List[str]] = None
+    session_id: Optional[str] = None
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MemoryEvent":
+        """Create a :class:`MemoryEvent` from a parsed SSE data payload."""
+        import dataclasses
+
+        valid = {f.name for f in dataclasses.fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in valid})
+
+
+# ===========================================================================
+# DASH-A: Cross-Agent Network Types
+# ===========================================================================
+
+
+@dataclass
+class AgentNetworkInfo:
+    """Summary information for one agent in the cross-agent network."""
+
+    agent_id: str
+    memory_count: int
+    avg_importance: float
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkInfo":
+        return cls(
+            agent_id=data["agent_id"],
+            memory_count=data["memory_count"],
+            avg_importance=data["avg_importance"],
+        )
+
+
+@dataclass
+class AgentNetworkNode:
+    """A memory node in the cross-agent network graph."""
+
+    id: str
+    agent_id: str
+    content: str
+    importance: float
+    tags: List[str]
+    memory_type: str
+    created_at: int
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkNode":
+        return cls(
+            id=data["id"],
+            agent_id=data["agent_id"],
+            content=data["content"],
+            importance=data["importance"],
+            tags=data.get("tags", []),
+            memory_type=data["memory_type"],
+            created_at=data["created_at"],
+        )
+
+
+@dataclass
+class AgentNetworkEdge:
+    """A similarity edge between memories from two different agents."""
+
+    source: str
+    target: str
+    source_agent: str
+    target_agent: str
+    similarity: float
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkEdge":
+        return cls(
+            source=data["source"],
+            target=data["target"],
+            source_agent=data["source_agent"],
+            target_agent=data["target_agent"],
+            similarity=data["similarity"],
+        )
+
+
+@dataclass
+class AgentNetworkStats:
+    """Network-level statistics for the cross-agent graph."""
+
+    total_agents: int
+    total_nodes: int
+    total_cross_edges: int
+    density: float
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkStats":
+        return cls(
+            total_agents=data["total_agents"],
+            total_nodes=data["total_nodes"],
+            total_cross_edges=data["total_cross_edges"],
+            density=data["density"],
+        )
+
+
+@dataclass
+class CrossAgentNetworkResponse:
+    """Response from ``POST /v1/knowledge/network/cross-agent``.
+
+    Contains agents, memory nodes, inter-agent similarity edges, and
+    aggregate network statistics.
+    """
+
+    agents: List[AgentNetworkInfo]
+    nodes: List[AgentNetworkNode]
+    edges: List[AgentNetworkEdge]
+    stats: AgentNetworkStats
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CrossAgentNetworkResponse":
+        return cls(
+            agents=[AgentNetworkInfo.from_dict(a) for a in data.get("agents", [])],
+            nodes=[AgentNetworkNode.from_dict(n) for n in data.get("nodes", [])],
+            edges=[AgentNetworkEdge.from_dict(e) for e in data.get("edges", [])],
+            stats=AgentNetworkStats.from_dict(data["stats"]),
+        )

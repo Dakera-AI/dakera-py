@@ -22,7 +22,12 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
+    AgentNetworkEdge,
+    AgentNetworkInfo,
+    AgentNetworkNode,
+    AgentNetworkStats,
     BatchTextQueryResponse,
+    CrossAgentNetworkResponse,
     DakeraEvent,
     DistanceMetric,
     Document,
@@ -32,6 +37,7 @@ from dakera.models import (
     FullTextSearchResult,
     HybridSearchResult,
     IndexStats,
+    MemoryEvent,
     NamespaceInfo,
     ReadConsistency,
     SearchResult,
@@ -1637,6 +1643,121 @@ class DakeraClient:
                 event = self._parse_sse_block(block)
                 if event is not None:
                     yield event
+
+    # =========================================================================
+    # DASH-B: Memory Lifecycle Event Stream
+    # =========================================================================
+
+    def stream_memory_events(
+        self,
+        timeout: Optional[float] = None,
+    ) -> Generator[MemoryEvent, None, None]:
+        """Stream memory lifecycle events from the DASH-B SSE endpoint.
+
+        Opens a long-lived HTTP connection to ``GET /v1/events/stream`` and
+        yields :class:`~dakera.models.MemoryEvent` objects as they arrive.
+
+        Requires a Read-scoped API key.
+
+        Event types: ``stored``, ``recalled``, ``forgotten``, ``consolidated``,
+        ``importance_updated``, ``session_started``, ``session_ended``.
+
+        Args:
+            timeout: Optional read timeout in seconds.  ``None`` (default)
+                means no timeout — the stream stays open indefinitely.
+
+        Yields:
+            :class:`~dakera.models.MemoryEvent` — one per SSE event.
+
+        Example::
+
+            for event in client.stream_memory_events():
+                if event.event_type == "stored":
+                    print(f"[{event.agent_id}] stored {event.memory_id}")
+        """
+        url = self._url("/v1/events/stream")
+        headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        response = self._session.get(
+            url,
+            headers=headers,
+            stream=True,
+            timeout=timeout,
+        )
+        if not response.ok:
+            _ = response.content
+            self._handle_response(response)
+
+        buffer = ""
+        for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+            buffer += chunk
+            while "\n\n" in buffer:
+                block, buffer = buffer.split("\n\n", 1)
+                data_lines = []
+                for line in block.splitlines():
+                    if line.startswith(":"):
+                        continue
+                    if line.startswith("data:"):
+                        data_lines.append(line[5:].lstrip())
+                if data_lines:
+                    import json
+
+                    try:
+                        payload = json.loads("\n".join(data_lines))
+                        yield MemoryEvent.from_dict(payload)
+                    except (json.JSONDecodeError, TypeError, KeyError):
+                        pass
+
+    # =========================================================================
+    # DASH-A: Cross-Agent Network
+    # =========================================================================
+
+    def cross_agent_network(
+        self,
+        agent_ids: Optional[List[str]] = None,
+        min_similarity: float = 0.3,
+        max_nodes_per_agent: int = 50,
+        min_importance: float = 0.0,
+        max_cross_edges: int = 200,
+    ) -> CrossAgentNetworkResponse:
+        """Build the cross-agent memory similarity network.
+
+        Calls ``POST /v1/knowledge/network/cross-agent`` (Admin scope) and
+        returns a graph of agents, memory nodes, and cross-agent similarity
+        edges suitable for rendering as a network diagram.
+
+        Args:
+            agent_ids: Limit the graph to these agent IDs.  ``None`` (default)
+                includes all agents.
+            min_similarity: Minimum cosine similarity for a cross-agent edge
+                (0–1, default 0.3).
+            max_nodes_per_agent: Maximum number of memories to include per
+                agent, selected by descending importance (default 50).
+            min_importance: Minimum importance score for a memory to be
+                included (0–1, default 0.0).
+            max_cross_edges: Maximum number of cross-agent edges to return
+                (default 200).
+
+        Returns:
+            :class:`~dakera.models.CrossAgentNetworkResponse` with ``agents``,
+            ``nodes``, ``edges``, and ``stats`` fields.
+
+        Example::
+
+            graph = client.cross_agent_network(min_similarity=0.5)
+            print(f"{graph.stats.total_agents} agents, "
+                  f"{graph.stats.total_cross_edges} cross-agent edges")
+        """
+        payload: Dict[str, Any] = {
+            "min_similarity": min_similarity,
+            "max_nodes_per_agent": max_nodes_per_agent,
+            "min_importance": min_importance,
+            "max_cross_edges": max_cross_edges,
+        }
+        if agent_ids is not None:
+            payload["agent_ids"] = agent_ids
+
+        data = self._request("POST", "/v1/knowledge/network/cross-agent", data=payload)
+        return CrossAgentNetworkResponse.from_dict(data)
 
     # =========================================================================
     # Context Manager Support
