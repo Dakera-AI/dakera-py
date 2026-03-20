@@ -4,7 +4,36 @@ Dakera SDK Exceptions
 Custom exception hierarchy for Dakera operations.
 """
 
+import enum
 from typing import Any, Optional
+
+
+class ErrorCode(enum.Enum):
+    """Server error codes returned in structured error responses."""
+
+    # 404 Not Found
+    NAMESPACE_NOT_FOUND = "NAMESPACE_NOT_FOUND"
+    VECTOR_NOT_FOUND = "VECTOR_NOT_FOUND"
+    # 400 Bad Request
+    DIMENSION_MISMATCH = "DIMENSION_MISMATCH"
+    EMPTY_VECTOR = "EMPTY_VECTOR"
+    INVALID_REQUEST = "INVALID_REQUEST"
+    # 500 Internal Server Error
+    STORAGE_ERROR = "STORAGE_ERROR"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    # 413 Content Too Large
+    QUOTA_EXCEEDED = "QUOTA_EXCEEDED"
+    # 503 Service Unavailable
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+    # 401 Unauthorized
+    AUTHENTICATION_REQUIRED = "AUTHENTICATION_REQUIRED"
+    INVALID_API_KEY = "INVALID_API_KEY"
+    API_KEY_EXPIRED = "API_KEY_EXPIRED"
+    # 403 Forbidden
+    INSUFFICIENT_SCOPE = "INSUFFICIENT_SCOPE"
+    NAMESPACE_ACCESS_DENIED = "NAMESPACE_ACCESS_DENIED"
+    # Fallback for unrecognised codes
+    UNKNOWN = "UNKNOWN"
 
 
 class DakeraError(Exception):
@@ -15,13 +44,17 @@ class DakeraError(Exception):
         message: str,
         status_code: Optional[int] = None,
         response_body: Optional[Any] = None,
+        code: Optional[ErrorCode] = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.response_body = response_body
+        self.code = code
 
     def __str__(self) -> str:
+        if self.status_code and self.code:
+            return f"[{self.status_code}] {self.code.value}: {self.message}"
         if self.status_code:
             return f"[{self.status_code}] {self.message}"
         return self.message
@@ -67,6 +100,15 @@ class ServerError(DakeraError):
 
 class AuthenticationError(DakeraError):
     """Raised when authentication fails."""
+
+    pass
+
+
+class AuthorizationError(DakeraError):
+    """Raised when the server returns a 403 Forbidden response.
+
+    Covers INSUFFICIENT_SCOPE and NAMESPACE_ACCESS_DENIED error codes.
+    """
 
     pass
 

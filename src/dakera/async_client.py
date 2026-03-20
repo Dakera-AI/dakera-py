@@ -37,8 +37,10 @@ except ImportError as exc:  # pragma: no cover
 
 from dakera.exceptions import (
     AuthenticationError,
+    AuthorizationError,
     ConnectionError,
     DakeraError,
+    ErrorCode,
     NotFoundError,
     RateLimitError,
     ServerError,
@@ -139,6 +141,13 @@ class AsyncDakeraClient:
             return body
         if response.status_code == 204:
             return None
+
+        raw_code = body.get("code") if isinstance(body, dict) else None
+        try:
+            error_code = ErrorCode(raw_code) if raw_code is not None else ErrorCode.UNKNOWN
+        except ValueError:
+            error_code = ErrorCode.UNKNOWN
+
         if response.status_code == 400:
             raise ValidationError(
                 message=(
@@ -148,12 +157,29 @@ class AsyncDakeraClient:
                 ),
                 status_code=response.status_code,
                 response_body=body,
+                code=error_code,
             )
         if response.status_code == 401:
             raise AuthenticationError(
-                message="Authentication failed",
+                message=(
+                    body.get("error", "Authentication failed")
+                    if isinstance(body, dict)
+                    else "Authentication failed"
+                ),
                 status_code=response.status_code,
                 response_body=body,
+                code=error_code,
+            )
+        if response.status_code == 403:
+            raise AuthorizationError(
+                message=(
+                    body.get("error", "Forbidden")
+                    if isinstance(body, dict)
+                    else "Forbidden"
+                ),
+                status_code=response.status_code,
+                response_body=body,
+                code=error_code,
             )
         if response.status_code == 404:
             raise NotFoundError(
@@ -164,6 +190,7 @@ class AsyncDakeraClient:
                 ),
                 status_code=response.status_code,
                 response_body=body,
+                code=error_code,
             )
         if response.status_code == 429:
             retry_after = response.headers.get("Retry-After")
@@ -178,11 +205,13 @@ class AsyncDakeraClient:
                 message=body.get("error", "Server error") if isinstance(body, dict) else str(body),
                 status_code=response.status_code,
                 response_body=body,
+                code=error_code,
             )
         raise DakeraError(
             message=f"Unexpected status code: {response.status_code}",
             status_code=response.status_code,
             response_body=body,
+            code=error_code,
         )
 
     async def _request(
