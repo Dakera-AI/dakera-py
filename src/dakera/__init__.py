@@ -28,21 +28,16 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
-    AgentStats,
-    # Agent types
-    AgentSummary,
-    # Analytics types
-    AnalyticsOverview,
-    ConsolidateResponse,
-    # SSE Streaming types
-    DakeraEvent,
-    MemoryEvent,
-    # Cross-agent network types (DASH-A)
+    AgentNetworkEdge,
     AgentNetworkInfo,
     AgentNetworkNode,
-    AgentNetworkEdge,
     AgentNetworkStats,
+    AgentStats,
+    AgentSummary,
+    AnalyticsOverview,
+    ConsolidateResponse,
     CrossAgentNetworkResponse,
+    DakeraEvent,
     DeduplicateResponse,
     DistanceMetric,
     Document,
@@ -51,28 +46,23 @@ from dakera.models import (
     IndexStats,
     KnowledgeEdge,
     KnowledgeGraphResponse,
-    # Knowledge Graph types
     KnowledgeNode,
     Memory,
+    MemoryEvent,
     NamespaceInfo,
     OpStatus,
     QueryResult,
-    # Consistency types
     ReadConsistency,
     RecalledMemory,
     SearchResult,
-    # Session types
     Session,
     StalenessConfig,
-    # Memory types
     StoreMemoryRequest,
     SummarizeResponse,
-    # Core types
     Vector,
     VectorMutationOp,
     WarmCacheRequest,
     WarmCacheResponse,
-    # Cache warming types
     WarmingPriority,
     WarmingTargetTier,
 )

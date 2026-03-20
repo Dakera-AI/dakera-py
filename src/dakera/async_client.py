@@ -47,10 +47,6 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
-    AgentNetworkEdge,
-    AgentNetworkInfo,
-    AgentNetworkNode,
-    AgentNetworkStats,
     BatchTextQueryResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
@@ -1284,7 +1280,7 @@ class AsyncDakeraClient:
 
     async def cross_agent_network(
         self,
-        agent_ids: Optional[List[str]] = None,
+        agent_ids: list[str] | None = None,
         min_similarity: float = 0.3,
         max_nodes_per_agent: int = 50,
         min_importance: float = 0.0,
@@ -1318,7 +1314,7 @@ class AsyncDakeraClient:
             print(f"{graph.stats.total_agents} agents, "
                   f"{graph.stats.total_cross_edges} cross-agent edges")
         """
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "min_similarity": min_similarity,
             "max_nodes_per_agent": max_nodes_per_agent,
             "min_importance": min_importance,
