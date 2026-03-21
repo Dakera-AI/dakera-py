@@ -1096,6 +1096,7 @@ class CrossAgentNetworkResponse:
     nodes: List[AgentNetworkNode]
     edges: List[AgentNetworkEdge]
     stats: AgentNetworkStats
+    node_count: int = 0
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "CrossAgentNetworkResponse":
@@ -1104,4 +1105,5 @@ class CrossAgentNetworkResponse:
             nodes=[AgentNetworkNode.from_dict(n) for n in data.get("nodes", [])],
             edges=[AgentNetworkEdge.from_dict(e) for e in data.get("edges", [])],
             stats=AgentNetworkStats.from_dict(data["stats"]),
+            node_count=int(data.get("node_count", 0)),
         )
