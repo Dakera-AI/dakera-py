@@ -7,7 +7,8 @@ Main client class for interacting with Dakera server.
 import json
 import random
 import time
-from typing import Any, Dict, Generator, List, Optional
+from collections.abc import Generator
+from typing import Any, Optional
 from urllib.parse import urljoin
 
 import requests
@@ -86,7 +87,7 @@ class DakeraClient:
         connect_timeout: Optional[float] = None,
         max_retries: int = 3,
         retry_config: Optional[RetryConfig] = None,
-        headers: Optional[Dict[str, str]] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> None:
         """
         Initialize Dakera client.
@@ -237,8 +238,8 @@ class DakeraClient:
         self,
         method: str,
         path: str,
-        data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
+        data: Optional[dict[str, Any]] = None,
+        params: Optional[dict[str, Any]] = None,
     ) -> Any:
         """Make HTTP request with retry logic and exponential backoff."""
         url = self._url(path)
@@ -288,8 +289,8 @@ class DakeraClient:
     def upsert(
         self,
         namespace: str,
-        vectors: List[VectorInput],
-    ) -> Dict[str, Any]:
+        vectors: list[VectorInput],
+    ) -> dict[str, Any]:
         """
         Upsert vectors into a namespace.
 
@@ -323,7 +324,7 @@ class DakeraClient:
     def query(
         self,
         namespace: str,
-        vector: List[float],
+        vector: list[float],
         top_k: int = 10,
         filter: Optional[FilterDict] = None,
         include_values: bool = False,
@@ -361,7 +362,7 @@ class DakeraClient:
             ...     distance_metric=DistanceMetric.COSINE,
             ... )
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "vector": vector,
             "top_k": top_k,
             "include_values": include_values,
@@ -386,10 +387,10 @@ class DakeraClient:
     def delete(
         self,
         namespace: str,
-        ids: Optional[List[str]] = None,
+        ids: Optional[list[str]] = None,
         filter: Optional[FilterDict] = None,
         delete_all: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Delete vectors from a namespace.
 
@@ -407,7 +408,7 @@ class DakeraClient:
             >>> client.delete("my-namespace", filter={"label": "obsolete"})
             >>> client.delete("my-namespace", delete_all=True)
         """
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
         if ids:
             data["ids"] = ids
         if filter:
@@ -424,10 +425,10 @@ class DakeraClient:
     def fetch(
         self,
         namespace: str,
-        ids: List[str],
+        ids: list[str],
         include_values: bool = True,
         include_metadata: bool = True,
-    ) -> List[Vector]:
+    ) -> list[Vector]:
         """
         Fetch vectors by ID.
 
@@ -458,8 +459,8 @@ class DakeraClient:
     def batch_query(
         self,
         namespace: str,
-        queries: List[Dict[str, Any]],
-    ) -> List[SearchResult]:
+        queries: list[dict[str, Any]],
+    ) -> list[SearchResult]:
         """
         Execute multiple queries in a single request.
 
@@ -491,7 +492,7 @@ class DakeraClient:
     def upsert_text(
         self,
         namespace: str,
-        documents: List[TextDocumentInput],
+        documents: list[TextDocumentInput],
         model: Optional[EmbeddingModel] = None,
     ) -> TextUpsertResponse:
         """
@@ -522,7 +523,7 @@ class DakeraClient:
             else:
                 doc_dicts.append(d)
 
-        data: Dict[str, Any] = {"documents": doc_dicts}
+        data: dict[str, Any] = {"documents": doc_dicts}
         if model:
             data["model"] = model.value
 
@@ -565,7 +566,7 @@ class DakeraClient:
             >>> for result in response.results:
             ...     print(f"{result.id}: {result.score} - {result.text}")
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "text": text,
             "top_k": top_k,
             "include_text": include_text,
@@ -586,7 +587,7 @@ class DakeraClient:
     def batch_query_text(
         self,
         namespace: str,
-        queries: List[str],
+        queries: list[str],
         top_k: int = 10,
         filter: Optional[FilterDict] = None,
         include_vectors: bool = False,
@@ -614,7 +615,7 @@ class DakeraClient:
             >>> for i, query_results in enumerate(response.results):
             ...     print(f"Query {i}: {len(query_results)} results")
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "queries": queries,
             "top_k": top_k,
             "include_vectors": include_vectors,
@@ -638,8 +639,8 @@ class DakeraClient:
     def index_documents(
         self,
         namespace: str,
-        documents: List[DocumentInput],
-    ) -> Dict[str, Any]:
+        documents: list[DocumentInput],
+    ) -> dict[str, Any]:
         """
         Index documents for full-text search.
 
@@ -675,7 +676,7 @@ class DakeraClient:
         query: str,
         top_k: int = 10,
         filter: Optional[FilterDict] = None,
-    ) -> List[FullTextSearchResult]:
+    ) -> list[FullTextSearchResult]:
         """
         Perform full-text search.
 
@@ -691,7 +692,7 @@ class DakeraClient:
         Example:
             >>> results = client.fulltext_search("my-namespace", query="hello world")
         """
-        data: Dict[str, Any] = {"query": query, "top_k": top_k}
+        data: dict[str, Any] = {"query": query, "top_k": top_k}
         if filter:
             data["filter"] = filter
 
@@ -705,12 +706,12 @@ class DakeraClient:
     def hybrid_search(
         self,
         namespace: str,
-        vector: List[float],
+        vector: list[float],
         query: str,
         top_k: int = 10,
         alpha: float = 0.5,
         filter: Optional[FilterDict] = None,
-    ) -> List[HybridSearchResult]:
+    ) -> list[HybridSearchResult]:
         """
         Perform hybrid search combining vector and full-text.
 
@@ -733,7 +734,7 @@ class DakeraClient:
             ...     alpha=0.7,
             ... )
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "vector": vector,
             "query": query,
             "top_k": top_k,
@@ -753,7 +754,7 @@ class DakeraClient:
     # Namespace Operations
     # =========================================================================
 
-    def list_namespaces(self) -> List[NamespaceInfo]:
+    def list_namespaces(self) -> list[NamespaceInfo]:
         """
         List all namespaces.
 
@@ -781,7 +782,7 @@ class DakeraClient:
         namespace: str,
         dimensions: Optional[int] = None,
         index_type: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
     ) -> NamespaceInfo:
         """
         Create a new namespace.
@@ -795,7 +796,7 @@ class DakeraClient:
         Returns:
             NamespaceInfo object
         """
-        data: Dict[str, Any] = {"name": namespace}
+        data: dict[str, Any] = {"name": namespace}
         if dimensions:
             data["dimensions"] = dimensions
         if index_type:
@@ -844,7 +845,7 @@ class DakeraClient:
     # Admin Operations
     # =========================================================================
 
-    def health(self) -> Dict[str, Any]:
+    def health(self) -> dict[str, Any]:
         """
         Check server health status.
 
@@ -866,7 +867,7 @@ class DakeraClient:
         response = self._request("GET", f"/v1/namespaces/{namespace}/stats")
         return IndexStats.from_dict(response)
 
-    def compact(self, namespace: str) -> Dict[str, Any]:
+    def compact(self, namespace: str) -> dict[str, Any]:
         """
         Trigger compaction for a namespace.
 
@@ -878,7 +879,7 @@ class DakeraClient:
         """
         return self._request("POST", f"/v1/namespaces/{namespace}/compact")
 
-    def flush(self, namespace: str) -> Dict[str, Any]:
+    def flush(self, namespace: str) -> dict[str, Any]:
         """
         Flush pending writes for a namespace.
 
@@ -900,11 +901,11 @@ class DakeraClient:
         content: str,
         memory_type: str = "episodic",
         importance: Optional[float] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         session_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Store a memory for an agent."""
-        data: Dict[str, Any] = {"content": content, "memory_type": memory_type}
+        data: dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
             data["importance"] = importance
         if metadata is not None:
@@ -920,9 +921,9 @@ class DakeraClient:
         top_k: int = 5,
         memory_type: Optional[str] = None,
         min_importance: Optional[float] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Recall memories for an agent."""
-        data: Dict[str, Any] = {"query": query, "top_k": top_k}
+        data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
@@ -930,7 +931,7 @@ class DakeraClient:
         result = self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
         return result.get("memories", result) if isinstance(result, dict) else result
 
-    def get_memory(self, agent_id: str, memory_id: str) -> Dict[str, Any]:
+    def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""
         return self._request("GET", f"/v1/agents/{agent_id}/memories/{memory_id}")
 
@@ -939,11 +940,11 @@ class DakeraClient:
         agent_id: str,
         memory_id: str,
         content: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         memory_type: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Update an existing memory."""
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
         if content is not None:
             data["content"] = content
         if metadata is not None:
@@ -952,7 +953,7 @@ class DakeraClient:
             data["memory_type"] = memory_type
         return self._request("PUT", f"/v1/agents/{agent_id}/memories/{memory_id}", data=data)
 
-    def forget(self, agent_id: str, memory_id: str) -> Dict[str, Any]:
+    def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Delete a memory."""
         return self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
 
@@ -1007,9 +1008,9 @@ class DakeraClient:
         top_k: int = 10,
         memory_type: Optional[str] = None,
         min_importance: Optional[float] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search memories for an agent."""
-        data: Dict[str, Any] = {"query": query, "top_k": top_k}
+        data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
@@ -1020,9 +1021,9 @@ class DakeraClient:
     def update_importance(
         self,
         agent_id: str,
-        memory_ids: List[str],
+        memory_ids: list[str],
         importance: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Update importance of memories."""
         data = {"memory_ids": memory_ids, "importance": importance}
         return self._request("PUT", f"/v1/agents/{agent_id}/memories/importance", data=data)
@@ -1033,9 +1034,9 @@ class DakeraClient:
         memory_type: Optional[str] = None,
         threshold: Optional[float] = None,
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Consolidate memories for an agent."""
-        data: Dict[str, Any] = {"dry_run": dry_run}
+        data: dict[str, Any] = {"dry_run": dry_run}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if threshold is not None:
@@ -1048,9 +1049,9 @@ class DakeraClient:
         memory_id: str,
         feedback: str,
         relevance_score: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Submit feedback on a memory recall."""
-        data: Dict[str, Any] = {"memory_id": memory_id, "feedback": feedback}
+        data: dict[str, Any] = {"memory_id": memory_id, "feedback": feedback}
         if relevance_score is not None:
             data["relevance_score"] = relevance_score
         return self._request("POST", f"/v1/agents/{agent_id}/memories/feedback", data=data)
@@ -1062,19 +1063,19 @@ class DakeraClient:
     def start_session(
         self,
         agent_id: str,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
         """Start a new session."""
-        data: Dict[str, Any] = {"agent_id": agent_id}
+        data: dict[str, Any] = {"agent_id": agent_id}
         if metadata is not None:
             data["metadata"] = metadata
         return self._request("POST", "/v1/sessions/start", data=data)
 
-    def end_session(self, session_id: str) -> Dict[str, Any]:
+    def end_session(self, session_id: str) -> dict[str, Any]:
         """End a session."""
         return self._request("POST", f"/v1/sessions/{session_id}/end")
 
-    def get_session(self, session_id: str) -> Dict[str, Any]:
+    def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session details."""
         return self._request("GET", f"/v1/sessions/{session_id}")
 
@@ -1084,9 +1085,9 @@ class DakeraClient:
         active_only: Optional[bool] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List sessions."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
         if active_only is not None:
@@ -1097,7 +1098,7 @@ class DakeraClient:
             params["offset"] = offset
         return self._request("GET", "/v1/sessions", params=params)
 
-    def session_memories(self, session_id: str) -> List[Dict[str, Any]]:
+    def session_memories(self, session_id: str) -> list[dict[str, Any]]:
         """Get memories for a session."""
         return self._request("GET", f"/v1/sessions/{session_id}/memories")
 
@@ -1105,7 +1106,7 @@ class DakeraClient:
     # Agent Operations
     # =========================================================================
 
-    def list_agents(self) -> List[Dict[str, Any]]:
+    def list_agents(self) -> list[dict[str, Any]]:
         """List all agents."""
         return self._request("GET", "/v1/agents")
 
@@ -1114,16 +1115,16 @@ class DakeraClient:
         agent_id: str,
         memory_type: Optional[str] = None,
         limit: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get memories for an agent."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if memory_type is not None:
             params["memory_type"] = memory_type
         if limit is not None:
             params["limit"] = limit
         return self._request("GET", f"/v1/agents/{agent_id}/memories", params=params)
 
-    def agent_stats(self, agent_id: str) -> Dict[str, Any]:
+    def agent_stats(self, agent_id: str) -> dict[str, Any]:
         """Get stats for an agent."""
         return self._request("GET", f"/v1/agents/{agent_id}/stats")
 
@@ -1132,9 +1133,9 @@ class DakeraClient:
         agent_id: str,
         active_only: Optional[bool] = None,
         limit: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get sessions for an agent."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if active_only is not None:
             params["active_only"] = str(active_only).lower()
         if limit is not None:
@@ -1148,7 +1149,7 @@ class DakeraClient:
     def warm_cache(
         self,
         namespace: str,
-        vector_ids: Optional[List[str]] = None,
+        vector_ids: Optional[list[str]] = None,
         priority: WarmingPriority = WarmingPriority.NORMAL,
         target_tier: WarmingTargetTier = WarmingTargetTier.L2,
         background: bool = False,
@@ -1205,15 +1206,15 @@ class DakeraClient:
     def multi_vector_search(
         self,
         namespace: str,
-        positive: List[List[float]],
-        negative: Optional[List[List[float]]] = None,
+        positive: list[list[float]],
+        negative: Optional[list[list[float]]] = None,
         top_k: int = 10,
-        filter: Optional[Dict[str, Any]] = None,
+        filter: Optional[dict[str, Any]] = None,
         include_metadata: bool = True,
         include_vectors: bool = False,
         mmr_lambda: Optional[float] = None,
         mmr_prefetch_k: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Multi-vector search with positive/negative vectors and optional MMR.
 
@@ -1231,7 +1232,7 @@ class DakeraClient:
         Returns:
             Dict with results and search metadata
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "positive": positive,
             "top_k": top_k,
             "include_metadata": include_metadata,
@@ -1250,17 +1251,17 @@ class DakeraClient:
     def unified_query(
         self,
         namespace: str,
-        vector: Optional[List[float]] = None,
+        vector: Optional[list[float]] = None,
         text: Optional[str] = None,
         top_k: int = 10,
-        filter: Optional[Dict[str, Any]] = None,
+        filter: Optional[dict[str, Any]] = None,
         include_metadata: bool = True,
         include_vectors: bool = False,
         vector_weight: Optional[float] = None,
         text_weight: Optional[float] = None,
         fusion_method: Optional[str] = None,
         rerank: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Unified query combining vector and text search.
 
@@ -1280,7 +1281,7 @@ class DakeraClient:
         Returns:
             Dict with results and search metadata
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "top_k": top_k,
             "include_metadata": include_metadata,
             "include_vectors": include_vectors,
@@ -1303,13 +1304,13 @@ class DakeraClient:
     def aggregate(
         self,
         namespace: str,
-        vector: Optional[List[float]] = None,
+        vector: Optional[list[float]] = None,
         group_by: Optional[str] = None,
-        metrics: Optional[List[str]] = None,
+        metrics: Optional[list[str]] = None,
         top_k: Optional[int] = None,
-        filter: Optional[Dict[str, Any]] = None,
+        filter: Optional[dict[str, Any]] = None,
         top_groups: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Aggregate vectors with grouping.
 
@@ -1325,7 +1326,7 @@ class DakeraClient:
         Returns:
             Dict with aggregation groups and metadata
         """
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
         if vector is not None:
             data["vector"] = vector
         if group_by is not None:
@@ -1345,9 +1346,9 @@ class DakeraClient:
         namespace: str,
         cursor: Optional[str] = None,
         limit: Optional[int] = None,
-        filter: Optional[Dict[str, Any]] = None,
+        filter: Optional[dict[str, Any]] = None,
         include_vectors: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Export vectors with pagination.
 
@@ -1361,7 +1362,7 @@ class DakeraClient:
         Returns:
             Dict with exported vectors and next_cursor for pagination
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "include_vectors": include_vectors,
         }
         if cursor is not None:
@@ -1375,11 +1376,11 @@ class DakeraClient:
     def explain_query(
         self,
         namespace: str,
-        vector: List[float],
+        vector: list[float],
         top_k: int = 10,
-        filter: Optional[Dict[str, Any]] = None,
+        filter: Optional[dict[str, Any]] = None,
         include_metadata: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Explain query execution plan and performance.
 
@@ -1393,7 +1394,7 @@ class DakeraClient:
         Returns:
             Dict with query plan, execution steps, and timing information
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "vector": vector,
             "top_k": top_k,
             "include_metadata": include_metadata,
@@ -1405,12 +1406,12 @@ class DakeraClient:
     def upsert_columns(
         self,
         namespace: str,
-        ids: List[str],
-        vectors: List[List[float]],
-        attributes: Optional[Dict[str, List[Any]]] = None,
+        ids: list[str],
+        vectors: list[list[float]],
+        attributes: Optional[dict[str, list[Any]]] = None,
         ttl_seconds: Optional[int] = None,
         dimension: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Column-format vector upsert for efficient bulk operations.
 
@@ -1425,7 +1426,7 @@ class DakeraClient:
         Returns:
             Dict with upsert status
         """
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "ids": ids,
             "vectors": vectors,
         }
@@ -1447,9 +1448,9 @@ class DakeraClient:
         memory_id: Optional[str] = None,
         depth: Optional[int] = None,
         min_similarity: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a knowledge graph from a seed memory."""
-        data: Dict[str, Any] = {"agent_id": agent_id}
+        data: dict[str, Any] = {"agent_id": agent_id}
         if memory_id is not None:
             data["memory_id"] = memory_id
         if depth is not None:
@@ -1465,9 +1466,9 @@ class DakeraClient:
         min_similarity: Optional[float] = None,
         cluster_threshold: Optional[float] = None,
         max_edges_per_node: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build a full knowledge graph for an agent."""
-        data: Dict[str, Any] = {"agent_id": agent_id}
+        data: dict[str, Any] = {"agent_id": agent_id}
         if max_nodes is not None:
             data["max_nodes"] = max_nodes
         if min_similarity is not None:
@@ -1481,12 +1482,12 @@ class DakeraClient:
     def summarize(
         self,
         agent_id: str,
-        memory_ids: Optional[List[str]] = None,
+        memory_ids: Optional[list[str]] = None,
         target_type: Optional[str] = None,
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Summarize memories."""
-        data: Dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
+        data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
         if memory_ids is not None:
             data["memory_ids"] = memory_ids
         if target_type is not None:
@@ -1499,9 +1500,9 @@ class DakeraClient:
         threshold: Optional[float] = None,
         memory_type: Optional[str] = None,
         dry_run: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Deduplicate memories."""
-        data: Dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
+        data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
         if threshold is not None:
             data["threshold"] = threshold
         if memory_type is not None:
@@ -1516,9 +1517,9 @@ class DakeraClient:
         self,
         period: Optional[str] = None,
         namespace: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get analytics overview."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if period is not None:
             params["period"] = period
         if namespace is not None:
@@ -1529,9 +1530,9 @@ class DakeraClient:
         self,
         period: Optional[str] = None,
         namespace: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get latency analytics."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if period is not None:
             params["period"] = period
         if namespace is not None:
@@ -1542,9 +1543,9 @@ class DakeraClient:
         self,
         period: Optional[str] = None,
         namespace: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get throughput analytics."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if period is not None:
             params["period"] = period
         if namespace is not None:
@@ -1554,9 +1555,9 @@ class DakeraClient:
     def analytics_storage(
         self,
         namespace: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Get storage analytics."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if namespace is not None:
             params["namespace"] = namespace
         return self._request("GET", "/v1/analytics/storage", params=params)
@@ -1565,50 +1566,50 @@ class DakeraClient:
     # Admin Operations (Extended)
     # =========================================================================
 
-    def cluster_status(self) -> Dict[str, Any]:
+    def cluster_status(self) -> dict[str, Any]:
         """Get cluster status."""
         return self._request("GET", "/v1/admin/cluster/status")
 
-    def cluster_nodes(self) -> List[Dict[str, Any]]:
+    def cluster_nodes(self) -> list[dict[str, Any]]:
         """Get cluster nodes."""
         return self._request("GET", "/v1/admin/cluster/nodes")
 
-    def optimize_namespace(self, namespace: str) -> Dict[str, Any]:
+    def optimize_namespace(self, namespace: str) -> dict[str, Any]:
         """Optimize a namespace."""
         return self._request("POST", f"/v1/admin/namespaces/{namespace}/optimize")
 
-    def index_stats(self, namespace: str) -> Dict[str, Any]:
+    def index_stats(self, namespace: str) -> dict[str, Any]:
         """Get index stats for a namespace."""
         return self._request("GET", f"/v1/admin/namespaces/{namespace}/index/stats")
 
-    def rebuild_indexes(self, namespace: str) -> Dict[str, Any]:
+    def rebuild_indexes(self, namespace: str) -> dict[str, Any]:
         """Rebuild indexes for a namespace."""
         return self._request("POST", f"/v1/admin/namespaces/{namespace}/index/rebuild")
 
-    def cache_stats(self) -> Dict[str, Any]:
+    def cache_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         return self._request("GET", "/v1/admin/cache/stats")
 
-    def cache_clear(self, namespace: Optional[str] = None) -> Dict[str, Any]:
+    def cache_clear(self, namespace: Optional[str] = None) -> dict[str, Any]:
         """Clear cache, optionally for a specific namespace."""
-        data: Optional[Dict[str, Any]] = None
+        data: Optional[dict[str, Any]] = None
         if namespace is not None:
             data = {"namespace": namespace}
         return self._request("POST", "/v1/admin/cache/clear", data=data)
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get server configuration."""
         return self._request("GET", "/v1/admin/config")
 
-    def update_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def update_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Update server configuration."""
         return self._request("PUT", "/v1/admin/config", data=config)
 
-    def get_quotas(self) -> Dict[str, Any]:
+    def get_quotas(self) -> dict[str, Any]:
         """Get quota settings."""
         return self._request("GET", "/v1/admin/quotas")
 
-    def update_quotas(self, quotas: Dict[str, Any]) -> Dict[str, Any]:
+    def update_quotas(self, quotas: dict[str, Any]) -> dict[str, Any]:
         """Update quota settings."""
         return self._request("PUT", "/v1/admin/quotas", data=quotas)
 
@@ -1616,28 +1617,28 @@ class DakeraClient:
         self,
         limit: Optional[int] = None,
         min_duration_ms: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get slow queries."""
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
         if min_duration_ms is not None:
             params["min_duration_ms"] = min_duration_ms
         return self._request("GET", "/v1/admin/slow-queries", params=params if params else None)
 
-    def create_backup(self, include_data: bool = True) -> Dict[str, Any]:
+    def create_backup(self, include_data: bool = True) -> dict[str, Any]:
         """Create a backup."""
         return self._request("POST", "/v1/admin/backups", data={"include_data": include_data})
 
-    def list_backups(self) -> List[Dict[str, Any]]:
+    def list_backups(self) -> list[dict[str, Any]]:
         """List all backups."""
         return self._request("GET", "/v1/admin/backups")
 
-    def restore_backup(self, backup_id: str) -> Dict[str, Any]:
+    def restore_backup(self, backup_id: str) -> dict[str, Any]:
         """Restore a backup."""
         return self._request("POST", f"/v1/admin/backups/{backup_id}/restore")
 
-    def delete_backup(self, backup_id: str) -> Dict[str, Any]:
+    def delete_backup(self, backup_id: str) -> dict[str, Any]:
         """Delete a backup."""
         return self._request("DELETE", f"/v1/admin/backups/{backup_id}")
 
@@ -1646,9 +1647,9 @@ class DakeraClient:
         namespace: str,
         ttl_seconds: int,
         strategy: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Configure TTL for a namespace."""
-        data: Dict[str, Any] = {"ttl_seconds": ttl_seconds}
+        data: dict[str, Any] = {"ttl_seconds": ttl_seconds}
         if strategy is not None:
             data["strategy"] = strategy
         return self._request("POST", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
@@ -1660,38 +1661,38 @@ class DakeraClient:
     def create_key(
         self,
         name: str,
-        permissions: Optional[List[str]] = None,
+        permissions: Optional[list[str]] = None,
         expires_at: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new API key."""
-        data: Dict[str, Any] = {"name": name}
+        data: dict[str, Any] = {"name": name}
         if permissions is not None:
             data["permissions"] = permissions
         if expires_at is not None:
             data["expires_at"] = expires_at
         return self._request("POST", "/v1/keys", data=data)
 
-    def list_keys(self) -> List[Dict[str, Any]]:
+    def list_keys(self) -> list[dict[str, Any]]:
         """List all API keys."""
         return self._request("GET", "/v1/keys")
 
-    def get_key(self, key_id: str) -> Dict[str, Any]:
+    def get_key(self, key_id: str) -> dict[str, Any]:
         """Get an API key by ID."""
         return self._request("GET", f"/v1/keys/{key_id}")
 
-    def delete_key(self, key_id: str) -> Dict[str, Any]:
+    def delete_key(self, key_id: str) -> dict[str, Any]:
         """Delete an API key."""
         return self._request("DELETE", f"/v1/keys/{key_id}")
 
-    def deactivate_key(self, key_id: str) -> Dict[str, Any]:
+    def deactivate_key(self, key_id: str) -> dict[str, Any]:
         """Deactivate an API key."""
         return self._request("POST", f"/v1/keys/{key_id}/deactivate")
 
-    def rotate_key(self, key_id: str) -> Dict[str, Any]:
+    def rotate_key(self, key_id: str) -> dict[str, Any]:
         """Rotate an API key."""
         return self._request("POST", f"/v1/keys/{key_id}/rotate")
 
-    def key_usage(self, key_id: str) -> Dict[str, Any]:
+    def key_usage(self, key_id: str) -> dict[str, Any]:
         """Get usage statistics for an API key."""
         return self._request("GET", f"/v1/keys/{key_id}/usage")
 
@@ -1701,7 +1702,7 @@ class DakeraClient:
 
     def _parse_sse_block(self, block: str) -> Optional[DakeraEvent]:
         """Parse a single SSE event block into a :class:`~dakera.models.DakeraEvent`."""
-        data_lines: List[str] = []
+        data_lines: list[str] = []
         for line in block.split("\n"):
             if line.startswith(":"):
                 continue  # SSE comment / heartbeat
@@ -1865,7 +1866,7 @@ class DakeraClient:
 
     def cross_agent_network(
         self,
-        agent_ids: Optional[List[str]] = None,
+        agent_ids: Optional[list[str]] = None,
         min_similarity: float = 0.3,
         max_nodes_per_agent: int = 50,
         min_importance: float = 0.0,
@@ -1899,7 +1900,7 @@ class DakeraClient:
             print(f"{graph.stats.total_agents} agents, "
                   f"{graph.stats.total_cross_edges} cross-agent edges")
         """
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "min_similarity": min_similarity,
             "max_nodes_per_agent": max_nodes_per_agent,
             "min_importance": min_importance,

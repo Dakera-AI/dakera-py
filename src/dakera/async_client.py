@@ -27,7 +27,8 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 try:
     import httpx

@@ -6,7 +6,7 @@ Dataclasses representing Dakera data structures.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 # ============================================================================
 # Consistency & Query Types (Turbopuffer-inspired)
@@ -63,11 +63,11 @@ class StalenessConfig:
     max_staleness_ms: int = 5000
     """Maximum acceptable staleness in milliseconds."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"max_staleness_ms": self.max_staleness_ms}
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "StalenessConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "StalenessConfig":
         return cls(max_staleness_ms=data.get("max_staleness_ms", 5000))
 
 
@@ -129,7 +129,7 @@ class WarmCacheRequest:
     """Cache warming request with priority hints."""
 
     namespace: str
-    vector_ids: Optional[List[str]] = None
+    vector_ids: Optional[list[str]] = None
     priority: WarmingPriority = WarmingPriority.NORMAL
     target_tier: WarmingTargetTier = WarmingTargetTier.L2
     background: bool = False
@@ -137,8 +137,8 @@ class WarmCacheRequest:
     access_pattern: AccessPatternHint = AccessPatternHint.RANDOM
     max_vectors: Optional[int] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "namespace": self.namespace,
             "priority": self.priority.value,
             "target_tier": self.target_tier.value,
@@ -169,7 +169,7 @@ class WarmCacheResponse:
     bytes_warmed: Optional[int] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WarmCacheResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "WarmCacheResponse":
         return cls(
             success=data["success"],
             entries_warmed=data.get("entries_warmed", 0),
@@ -204,8 +204,8 @@ class ConfigureNamespaceRequest:
     distance: Optional[DistanceMetric] = None
     """Distance metric.  Defaults to ``cosine`` when not supplied."""
 
-    def to_dict(self) -> Dict[str, Any]:
-        result: Dict[str, Any] = {"dimension": self.dimension}
+    def to_dict(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"dimension": self.dimension}
         if self.distance is not None:
             result["distance"] = self.distance.value
         return result
@@ -228,7 +228,7 @@ class ConfigureNamespaceResponse:
     """``True`` if the namespace was newly created; ``False`` if it already existed."""
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ConfigureNamespaceResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "ConfigureNamespaceResponse":
         return cls(
             namespace=data["namespace"],
             dimension=data["dimension"],
@@ -247,18 +247,18 @@ class Vector:
     """Represents a vector with optional metadata."""
 
     id: str
-    values: List[float]
-    metadata: Optional[Dict[str, Any]] = None
+    values: list[float]
+    metadata: Optional[dict[str, Any]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API requests."""
-        result: Dict[str, Any] = {"id": self.id, "values": self.values}
+        result: dict[str, Any] = {"id": self.id, "values": self.values}
         if self.metadata is not None:
             result["metadata"] = self.metadata
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Vector":
+    def from_dict(cls, data: dict[str, Any]) -> "Vector":
         """Create Vector from API response dictionary."""
         return cls(
             id=data["id"],
@@ -273,11 +273,11 @@ class QueryResult:
 
     id: str
     score: float
-    values: Optional[List[float]] = None
-    metadata: Optional[Dict[str, Any]] = None
+    values: Optional[list[float]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "QueryResult":
+    def from_dict(cls, data: dict[str, Any]) -> "QueryResult":
         """Create QueryResult from API response dictionary."""
         return cls(
             id=data["id"],
@@ -291,12 +291,12 @@ class QueryResult:
 class SearchResult:
     """Result container for vector search operations."""
 
-    results: List[QueryResult]
+    results: list[QueryResult]
     total_searched: Optional[int] = None
     search_time_ms: Optional[float] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SearchResult":
+    def from_dict(cls, data: dict[str, Any]) -> "SearchResult":
         """Create SearchResult from API response dictionary."""
         return cls(
             results=[QueryResult.from_dict(r) for r in data.get("results", [])],
@@ -315,10 +315,10 @@ class NamespaceInfo:
     index_type: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "NamespaceInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "NamespaceInfo":
         """Create NamespaceInfo from API response dictionary."""
         return cls(
             name=data["name"],
@@ -344,7 +344,7 @@ class IndexStats:
     is_trained: Optional[bool] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "IndexStats":
+    def from_dict(cls, data: dict[str, Any]) -> "IndexStats":
         """Create IndexStats from API response dictionary."""
         return cls(
             total_vectors=data.get("total_vectors", 0),
@@ -363,17 +363,17 @@ class Document:
 
     id: str
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API requests."""
-        result: Dict[str, Any] = {"id": self.id, "content": self.content}
+        result: dict[str, Any] = {"id": self.id, "content": self.content}
         if self.metadata is not None:
             result["metadata"] = self.metadata
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Document":
+    def from_dict(cls, data: dict[str, Any]) -> "Document":
         """Create Document from API response dictionary."""
         return cls(
             id=data["id"],
@@ -389,11 +389,11 @@ class FullTextSearchResult:
     id: str
     score: float
     content: Optional[str] = None
-    highlights: Optional[List[str]] = None
-    metadata: Optional[Dict[str, Any]] = None
+    highlights: Optional[list[str]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FullTextSearchResult":
+    def from_dict(cls, data: dict[str, Any]) -> "FullTextSearchResult":
         """Create FullTextSearchResult from API response dictionary."""
         return cls(
             id=data["id"],
@@ -412,12 +412,12 @@ class HybridSearchResult:
     score: float
     vector_score: Optional[float] = None
     text_score: Optional[float] = None
-    values: Optional[List[float]] = None
+    values: Optional[list[float]] = None
     content: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HybridSearchResult":
+    def from_dict(cls, data: dict[str, Any]) -> "HybridSearchResult":
         """Create HybridSearchResult from API response dictionary."""
         return cls(
             id=data["id"],
@@ -459,15 +459,15 @@ class TextDocument:
     text: str
     """Raw text content to be embedded."""
 
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
     """Optional metadata for the document."""
 
     ttl_seconds: Optional[int] = None
     """Optional TTL in seconds."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API requests."""
-        result: Dict[str, Any] = {"id": self.id, "text": self.text}
+        result: dict[str, Any] = {"id": self.id, "text": self.text}
         if self.metadata is not None:
             result["metadata"] = self.metadata
         if self.ttl_seconds is not None:
@@ -488,14 +488,14 @@ class TextSearchResult:
     text: Optional[str] = None
     """Original text (if includeText was true)."""
 
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
     """Document metadata (excluding internal _text field)."""
 
-    vector: Optional[List[float]] = None
+    vector: Optional[list[float]] = None
     """Vector values (if includeVectors was true)."""
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TextSearchResult":
+    def from_dict(cls, data: dict[str, Any]) -> "TextSearchResult":
         """Create TextSearchResult from API response dictionary."""
         return cls(
             id=data["id"],
@@ -523,7 +523,7 @@ class TextUpsertResponse:
     """Time spent generating embeddings in milliseconds."""
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TextUpsertResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "TextUpsertResponse":
         """Create TextUpsertResponse from API response dictionary."""
         return cls(
             upserted_count=data.get("upserted_count", 0),
@@ -537,7 +537,7 @@ class TextUpsertResponse:
 class TextQueryResponse:
     """Response from a text query operation."""
 
-    results: List[TextSearchResult]
+    results: list[TextSearchResult]
     """Search results."""
 
     model: EmbeddingModel
@@ -550,7 +550,7 @@ class TextQueryResponse:
     """Time spent searching in milliseconds."""
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TextQueryResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "TextQueryResponse":
         """Create TextQueryResponse from API response dictionary."""
         return cls(
             results=[TextSearchResult.from_dict(r) for r in data.get("results", [])],
@@ -564,7 +564,7 @@ class TextQueryResponse:
 class BatchTextQueryResponse:
     """Response from a batch text query operation."""
 
-    results: List[List[TextSearchResult]]
+    results: list[list[TextSearchResult]]
     """Results for each query."""
 
     model: EmbeddingModel
@@ -577,7 +577,7 @@ class BatchTextQueryResponse:
     """Time spent on all searches in milliseconds."""
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchTextQueryResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "BatchTextQueryResponse":
         """Create BatchTextQueryResponse from API response dictionary."""
         return cls(
             results=[
@@ -601,13 +601,13 @@ class StoreMemoryRequest:
     content: str
     memory_type: str = "episodic"
     importance: Optional[float] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
     ttl_seconds: Optional[int] = None
     session_id: Optional[str] = None
-    embedding: Optional[List[float]] = None
+    embedding: Optional[list[float]] = None
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {"content": self.content, "memory_type": self.memory_type}
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"content": self.content, "memory_type": self.memory_type}
         if self.importance is not None:
             d["importance"] = self.importance
         if self.metadata is not None:
@@ -628,13 +628,13 @@ class Memory:
     content: str
     memory_type: str
     importance: float
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     access_count: Optional[int] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Memory":
+    def from_dict(cls, data: dict[str, Any]) -> "Memory":
         return cls(
             id=data["id"],
             content=data["content"],
@@ -655,11 +655,11 @@ class RecalledMemory:
     memory_type: str
     importance: float
     score: float
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
     created_at: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "RecalledMemory":
+    def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
         return cls(
             id=data["id"],
             content=data["content"],
@@ -676,10 +676,10 @@ class ConsolidateResponse:
     """Response from memory consolidation."""
     consolidated_count: int
     removed_count: int
-    new_memories: List[str]
+    new_memories: list[str]
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ConsolidateResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "ConsolidateResponse":
         return cls(
             consolidated_count=data.get("consolidated_count", 0),
             removed_count=data.get("removed_count", 0),
@@ -699,10 +699,10 @@ class Session:
     agent_id: str
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Session":
+    def from_dict(cls, data: dict[str, Any]) -> "Session":
         return cls(
             session_id=data["session_id"],
             agent_id=data["agent_id"],
@@ -726,7 +726,7 @@ class AgentSummary:
     active_sessions: int
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentSummary":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentSummary":
         return cls(
             agent_id=data["agent_id"],
             memory_count=data.get("memory_count", 0),
@@ -740,7 +740,7 @@ class AgentStats:
     """Detailed stats for an agent."""
     agent_id: str
     total_memories: int
-    memories_by_type: Dict[str, int]
+    memories_by_type: dict[str, int]
     total_sessions: int
     active_sessions: int
     avg_importance: Optional[float] = None
@@ -748,7 +748,7 @@ class AgentStats:
     newest_memory_at: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentStats":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentStats":
         return cls(
             agent_id=data["agent_id"],
             total_memories=data.get("total_memories", 0),
@@ -773,10 +773,10 @@ class KnowledgeNode:
     content: str
     memory_type: Optional[str] = None
     importance: Optional[float] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "KnowledgeNode":
+    def from_dict(cls, data: dict[str, Any]) -> "KnowledgeNode":
         return cls(
             id=data["id"],
             content=data["content"],
@@ -795,7 +795,7 @@ class KnowledgeEdge:
     relationship: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "KnowledgeEdge":
+    def from_dict(cls, data: dict[str, Any]) -> "KnowledgeEdge":
         return cls(
             source=data["source"],
             target=data["target"],
@@ -807,12 +807,12 @@ class KnowledgeEdge:
 @dataclass
 class KnowledgeGraphResponse:
     """Response from knowledge graph operations."""
-    nodes: List["KnowledgeNode"]
-    edges: List["KnowledgeEdge"]
-    clusters: Optional[List[List[str]]] = None
+    nodes: list["KnowledgeNode"]
+    edges: list["KnowledgeEdge"]
+    clusters: Optional[list[list[str]]] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "KnowledgeGraphResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "KnowledgeGraphResponse":
         return cls(
             nodes=[KnowledgeNode.from_dict(n) for n in data.get("nodes", [])],
             edges=[KnowledgeEdge.from_dict(e) for e in data.get("edges", [])],
@@ -828,7 +828,7 @@ class SummarizeResponse:
     new_memory_id: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SummarizeResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "SummarizeResponse":
         return cls(
             summary=data["summary"],
             source_count=data.get("source_count", 0),
@@ -841,10 +841,10 @@ class DeduplicateResponse:
     """Response from deduplication."""
     duplicates_found: int
     removed_count: int
-    groups: List[List[str]]
+    groups: list[list[str]]
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DeduplicateResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "DeduplicateResponse":
         return cls(
             duplicates_found=data.get("duplicates_found", 0),
             removed_count=data.get("removed_count", 0),
@@ -873,7 +873,7 @@ class AnalyticsOverview:
     uptime_seconds: int
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AnalyticsOverview":
+    def from_dict(cls, data: dict[str, Any]) -> "AnalyticsOverview":
         return cls(
             total_queries=data.get("total_queries", 0),
             avg_latency_ms=data.get("avg_latency_ms", 0.0),
@@ -890,12 +890,12 @@ class AnalyticsOverview:
 
 
 # Type aliases for convenience
-FilterDict = Dict[str, Any]
-MetadataDict = Dict[str, Any]
-VectorValues = List[float]
-VectorInput = Union[Vector, Dict[str, Any]]
-DocumentInput = Union[Document, Dict[str, Any]]
-TextDocumentInput = Union[TextDocument, Dict[str, Any]]
+FilterDict = dict[str, Any]
+MetadataDict = dict[str, Any]
+VectorValues = list[float]
+VectorInput = Union[Vector, dict[str, Any]]
+DocumentInput = Union[Document, dict[str, Any]]
+TextDocumentInput = Union[TextDocument, dict[str, Any]]
 
 
 # ===========================================================================
@@ -964,7 +964,7 @@ class DakeraEvent:
     hint: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DakeraEvent":
+    def from_dict(cls, data: dict[str, Any]) -> "DakeraEvent":
         """Create a :class:`DakeraEvent` from a parsed SSE data payload."""
         import dataclasses
 
@@ -1007,11 +1007,11 @@ class MemoryEvent:
     memory_id: Optional[str] = None
     content: Optional[str] = None
     importance: Optional[float] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[list[str]] = None
     session_id: Optional[str] = None
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MemoryEvent":
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryEvent":
         """Create a :class:`MemoryEvent` from a parsed SSE data payload."""
         import dataclasses
 
@@ -1033,7 +1033,7 @@ class AgentNetworkInfo:
     avg_importance: float
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentNetworkInfo":
         return cls(
             agent_id=data["agent_id"],
             memory_count=data["memory_count"],
@@ -1049,12 +1049,12 @@ class AgentNetworkNode:
     agent_id: str
     content: str
     importance: float
-    tags: List[str]
+    tags: list[str]
     memory_type: str
     created_at: int
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkNode":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentNetworkNode":
         return cls(
             id=data["id"],
             agent_id=data["agent_id"],
@@ -1077,7 +1077,7 @@ class AgentNetworkEdge:
     similarity: float
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkEdge":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentNetworkEdge":
         return cls(
             source=data["source"],
             target=data["target"],
@@ -1097,7 +1097,7 @@ class AgentNetworkStats:
     density: float
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentNetworkStats":
+    def from_dict(cls, data: dict[str, Any]) -> "AgentNetworkStats":
         return cls(
             total_agents=data["total_agents"],
             total_nodes=data["total_nodes"],
@@ -1114,14 +1114,14 @@ class CrossAgentNetworkResponse:
     aggregate network statistics.
     """
 
-    agents: List[AgentNetworkInfo]
-    nodes: List[AgentNetworkNode]
-    edges: List[AgentNetworkEdge]
+    agents: list[AgentNetworkInfo]
+    nodes: list[AgentNetworkNode]
+    edges: list[AgentNetworkEdge]
     stats: AgentNetworkStats
     node_count: int = 0
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "CrossAgentNetworkResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "CrossAgentNetworkResponse":
         return cls(
             agents=[AgentNetworkInfo.from_dict(a) for a in data.get("agents", [])],
             nodes=[AgentNetworkNode.from_dict(n) for n in data.get("nodes", [])],
@@ -1156,7 +1156,7 @@ class RateLimitHeaders:
     """``X-Quota-Limit`` — namespace quota ceiling."""
 
     @classmethod
-    def from_headers(cls, headers: Dict[str, str]) -> "RateLimitHeaders":
+    def from_headers(cls, headers: dict[str, str]) -> "RateLimitHeaders":
         def _int(key: str) -> Optional[int]:
             val = headers.get(key)
             try:
@@ -1186,7 +1186,7 @@ class BatchMemoryFilter:
     (server-side safety guard).
     """
 
-    tags: Optional[List[str]] = None
+    tags: Optional[list[str]] = None
     """Restrict to memories that carry **all** listed tags."""
     min_importance: Optional[float] = None
     """Minimum importance (inclusive)."""
@@ -1201,8 +1201,8 @@ class BatchMemoryFilter:
     session_id: Optional[str] = None
     """Restrict to memories from a specific session."""
 
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {}
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
         if self.tags is not None:
             d["tags"] = self.tags
         if self.min_importance is not None:
@@ -1231,7 +1231,7 @@ class BatchRecallRequest:
     limit: int = 100
     """Maximum number of results to return (default: 100)."""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "agent_id": self.agent_id,
             "filter": self.filter.to_dict() if self.filter else {},
@@ -1243,12 +1243,12 @@ class BatchRecallRequest:
 class BatchRecallResponse:
     """Response from ``POST /v1/memories/recall/batch``."""
 
-    memories: List[Memory]
+    memories: list[Memory]
     total: int
     filtered: int
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchRecallResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "BatchRecallResponse":
         return cls(
             memories=[Memory.from_dict(m) for m in data.get("memories", [])],
             total=data.get("total", 0),
@@ -1269,7 +1269,7 @@ class BatchForgetRequest:
         if self.filter is None:
             self.filter = BatchMemoryFilter()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "agent_id": self.agent_id,
             "filter": self.filter.to_dict(),
@@ -1283,5 +1283,5 @@ class BatchForgetResponse:
     deleted_count: int
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BatchForgetResponse":
+    def from_dict(cls, data: dict[str, Any]) -> "BatchForgetResponse":
         return cls(deleted_count=data.get("deleted_count", 0))
