@@ -1,20 +1,23 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        # Full matrix on PRs labeled 'full-matrix'; default: min + max only (saves ~50% CI minutes)
+        python-version: ${{ contains(github.event.pull_request.labels.*.name, 'full-matrix') && fromJson('["3.9","3.10","3.11","3.12"]') || fromJson('["3.9","3.12"]') }}
 
     steps:
       - uses: actions/checkout@v4
