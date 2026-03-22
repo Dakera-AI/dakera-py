@@ -51,6 +51,10 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
+    BatchForgetRequest,
+    BatchForgetResponse,
+    BatchRecallRequest,
+    BatchRecallResponse,
     BatchTextQueryResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
@@ -66,6 +70,7 @@ from dakera.models import (
     IndexStats,
     MemoryEvent,
     NamespaceInfo,
+    RateLimitHeaders,
     ReadConsistency,
     RetryConfig,
     SearchResult,
@@ -142,12 +147,28 @@ class AsyncDakeraClient:
             timeout=httpx.Timeout(timeout, connect=self.connect_timeout),
         )
 
+        # OPS-1: last seen rate-limit headers (updated after every response)
+        self._last_rate_limit_headers: RateLimitHeaders | None = None
+
+    @property
+    def last_rate_limit_headers(self) -> RateLimitHeaders | None:
+        """Rate-limit headers from the most recent API response (OPS-1).
+
+        Returns ``None`` until the first successful request has been made.
+        """
+        return self._last_rate_limit_headers
+
     def _url(self, path: str) -> str:
         """Build full URL from path."""
         return f"{self.base_url}/{path.lstrip('/')}"
 
     def _handle_response(self, response: httpx.Response) -> Any:
         """Handle API response and raise appropriate exceptions."""
+        # OPS-1: capture rate-limit headers before consuming the body
+        self._last_rate_limit_headers = RateLimitHeaders.from_headers(
+            dict(response.headers)
+        )
+
         try:
             body = response.json() if response.content else None
         except json.JSONDecodeError:
@@ -652,6 +673,37 @@ class AsyncDakeraClient:
     async def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Delete a memory."""
         return await self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
+
+    async def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
+        """Bulk-recall memories using filter predicates (CE-2).
+
+        Uses ``POST /v1/memories/recall/batch`` — no embedding required.
+
+        Example:
+            >>> filt = BatchMemoryFilter(tags=["sdk-lead"], min_importance=0.7)
+            >>> resp = await client.batch_recall(BatchRecallRequest("agent-1", filter=filt))
+            >>> print(f"Found {resp.filtered} memories")
+        """
+        result = await self._request(
+            "POST", "/v1/memories/recall/batch", data=request.to_dict()
+        )
+        return BatchRecallResponse.from_dict(result)
+
+    async def batch_forget(self, request: BatchForgetRequest) -> BatchForgetResponse:
+        """Bulk-delete memories using filter predicates (CE-2).
+
+        Uses ``DELETE /v1/memories/forget/batch``.  At least one filter
+        predicate must be set (server safety guard).
+
+        Example:
+            >>> filt = BatchMemoryFilter(created_before=1700000000)
+            >>> resp = await client.batch_forget(BatchForgetRequest("agent-1", filter=filt))
+            >>> print(f"Deleted {resp.deleted_count} memories")
+        """
+        result = await self._request(
+            "DELETE", "/v1/memories/forget/batch", data=request.to_dict()
+        )
+        return BatchForgetResponse.from_dict(result)
 
     async def search_memories(
         self,
