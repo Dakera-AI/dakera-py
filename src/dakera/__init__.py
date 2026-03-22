@@ -38,6 +38,11 @@ from dakera.models import (
     AgentStats,
     AgentSummary,
     AnalyticsOverview,
+    BatchForgetRequest,
+    BatchForgetResponse,
+    BatchMemoryFilter,
+    BatchRecallRequest,
+    BatchRecallResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
     ConsolidateResponse,
@@ -58,6 +63,7 @@ from dakera.models import (
     NamespaceInfo,
     OpStatus,
     QueryResult,
+    RateLimitHeaders,
     ReadConsistency,
     RecalledMemory,
     RetryConfig,
@@ -105,6 +111,14 @@ __all__ = [
     "Memory",
     "RecalledMemory",
     "ConsolidateResponse",
+    # Batch memory operations (CE-2)
+    "BatchMemoryFilter",
+    "BatchRecallRequest",
+    "BatchRecallResponse",
+    "BatchForgetRequest",
+    "BatchForgetResponse",
+    # Rate-limit headers (OPS-1)
+    "RateLimitHeaders",
     # Session types
     "Session",
     # Agent types

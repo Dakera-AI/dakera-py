@@ -1129,3 +1129,159 @@ class CrossAgentNetworkResponse:
             stats=AgentNetworkStats.from_dict(data["stats"]),
             node_count=int(data.get("node_count", 0)),
         )
+
+
+# ===========================================================================
+# OPS-1: Rate-Limit Headers
+# ===========================================================================
+
+
+@dataclass
+class RateLimitHeaders:
+    """Rate-limit and quota headers returned on every API response (OPS-1).
+
+    Fields are ``None`` when the server does not include the header
+    (e.g. non-namespaced endpoints where quota does not apply).
+    """
+
+    limit: Optional[int] = None
+    """``X-RateLimit-Limit`` — max requests allowed in the current window."""
+    remaining: Optional[int] = None
+    """``X-RateLimit-Remaining`` — requests left in the current window."""
+    reset: Optional[int] = None
+    """``X-RateLimit-Reset`` — Unix timestamp (seconds) when the window resets."""
+    quota_used: Optional[int] = None
+    """``X-Quota-Used`` — namespace vectors / storage consumed."""
+    quota_limit: Optional[int] = None
+    """``X-Quota-Limit`` — namespace quota ceiling."""
+
+    @classmethod
+    def from_headers(cls, headers: Dict[str, str]) -> "RateLimitHeaders":
+        def _int(key: str) -> Optional[int]:
+            val = headers.get(key)
+            try:
+                return int(val) if val is not None else None
+            except (ValueError, TypeError):
+                return None
+
+        return cls(
+            limit=_int("X-RateLimit-Limit"),
+            remaining=_int("X-RateLimit-Remaining"),
+            reset=_int("X-RateLimit-Reset"),
+            quota_used=_int("X-Quota-Used"),
+            quota_limit=_int("X-Quota-Limit"),
+        )
+
+
+# ===========================================================================
+# CE-2: Batch Recall / Forget
+# ===========================================================================
+
+
+@dataclass
+class BatchMemoryFilter:
+    """Filter predicates for batch memory operations (CE-2).
+
+    All fields are optional.  For ``batch_forget`` at least one must be set
+    (server-side safety guard).
+    """
+
+    tags: Optional[List[str]] = None
+    """Restrict to memories that carry **all** listed tags."""
+    min_importance: Optional[float] = None
+    """Minimum importance (inclusive)."""
+    max_importance: Optional[float] = None
+    """Maximum importance (inclusive)."""
+    created_after: Optional[int] = None
+    """Only memories created at or after this Unix timestamp (seconds)."""
+    created_before: Optional[int] = None
+    """Only memories created before or at this Unix timestamp (seconds)."""
+    memory_type: Optional[str] = None
+    """Restrict to a specific memory type (e.g. ``"episodic"``)."""
+    session_id: Optional[str] = None
+    """Restrict to memories from a specific session."""
+
+    def to_dict(self) -> Dict[str, Any]:
+        d: Dict[str, Any] = {}
+        if self.tags is not None:
+            d["tags"] = self.tags
+        if self.min_importance is not None:
+            d["min_importance"] = self.min_importance
+        if self.max_importance is not None:
+            d["max_importance"] = self.max_importance
+        if self.created_after is not None:
+            d["created_after"] = self.created_after
+        if self.created_before is not None:
+            d["created_before"] = self.created_before
+        if self.memory_type is not None:
+            d["memory_type"] = self.memory_type
+        if self.session_id is not None:
+            d["session_id"] = self.session_id
+        return d
+
+
+@dataclass
+class BatchRecallRequest:
+    """Request body for ``POST /v1/memories/recall/batch``."""
+
+    agent_id: str
+    """Agent whose memory namespace to search."""
+    filter: Optional[BatchMemoryFilter] = None
+    """Filter predicates to apply.  An empty filter returns all memories up to ``limit``."""
+    limit: int = 100
+    """Maximum number of results to return (default: 100)."""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "filter": self.filter.to_dict() if self.filter else {},
+            "limit": self.limit,
+        }
+
+
+@dataclass
+class BatchRecallResponse:
+    """Response from ``POST /v1/memories/recall/batch``."""
+
+    memories: List[Memory]
+    total: int
+    filtered: int
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BatchRecallResponse":
+        return cls(
+            memories=[Memory.from_dict(m) for m in data.get("memories", [])],
+            total=data.get("total", 0),
+            filtered=data.get("filtered", 0),
+        )
+
+
+@dataclass
+class BatchForgetRequest:
+    """Request body for ``DELETE /v1/memories/forget/batch``."""
+
+    agent_id: str
+    """Agent whose memory namespace to purge from."""
+    filter: BatchMemoryFilter = None  # type: ignore[assignment]
+    """Filter predicates — **at least one must be set** (server safety guard)."""
+
+    def __post_init__(self) -> None:
+        if self.filter is None:
+            self.filter = BatchMemoryFilter()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "filter": self.filter.to_dict(),
+        }
+
+
+@dataclass
+class BatchForgetResponse:
+    """Response from ``DELETE /v1/memories/forget/batch``."""
+
+    deleted_count: int
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BatchForgetResponse":
+        return cls(deleted_count=data.get("deleted_count", 0))

@@ -26,6 +26,10 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
+    BatchForgetRequest,
+    BatchForgetResponse,
+    BatchRecallRequest,
+    BatchRecallResponse,
     BatchTextQueryResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
@@ -41,6 +45,7 @@ from dakera.models import (
     IndexStats,
     MemoryEvent,
     NamespaceInfo,
+    RateLimitHeaders,
     ReadConsistency,
     RetryConfig,
     SearchResult,
@@ -119,12 +124,28 @@ class DakeraClient:
         if headers:
             self._session.headers.update(headers)
 
+        # OPS-1: last seen rate-limit headers (updated after every response)
+        self._last_rate_limit_headers: Optional[RateLimitHeaders] = None
+
+    @property
+    def last_rate_limit_headers(self) -> Optional[RateLimitHeaders]:
+        """Rate-limit headers from the most recent API response (OPS-1).
+
+        Returns ``None`` until the first successful request has been made.
+        """
+        return self._last_rate_limit_headers
+
     def _url(self, path: str) -> str:
         """Build full URL from path."""
         return urljoin(self.base_url + "/", path.lstrip("/"))
 
     def _handle_response(self, response: requests.Response) -> Any:
         """Handle API response and raise appropriate exceptions."""
+        # OPS-1: capture rate-limit headers before consuming the body
+        self._last_rate_limit_headers = RateLimitHeaders.from_headers(
+            dict(response.headers)
+        )
+
         try:
             body = response.json() if response.content else None
         except json.JSONDecodeError:
@@ -934,6 +955,50 @@ class DakeraClient:
     def forget(self, agent_id: str, memory_id: str) -> Dict[str, Any]:
         """Delete a memory."""
         return self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
+
+    def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
+        """Bulk-recall memories using filter predicates (CE-2).
+
+        Uses ``POST /v1/memories/recall/batch`` — no embedding required.
+
+        Args:
+            request: Batch recall parameters including ``agent_id``, optional
+                ``filter`` predicates, and ``limit``.
+
+        Returns:
+            :class:`BatchRecallResponse` containing matched memories, total
+            count in the namespace, and count after filtering.
+
+        Example:
+            >>> filt = BatchMemoryFilter(tags=["preferences"], min_importance=0.7)
+            >>> resp = client.batch_recall(BatchRecallRequest("agent-1", filter=filt, limit=50))
+            >>> print(f"Found {resp.filtered} memories")
+        """
+        result = self._request("POST", "/v1/memories/recall/batch", data=request.to_dict())
+        return BatchRecallResponse.from_dict(result)
+
+    def batch_forget(self, request: BatchForgetRequest) -> BatchForgetResponse:
+        """Bulk-delete memories using filter predicates (CE-2).
+
+        Uses ``DELETE /v1/memories/forget/batch``.  The server requires at
+        least one filter predicate to be set as a safety guard.
+
+        Args:
+            request: Batch forget parameters including ``agent_id`` and
+                ``filter`` predicates (at least one required).
+
+        Returns:
+            :class:`BatchForgetResponse` with the number of deleted memories.
+
+        Example:
+            >>> filt = BatchMemoryFilter(created_before=1700000000)
+            >>> resp = client.batch_forget(BatchForgetRequest("agent-1", filter=filt))
+            >>> print(f"Deleted {resp.deleted_count} memories")
+        """
+        result = self._request(
+            "DELETE", "/v1/memories/forget/batch", data=request.to_dict()
+        )
+        return BatchForgetResponse.from_dict(result)
 
     def search_memories(
         self,
