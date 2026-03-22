@@ -652,7 +652,7 @@ class TestBatchMemoryOperations:
         assert resp.memories == []
 
     def test_batch_forget_sends_correct_request(self, client, mock_responses):
-        """batch_forget() sends DELETE to /v1/memories/forget/batch and returns BatchForgetResponse."""
+        """batch_forget() DELETEs /v1/memories/forget/batch and returns BatchForgetResponse."""
         from dakera import BatchForgetRequest, BatchForgetResponse, BatchMemoryFilter
 
         mock_responses.add(
