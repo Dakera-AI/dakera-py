@@ -5,6 +5,8 @@ Main client class for interacting with Dakera server.
 """
 
 import json
+import random
+import time
 from typing import Any, Dict, Generator, List, Optional
 from urllib.parse import urljoin
 
@@ -40,6 +42,7 @@ from dakera.models import (
     MemoryEvent,
     NamespaceInfo,
     ReadConsistency,
+    RetryConfig,
     SearchResult,
     StalenessConfig,
     TextDocument,
@@ -75,7 +78,9 @@ class DakeraClient:
         base_url: str,
         api_key: Optional[str] = None,
         timeout: float = 30.0,
+        connect_timeout: Optional[float] = None,
         max_retries: int = 3,
+        retry_config: Optional[RetryConfig] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> None:
         """
@@ -84,14 +89,26 @@ class DakeraClient:
         Args:
             base_url: Base URL of the Dakera server (e.g., "http://localhost:3000")
             api_key: Optional API key for authentication
-            timeout: Request timeout in seconds (default: 30.0)
-            max_retries: Maximum number of retries for failed requests (default: 3)
+            timeout: Per-request timeout in seconds (default: 30.0)
+            connect_timeout: Connection establishment timeout in seconds.
+                Defaults to ``timeout`` when not set.
+            max_retries: Maximum number of retries for transient errors (default: 3).
+                Ignored when ``retry_config`` is provided.
+            retry_config: Fine-grained retry configuration.  When provided,
+                ``max_retries`` is ignored in favour of
+                ``retry_config.max_retries``.
             headers: Additional headers to include in all requests
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
-        self.max_retries = max_retries
+        self.connect_timeout = connect_timeout if connect_timeout is not None else timeout
+
+        # Build effective RetryConfig
+        if retry_config is not None:
+            self._retry_config = retry_config
+        else:
+            self._retry_config = RetryConfig(max_retries=max_retries)
 
         self._session = requests.Session()
         self._session.headers.update({"Content-Type": "application/json"})
@@ -187,6 +204,14 @@ class DakeraClient:
                 code=error_code,
             )
 
+    @staticmethod
+    def _compute_backoff(rc: RetryConfig, attempt: int) -> float:
+        """Compute exponential backoff delay for the given attempt index."""
+        delay = min(rc.max_delay, rc.base_delay * (2 ** attempt))
+        if rc.jitter:
+            delay *= random.uniform(0.5, 1.5)
+        return delay
+
     def _request(
         self,
         method: str,
@@ -194,33 +219,45 @@ class DakeraClient:
         data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        """Make HTTP request with retry logic."""
+        """Make HTTP request with retry logic and exponential backoff."""
         url = self._url(path)
-        last_exception: Optional[Exception] = None
+        rc = self._retry_config
+        request_timeout = (self.connect_timeout, self.timeout)
 
-        for attempt in range(self.max_retries):
+        for attempt in range(rc.max_retries):
             try:
                 response = self._session.request(
                     method=method,
                     url=url,
                     json=data,
                     params=params,
-                    timeout=self.timeout,
+                    timeout=request_timeout,
                 )
                 return self._handle_response(response)
             except requests.exceptions.ConnectionError as e:
-                last_exception = ConnectionError(f"Failed to connect to {url}: {e}")
+                if attempt == rc.max_retries - 1:
+                    raise ConnectionError(f"Failed to connect to {url}: {e}") from e
             except requests.exceptions.Timeout as e:
-                last_exception = TimeoutError(f"Request timed out: {e}")
-            except (RateLimitError, ServerError) as e:
-                if attempt == self.max_retries - 1:
+                if attempt == rc.max_retries - 1:
+                    raise TimeoutError(f"Request timed out: {e}") from e
+            except RateLimitError as e:
+                if attempt == rc.max_retries - 1:
                     raise
-                last_exception = e
+                # Respect Retry-After header when present
+                wait = (
+                    float(e.retry_after) if e.retry_after is not None
+                    else self._compute_backoff(rc, attempt)
+                )
+                time.sleep(wait)
+                continue
+            except ServerError:
+                if attempt == rc.max_retries - 1:
+                    raise
             except DakeraError:
                 raise
 
-        if last_exception:
-            raise last_exception
+            time.sleep(self._compute_backoff(rc, attempt))
+
         raise DakeraError("Request failed after retries")
 
     # =========================================================================

@@ -441,3 +441,149 @@ class TestModels:
         assert d["id"] == "doc1"
         assert d["content"] == "Hello"
         assert d["metadata"] == {"type": "greeting"}
+
+
+class TestRetryConfig:
+    """Tests for RetryConfig and retry behavior."""
+
+    def test_retry_config_defaults(self):
+        """Test RetryConfig default values."""
+        from dakera import RetryConfig
+        rc = RetryConfig()
+        assert rc.max_retries == 3
+        assert rc.base_delay == 0.1
+        assert rc.max_delay == 60.0
+        assert rc.jitter is True
+
+    def test_retry_config_custom(self):
+        """Test RetryConfig accepts custom values."""
+        from dakera import RetryConfig
+        rc = RetryConfig(max_retries=5, base_delay=0.5, max_delay=30.0, jitter=False)
+        assert rc.max_retries == 5
+        assert rc.base_delay == 0.5
+        assert rc.max_delay == 30.0
+        assert rc.jitter is False
+
+    def test_client_accepts_retry_config(self):
+        """Test DakeraClient accepts RetryConfig."""
+        from dakera import RetryConfig
+        rc = RetryConfig(max_retries=5, base_delay=0.2, jitter=False)
+        client = DakeraClient("http://localhost:3000", retry_config=rc)
+        assert client._retry_config.max_retries == 5
+        assert client._retry_config.base_delay == 0.2
+
+    def test_client_connect_timeout(self):
+        """Test DakeraClient accepts connect_timeout."""
+        client = DakeraClient("http://localhost:3000", timeout=30.0, connect_timeout=5.0)
+        assert client.connect_timeout == 5.0
+        assert client.timeout == 30.0
+
+    def test_client_connect_timeout_defaults_to_timeout(self):
+        """Test connect_timeout defaults to timeout when not set."""
+        client = DakeraClient("http://localhost:3000", timeout=15.0)
+        assert client.connect_timeout == 15.0
+
+    def test_max_retries_param_sets_retry_config(self):
+        """Test max_retries param is reflected in _retry_config."""
+        client = DakeraClient("http://localhost:3000", max_retries=7)
+        assert client._retry_config.max_retries == 7
+
+    def test_retry_on_server_error(self, mock_responses):
+        """Test that 5xx errors are retried up to max_retries."""
+        from dakera import RetryConfig
+        rc = RetryConfig(max_retries=3, base_delay=0.0, jitter=False)
+        client = DakeraClient("http://localhost:3000", retry_config=rc)
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"error": "internal error"},
+            status=500,
+        )
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"error": "internal error"},
+            status=500,
+        )
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"healthy": True},
+            status=200,
+        )
+
+        result = client.health()
+        assert result["healthy"] is True
+        assert len(mock_responses.calls) == 3
+
+    def test_retry_exhausted_raises(self, mock_responses):
+        """Test that exhausting retries re-raises the last error."""
+        from dakera import RetryConfig, ServerError
+        rc = RetryConfig(max_retries=2, base_delay=0.0, jitter=False)
+        client = DakeraClient("http://localhost:3000", retry_config=rc)
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"error": "server error"},
+            status=500,
+        )
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"error": "server error"},
+            status=500,
+        )
+
+        with pytest.raises(ServerError):
+            client.health()
+        assert len(mock_responses.calls) == 2
+
+    def test_no_retry_on_4xx(self, mock_responses):
+        """Test that 4xx errors (except 429) are NOT retried."""
+        from dakera import NotFoundError, RetryConfig
+        rc = RetryConfig(max_retries=3, base_delay=0.0, jitter=False)
+        client = DakeraClient("http://localhost:3000", retry_config=rc)
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/namespaces/does-not-exist",
+            json={"error": "not found"},
+            status=404,
+        )
+
+        with pytest.raises(NotFoundError):
+            client.get_namespace("does-not-exist")
+        assert len(mock_responses.calls) == 1
+
+    def test_retry_after_respected_on_429(self, mock_responses):
+        """Test that Retry-After header is used as wait time on 429."""
+        import time  # noqa: PLC0415
+
+        from dakera import RetryConfig
+        rc = RetryConfig(max_retries=2, base_delay=10.0, jitter=False)
+        client = DakeraClient("http://localhost:3000", retry_config=rc)
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/ns/vectors",
+            headers={"Retry-After": "0"},
+            json={"error": "rate limited"},
+            status=429,
+        )
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/ns/vectors",
+            json={"upserted_count": 1},
+            status=200,
+        )
+
+        start = time.monotonic()
+        result = client.upsert("ns", vectors=[{"id": "v1", "values": [0.1]}])
+        elapsed = time.monotonic() - start
+
+        assert result["upserted_count"] == 1
+        # Retry-After=0, not the 10s base_delay — should be fast
+        assert elapsed < 2.0
+        assert len(mock_responses.calls) == 2

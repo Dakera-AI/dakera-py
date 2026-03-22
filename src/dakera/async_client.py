@@ -24,7 +24,9 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import random
 from typing import Any, AsyncGenerator
 
 try:
@@ -65,6 +67,7 @@ from dakera.models import (
     MemoryEvent,
     NamespaceInfo,
     ReadConsistency,
+    RetryConfig,
     SearchResult,
     StalenessConfig,
     TextDocument,
@@ -97,7 +100,9 @@ class AsyncDakeraClient:
         base_url: str,
         api_key: str | None = None,
         timeout: float = 30.0,
+        connect_timeout: float | None = None,
         max_retries: int = 3,
+        retry_config: RetryConfig | None = None,
         headers: dict[str, str] | None = None,
     ) -> None:
         """
@@ -106,14 +111,25 @@ class AsyncDakeraClient:
         Args:
             base_url: Base URL of the Dakera server (e.g., "http://localhost:3000")
             api_key: Optional API key for authentication
-            timeout: Request timeout in seconds (default: 30.0)
-            max_retries: Maximum number of retries for failed requests (default: 3)
+            timeout: Per-request timeout in seconds (default: 30.0)
+            connect_timeout: Connection establishment timeout in seconds.
+                Defaults to ``timeout`` when not set.
+            max_retries: Maximum number of retries for transient errors (default: 3).
+                Ignored when ``retry_config`` is provided.
+            retry_config: Fine-grained retry configuration.  When provided,
+                ``max_retries`` is ignored in favour of
+                ``retry_config.max_retries``.
             headers: Additional headers to include in all requests
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
-        self.max_retries = max_retries
+        self.connect_timeout = connect_timeout if connect_timeout is not None else timeout
+
+        if retry_config is not None:
+            self._retry_config = retry_config
+        else:
+            self._retry_config = RetryConfig(max_retries=max_retries)
 
         default_headers: dict[str, str] = {"Content-Type": "application/json"}
         if api_key:
@@ -123,7 +139,7 @@ class AsyncDakeraClient:
 
         self._client = httpx.AsyncClient(
             headers=default_headers,
-            timeout=httpx.Timeout(timeout),
+            timeout=httpx.Timeout(timeout, connect=self.connect_timeout),
         )
 
     def _url(self, path: str) -> str:
@@ -214,6 +230,14 @@ class AsyncDakeraClient:
             code=error_code,
         )
 
+    @staticmethod
+    def _compute_backoff(rc: RetryConfig, attempt: int) -> float:
+        """Compute exponential backoff delay for the given attempt index."""
+        delay = min(rc.max_delay, rc.base_delay * (2 ** attempt))
+        if rc.jitter:
+            delay *= random.uniform(0.5, 1.5)
+        return delay
+
     async def _request(
         self,
         method: str,
@@ -221,11 +245,11 @@ class AsyncDakeraClient:
         data: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
     ) -> Any:
-        """Make async HTTP request with retry logic."""
+        """Make async HTTP request with retry logic and exponential backoff."""
         url = self._url(path)
-        last_exception: Exception | None = None
+        rc = self._retry_config
 
-        for attempt in range(self.max_retries):
+        for attempt in range(rc.max_retries):
             try:
                 response = await self._client.request(
                     method=method,
@@ -235,18 +259,28 @@ class AsyncDakeraClient:
                 )
                 return self._handle_response(response)
             except httpx.ConnectError as e:
-                last_exception = ConnectionError(f"Failed to connect to {url}: {e}")
+                if attempt == rc.max_retries - 1:
+                    raise ConnectionError(f"Failed to connect to {url}: {e}") from e
             except httpx.TimeoutException as e:
-                last_exception = TimeoutError(f"Request timed out: {e}")
-            except (RateLimitError, ServerError) as e:
-                if attempt == self.max_retries - 1:
+                if attempt == rc.max_retries - 1:
+                    raise TimeoutError(f"Request timed out: {e}") from e
+            except RateLimitError as e:
+                if attempt == rc.max_retries - 1:
                     raise
-                last_exception = e
+                wait = (
+                    float(e.retry_after) if e.retry_after is not None
+                    else self._compute_backoff(rc, attempt)
+                )
+                await asyncio.sleep(wait)
+                continue
+            except ServerError:
+                if attempt == rc.max_retries - 1:
+                    raise
             except DakeraError:
                 raise
 
-        if last_exception:
-            raise last_exception
+            await asyncio.sleep(self._compute_backoff(rc, attempt))
+
         raise DakeraError("Request failed after retries")
 
     # =========================================================================

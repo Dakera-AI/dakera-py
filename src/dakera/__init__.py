@@ -60,6 +60,7 @@ from dakera.models import (
     QueryResult,
     ReadConsistency,
     RecalledMemory,
+    RetryConfig,
     SearchResult,
     Session,
     StalenessConfig,
@@ -73,7 +74,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.6.2"
+__version__ = "0.7.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -87,6 +88,8 @@ __all__ = [
     "Document",
     "FullTextSearchResult",
     "HybridSearchResult",
+    # Retry & timeout configuration
+    "RetryConfig",
     # Consistency types
     "ReadConsistency",
     "DistanceMetric",

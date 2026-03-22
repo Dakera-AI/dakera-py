@@ -34,6 +34,28 @@ class DistanceMetric(str, Enum):
     DOT_PRODUCT = "dot_product"
 
 
+# ============================================================================
+# Retry & Timeout Configuration
+# ============================================================================
+
+
+@dataclass
+class RetryConfig:
+    """Configuration for request retry behavior with exponential backoff."""
+
+    max_retries: int = 3
+    """Maximum number of retry attempts (default: 3)."""
+
+    base_delay: float = 0.1
+    """Base delay in seconds before first retry (default: 0.1)."""
+
+    max_delay: float = 60.0
+    """Maximum delay in seconds between retries (default: 60.0)."""
+
+    jitter: bool = True
+    """Whether to add random jitter to backoff delay (default: True)."""
+
+
 @dataclass
 class StalenessConfig:
     """Configuration for bounded staleness reads."""
