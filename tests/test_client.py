@@ -587,3 +587,194 @@ class TestRetryConfig:
         # Retry-After=0, not the 10s base_delay — should be fast
         assert elapsed < 2.0
         assert len(mock_responses.calls) == 2
+
+
+class TestBatchMemoryOperations:
+    """Tests for CE-2 batch recall/forget (v0.7.0)."""
+
+    def test_batch_recall_sends_correct_request(self, client, mock_responses):
+        """batch_recall() POSTs to /v1/memories/recall/batch and returns BatchRecallResponse."""
+        from dakera import BatchMemoryFilter, BatchRecallRequest, BatchRecallResponse
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/recall/batch",
+            json={
+                "memories": [
+                    {
+                        "id": "mem_1",
+                        "agent_id": "qa",
+                        "content": "test memory",
+                        "importance": 0.8,
+                        "memory_type": "episodic",
+                        "tags": ["test"],
+                        "created_at": 1700000000,
+                        "last_accessed_at": 1700000000,
+                        "access_count": 1,
+                    }
+                ],
+                "total": 10,
+                "filtered": 1,
+            },
+            status=200,
+        )
+
+        filt = BatchMemoryFilter(tags=["test"], min_importance=0.5)
+        req = BatchRecallRequest("qa", filter=filt, limit=50)
+        resp = client.batch_recall(req)
+
+        assert isinstance(resp, BatchRecallResponse)
+        assert resp.total == 10
+        assert resp.filtered == 1
+        assert len(resp.memories) == 1
+        assert resp.memories[0].id == "mem_1"
+        # Verify correct HTTP method + URL
+        assert mock_responses.calls[0].request.method == "POST"
+        assert "/v1/memories/recall/batch" in mock_responses.calls[0].request.url
+
+    def test_batch_recall_no_filter(self, client, mock_responses):
+        """batch_recall() works with no filter (returns all up to limit)."""
+        from dakera import BatchRecallRequest, BatchRecallResponse
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/recall/batch",
+            json={"memories": [], "total": 0, "filtered": 0},
+            status=200,
+        )
+
+        req = BatchRecallRequest("agent-x")
+        resp = client.batch_recall(req)
+
+        assert isinstance(resp, BatchRecallResponse)
+        assert resp.total == 0
+        assert resp.filtered == 0
+        assert resp.memories == []
+
+    def test_batch_forget_sends_correct_request(self, client, mock_responses):
+        """batch_forget() DELETEs /v1/memories/forget/batch and returns BatchForgetResponse."""
+        from dakera import BatchForgetRequest, BatchForgetResponse, BatchMemoryFilter
+
+        mock_responses.add(
+            responses.DELETE,
+            "http://localhost:3000/v1/memories/forget/batch",
+            json={"deleted_count": 5},
+            status=200,
+        )
+
+        filt = BatchMemoryFilter(created_before=1700000000)
+        req = BatchForgetRequest("qa", filter=filt)
+        resp = client.batch_forget(req)
+
+        assert isinstance(resp, BatchForgetResponse)
+        assert resp.deleted_count == 5
+        assert mock_responses.calls[0].request.method == "DELETE"
+        assert "/v1/memories/forget/batch" in mock_responses.calls[0].request.url
+
+    def test_batch_recall_request_to_dict(self):
+        """BatchRecallRequest.to_dict() serializes correctly."""
+        from dakera import BatchMemoryFilter, BatchRecallRequest
+
+        filt = BatchMemoryFilter(tags=["qa"], min_importance=0.7, memory_type="episodic")
+        req = BatchRecallRequest("agent-1", filter=filt, limit=25)
+        d = req.to_dict()
+
+        assert d["agent_id"] == "agent-1"
+        assert d["limit"] == 25
+        assert d["filter"]["tags"] == ["qa"]
+        assert d["filter"]["min_importance"] == 0.7
+        assert d["filter"]["memory_type"] == "episodic"
+
+    def test_batch_forget_request_default_filter(self):
+        """BatchForgetRequest gets a default empty BatchMemoryFilter when filter is None."""
+        from dakera import BatchForgetRequest, BatchMemoryFilter
+
+        req = BatchForgetRequest("agent-1")
+        assert req.filter is not None
+        assert isinstance(req.filter, BatchMemoryFilter)
+
+    def test_batch_forget_response_from_dict(self):
+        """BatchForgetResponse.from_dict() parses deleted_count correctly."""
+        from dakera import BatchForgetResponse
+
+        resp = BatchForgetResponse.from_dict({"deleted_count": 42})
+        assert resp.deleted_count == 42
+
+    def test_batch_recall_response_from_dict(self):
+        """BatchRecallResponse.from_dict() parses total/filtered/memories."""
+        from dakera import BatchRecallResponse
+
+        resp = BatchRecallResponse.from_dict(
+            {"memories": [], "total": 100, "filtered": 0}
+        )
+        assert resp.total == 100
+        assert resp.filtered == 0
+        assert resp.memories == []
+
+
+class TestRateLimitHeaders:
+    """Tests for OPS-1 RateLimitHeaders (v0.7.0)."""
+
+    def test_from_headers_parses_all_fields(self):
+        """RateLimitHeaders.from_headers() parses all known header names."""
+        from dakera import RateLimitHeaders
+
+        rl = RateLimitHeaders.from_headers(
+            {
+                "X-RateLimit-Limit": "1000",
+                "X-RateLimit-Remaining": "750",
+                "X-RateLimit-Reset": "1700000060",
+                "X-Quota-Used": "500",
+                "X-Quota-Limit": "10000",
+            }
+        )
+        assert rl.limit == 1000
+        assert rl.remaining == 750
+        assert rl.reset == 1700000060
+        assert rl.quota_used == 500
+        assert rl.quota_limit == 10000
+
+    def test_from_headers_missing_fields_are_none(self):
+        """RateLimitHeaders.from_headers() returns None for missing headers."""
+        from dakera import RateLimitHeaders
+
+        rl = RateLimitHeaders.from_headers({})
+        assert rl.limit is None
+        assert rl.remaining is None
+        assert rl.reset is None
+        assert rl.quota_used is None
+        assert rl.quota_limit is None
+
+    def test_from_headers_ignores_non_numeric_values(self):
+        """RateLimitHeaders.from_headers() returns None for non-numeric header values."""
+        from dakera import RateLimitHeaders
+
+        rl = RateLimitHeaders.from_headers({"X-RateLimit-Limit": "not-a-number"})
+        assert rl.limit is None
+
+    def test_last_rate_limit_headers_populated_after_request(self, client, mock_responses):
+        """client.last_rate_limit_headers is populated from response headers."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"status": "healthy", "version": "0.7.0"},
+            headers={
+                "X-RateLimit-Limit": "500",
+                "X-RateLimit-Remaining": "499",
+                "X-RateLimit-Reset": "1700000120",
+            },
+            status=200,
+        )
+
+        client.health()
+        rl = client.last_rate_limit_headers
+
+        assert rl is not None
+        assert rl.limit == 500
+        assert rl.remaining == 499
+        assert rl.reset == 1700000120
+
+    def test_last_rate_limit_headers_initially_none(self):
+        """client.last_rate_limit_headers is None before any request."""
+        fresh_client = DakeraClient("http://localhost:3000")
+        assert fresh_client.last_rate_limit_headers is None
