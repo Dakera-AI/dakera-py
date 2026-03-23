@@ -621,8 +621,24 @@ class AsyncDakeraClient:
         importance: float | None = None,
         metadata: dict[str, Any] | None = None,
         session_id: str | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
     ) -> dict[str, Any]:
-        """Store a memory for an agent."""
+        """Store a memory for an agent.
+
+        Args:
+            agent_id: Agent identifier.
+            content: Memory content text.
+            memory_type: One of ``"episodic"``, ``"semantic"``, ``"procedural"``,
+                or ``"working"``.
+            importance: Importance score 0.0–1.0.
+            metadata: Arbitrary metadata dictionary.
+            session_id: Optional session ID to associate with.
+            ttl_seconds: Optional TTL in seconds. The memory is hard-deleted
+                after this many seconds from creation.
+            expires_at: Optional explicit expiry as a Unix timestamp (seconds).
+                Takes precedence over ``ttl_seconds`` when both are provided.
+        """
         data: dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
             data["importance"] = importance
@@ -630,6 +646,10 @@ class AsyncDakeraClient:
             data["metadata"] = metadata
         if session_id is not None:
             data["session_id"] = session_id
+        if ttl_seconds is not None:
+            data["ttl_seconds"] = ttl_seconds
+        if expires_at is not None:
+            data["expires_at"] = expires_at
         return await self._request("POST", f"/v1/agents/{agent_id}/memories", data=data)
 
     async def recall(

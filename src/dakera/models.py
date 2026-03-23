@@ -603,6 +603,7 @@ class StoreMemoryRequest:
     importance: Optional[float] = None
     metadata: Optional[dict[str, Any]] = None
     ttl_seconds: Optional[int] = None
+    expires_at: Optional[int] = None
     session_id: Optional[str] = None
     embedding: Optional[list[float]] = None
 
@@ -614,6 +615,8 @@ class StoreMemoryRequest:
             d["metadata"] = self.metadata
         if self.ttl_seconds is not None:
             d["ttl_seconds"] = self.ttl_seconds
+        if self.expires_at is not None:
+            d["expires_at"] = self.expires_at
         if self.session_id is not None:
             d["session_id"] = self.session_id
         if self.embedding is not None:
@@ -985,6 +988,7 @@ class MemoryEvent:
 
     The ``event_type`` field identifies the operation:
 
+    - ``connected`` — emitted immediately on subscription (agent_id will be empty)
     - ``stored`` — a memory was stored (content, importance, tags present)
     - ``recalled`` — a memory was recalled (importance present)
     - ``forgotten`` — a memory was deleted
@@ -1002,8 +1006,8 @@ class MemoryEvent:
     """
 
     event_type: str
-    agent_id: str
     timestamp: int
+    agent_id: str = ""
     memory_id: Optional[str] = None
     content: Optional[str] = None
     importance: Optional[float] = None
@@ -1012,11 +1016,19 @@ class MemoryEvent:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryEvent":
-        """Create a :class:`MemoryEvent` from a parsed SSE data payload."""
+        """Create a :class:`MemoryEvent` from a parsed SSE data payload.
+
+        Handles both regular memory events (``event_type`` field) and the
+        ``connected`` handshake event (``type`` field, no ``agent_id``).
+        """
         import dataclasses
 
         valid = {f.name for f in dataclasses.fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in valid})
+        kwargs = {k: v for k, v in data.items() if k in valid}
+        # connected event uses "type" instead of "event_type"
+        if "event_type" not in kwargs and "type" in data:
+            kwargs["event_type"] = data["type"]
+        return cls(**kwargs)
 
 
 # ===========================================================================
