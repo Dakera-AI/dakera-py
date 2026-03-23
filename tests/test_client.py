@@ -883,7 +883,7 @@ class TestAutoPilotOperations:
         assert "/v1/admin/autopilot/trigger" in mock_responses.calls[0].request.url
 
     def test_autopilot_trigger_all(self, client, mock_responses):
-        """autopilot_trigger('all') sends action=all and returns both dedup+consolidation results."""
+        """autopilot_trigger('all') sends action=all and returns dedup+consolidation."""
         import json as _json
 
         mock_responses.add(
@@ -892,7 +892,11 @@ class TestAutoPilotOperations:
             json={
                 "success": True,
                 "action": "all",
-                "dedup": {"namespaces_processed": 2, "memories_scanned": 300, "duplicates_removed": 5},
+                "dedup": {
+                    "namespaces_processed": 2,
+                    "memories_scanned": 300,
+                    "duplicates_removed": 5,
+                },
                 "consolidation": {
                     "namespaces_processed": 2,
                     "memories_scanned": 300,
