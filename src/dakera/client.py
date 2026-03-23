@@ -753,7 +753,7 @@ class DakeraClient:
 
         response = self._request(
             "POST",
-            f"/v1/namespaces/{namespace}/fulltext/hybrid",
+            f"/v1/namespaces/{namespace}/hybrid",
             data=data,
         )
         return [HybridSearchResult.from_dict(r) for r in response.get("results", [])]
