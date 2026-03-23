@@ -778,3 +778,307 @@ class TestRateLimitHeaders:
         """client.last_rate_limit_headers is None before any request."""
         fresh_client = DakeraClient("http://localhost:3000")
         assert fresh_client.last_rate_limit_headers is None
+
+
+class TestAutoPilotOperations:
+    """Tests for AutoPilot management API (PILOT-1/2/3) — v0.7.2."""
+
+    def test_autopilot_status(self, client, mock_responses):
+        """autopilot_status() GETs /v1/admin/autopilot/status and returns config + stats."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/admin/autopilot/status",
+            json={
+                "config": {
+                    "enabled": True,
+                    "dedup_threshold": 0.93,
+                    "dedup_interval_hours": 6,
+                    "consolidation_interval_hours": 12,
+                },
+                "last_dedup_at": 1700000000,
+                "last_consolidation_at": 1700000100,
+                "total_dedup_removed": 42,
+                "total_consolidated": 10,
+            },
+            status=200,
+        )
+
+        result = client.autopilot_status()
+
+        assert result["config"]["enabled"] is True
+        assert result["config"]["dedup_threshold"] == 0.93
+        assert result["total_dedup_removed"] == 42
+        assert mock_responses.calls[0].request.method == "GET"
+        assert "/v1/admin/autopilot/status" in mock_responses.calls[0].request.url
+
+    def test_autopilot_update_config(self, client, mock_responses):
+        """autopilot_update_config() PUTs /v1/admin/autopilot/config with updated fields."""
+        mock_responses.add(
+            responses.PUT,
+            "http://localhost:3000/v1/admin/autopilot/config",
+            json={
+                "success": True,
+                "config": {
+                    "enabled": False,
+                    "dedup_threshold": 0.90,
+                    "dedup_interval_hours": 8,
+                    "consolidation_interval_hours": 24,
+                },
+                "message": "AutoPilot config updated",
+            },
+            status=200,
+        )
+
+        result = client.autopilot_update_config(enabled=False, dedup_threshold=0.90)
+
+        assert result["success"] is True
+        assert result["config"]["enabled"] is False
+        assert result["config"]["dedup_threshold"] == 0.90
+        assert mock_responses.calls[0].request.method == "PUT"
+        assert "/v1/admin/autopilot/config" in mock_responses.calls[0].request.url
+
+    def test_autopilot_update_config_serializes_only_set_fields(self, client, mock_responses):
+        """autopilot_update_config() omits unset optional fields from the request body."""
+        import json as _json
+
+        mock_responses.add(
+            responses.PUT,
+            "http://localhost:3000/v1/admin/autopilot/config",
+            json={"success": True, "config": {}, "message": "ok"},
+            status=200,
+        )
+
+        client.autopilot_update_config(dedup_interval_hours=4)
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert "dedup_interval_hours" in body
+        assert body["dedup_interval_hours"] == 4
+        assert "enabled" not in body
+        assert "dedup_threshold" not in body
+
+    def test_autopilot_trigger_dedup(self, client, mock_responses):
+        """autopilot_trigger('dedup') POSTs /v1/admin/autopilot/trigger with action=dedup."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/autopilot/trigger",
+            json={
+                "success": True,
+                "action": "dedup",
+                "dedup": {
+                    "namespaces_processed": 3,
+                    "memories_scanned": 500,
+                    "duplicates_removed": 12,
+                },
+                "message": "Dedup cycle completed",
+            },
+            status=200,
+        )
+
+        result = client.autopilot_trigger("dedup")
+
+        assert result["success"] is True
+        assert result["action"] == "dedup"
+        assert result["dedup"]["duplicates_removed"] == 12
+        assert mock_responses.calls[0].request.method == "POST"
+        assert "/v1/admin/autopilot/trigger" in mock_responses.calls[0].request.url
+
+    def test_autopilot_trigger_all(self, client, mock_responses):
+        """autopilot_trigger('all') sends action=all and returns dedup+consolidation."""
+        import json as _json
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/autopilot/trigger",
+            json={
+                "success": True,
+                "action": "all",
+                "dedup": {
+                    "namespaces_processed": 2,
+                    "memories_scanned": 300,
+                    "duplicates_removed": 5,
+                },
+                "consolidation": {
+                    "namespaces_processed": 2,
+                    "memories_scanned": 300,
+                    "clusters_merged": 4,
+                    "memories_consolidated": 8,
+                },
+                "message": "Full AutoPilot cycle completed",
+            },
+            status=200,
+        )
+
+        result = client.autopilot_trigger("all")
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["action"] == "all"
+        assert result["consolidation"]["clusters_merged"] == 4
+
+
+class TestDecayOperations:
+    """Tests for Decay Engine management API (DECAY-1/2) — v0.7.3."""
+
+    def test_decay_config(self, client, mock_responses):
+        """decay_config() GETs /v1/admin/decay/config and returns strategy/half-life/min."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/admin/decay/config",
+            json={
+                "strategy": "exponential",
+                "half_life_hours": 168.0,
+                "min_importance": 0.05,
+            },
+            status=200,
+        )
+
+        result = client.decay_config()
+
+        assert result["strategy"] == "exponential"
+        assert result["half_life_hours"] == 168.0
+        assert result["min_importance"] == 0.05
+        assert mock_responses.calls[0].request.method == "GET"
+        assert "/v1/admin/decay/config" in mock_responses.calls[0].request.url
+
+    def test_decay_update_config(self, client, mock_responses):
+        """decay_update_config() PUTs /v1/admin/decay/config with updated fields."""
+        mock_responses.add(
+            responses.PUT,
+            "http://localhost:3000/v1/admin/decay/config",
+            json={
+                "success": True,
+                "config": {
+                    "strategy": "linear",
+                    "half_life_hours": 72.0,
+                    "min_importance": 0.1,
+                },
+                "message": "Decay config updated",
+            },
+            status=200,
+        )
+
+        result = client.decay_update_config(strategy="linear", half_life_hours=72.0)
+
+        assert result["success"] is True
+        assert result["config"]["strategy"] == "linear"
+        assert result["config"]["half_life_hours"] == 72.0
+        assert mock_responses.calls[0].request.method == "PUT"
+        assert "/v1/admin/decay/config" in mock_responses.calls[0].request.url
+
+    def test_decay_update_config_serializes_only_set_fields(self, client, mock_responses):
+        """decay_update_config() omits unset optional fields from the request body."""
+        import json as _json
+
+        mock_responses.add(
+            responses.PUT,
+            "http://localhost:3000/v1/admin/decay/config",
+            json={"success": True, "config": {}, "message": "ok"},
+            status=200,
+        )
+
+        client.decay_update_config(min_importance=0.02)
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["min_importance"] == 0.02
+        assert "strategy" not in body
+        assert "half_life_hours" not in body
+
+    def test_decay_stats(self, client, mock_responses):
+        """decay_stats() GETs /v1/admin/decay/stats and returns counters + last-cycle snapshot."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/admin/decay/stats",
+            json={
+                "total_decayed": 1024,
+                "total_deleted": 128,
+                "last_run_at": 1700000000,
+                "cycles_run": 42,
+                "last_cycle": {
+                    "namespaces_processed": 5,
+                    "memories_processed": 200,
+                    "memories_decayed": 30,
+                    "memories_deleted": 5,
+                },
+            },
+            status=200,
+        )
+
+        result = client.decay_stats()
+
+        assert result["total_decayed"] == 1024
+        assert result["total_deleted"] == 128
+        assert result["cycles_run"] == 42
+        assert result["last_cycle"]["memories_decayed"] == 30
+        assert mock_responses.calls[0].request.method == "GET"
+        assert "/v1/admin/decay/stats" in mock_responses.calls[0].request.url
+
+    def test_decay_stats_no_last_cycle(self, client, mock_responses):
+        """decay_stats() handles the case where last_cycle is absent (never run)."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/admin/decay/stats",
+            json={
+                "total_decayed": 0,
+                "total_deleted": 0,
+                "cycles_run": 0,
+            },
+            status=200,
+        )
+
+        result = client.decay_stats()
+
+        assert result["cycles_run"] == 0
+        assert "last_cycle" not in result
+
+
+class TestStoreMemoryExpiresAt:
+    """Tests for expires_at and ttl_seconds params on store_memory (DECAY-3) — v0.7.3."""
+
+    def test_store_memory_with_expires_at(self, client, mock_responses):
+        """store_memory() includes expires_at in request body when set."""
+        import json as _json
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/agents/agent-1/memories",
+            json={"id": "mem_1", "content": "test content"},
+            status=200,
+        )
+
+        client.store_memory("agent-1", "test content", expires_at=1800000000)
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert "expires_at" in body
+        assert body["expires_at"] == 1800000000
+
+    def test_store_memory_without_expires_at(self, client, mock_responses):
+        """store_memory() omits expires_at from request body when not set."""
+        import json as _json
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/agents/agent-1/memories",
+            json={"id": "mem_1", "content": "test content"},
+            status=200,
+        )
+
+        client.store_memory("agent-1", "test content")
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert "expires_at" not in body
+
+    def test_store_memory_with_ttl_seconds(self, client, mock_responses):
+        """store_memory() includes ttl_seconds in request body when set."""
+        import json as _json
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/agents/agent-1/memories",
+            json={"id": "mem_1", "content": "ephemeral"},
+            status=200,
+        )
+
+        client.store_memory("agent-1", "ephemeral", ttl_seconds=3600)
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["ttl_seconds"] == 3600
+        assert "expires_at" not in body
