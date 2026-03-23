@@ -225,7 +225,7 @@ class TestFullTextOperations:
         """Test hybrid search."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/fulltext/hybrid",
+            "http://localhost:3000/v1/namespaces/test-ns/hybrid",
             json={
                 "results": [
                     {
@@ -256,7 +256,7 @@ class TestFullTextOperations:
         """Test hybrid search with no vector (BM25-only fallback)."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/fulltext/hybrid",
+            "http://localhost:3000/v1/namespaces/test-ns/hybrid",
             json={
                 "results": [{"id": "doc2", "score": 0.75, "vector_score": 0, "text_score": 0.75}]
             },
