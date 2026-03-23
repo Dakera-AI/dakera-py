@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-03-23
+
+### Added
+- `DakeraClient.store_memory()` — new `ttl_seconds` and `expires_at` parameters (DECAY-3).
+  `expires_at` accepts a Unix timestamp (seconds) and takes precedence over `ttl_seconds`
+  when both are provided; the memory is hard-deleted by the decay engine on expiry.
+- `DakeraClient.decay_config()` — `GET /v1/admin/decay/config` — current decay strategy,
+  half-life, and minimum importance threshold (DECAY-1). Requires Admin scope.
+- `DakeraClient.decay_update_config()` — `PUT /v1/admin/decay/config` — update decay
+  settings at runtime with no restart required (DECAY-1). All parameters optional.
+- `DakeraClient.decay_stats()` — `GET /v1/admin/decay/stats` — cumulative decay counters
+  and last-cycle snapshot (DECAY-2). Requires Admin scope.
+
 ## [0.7.2] - 2026-03-23
 
 ### Added
