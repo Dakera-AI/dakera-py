@@ -251,6 +251,9 @@ class TestFullTextOperations:
         assert results[0].id == "doc1"
         assert results[0].vector_score == 0.9
         assert results[0].text_score == 0.8
+        # Verify correct endpoint was called
+        assert len(mock_responses.calls) == 1
+        assert "/v1/namespaces/test-ns/hybrid" in mock_responses.calls[0].request.url
 
     def test_hybrid_search_bm25_only(self, client, mock_responses):
         """Test hybrid search with no vector (BM25-only fallback)."""
@@ -267,6 +270,8 @@ class TestFullTextOperations:
 
         assert len(results) == 1
         assert results[0].id == "doc2"
+        # Verify correct endpoint was called
+        assert "/v1/namespaces/test-ns/hybrid" in mock_responses.calls[-1].request.url
         # Verify vector was not sent in request body
         sent_body = mock_responses.calls[-1].request.body
         import json
