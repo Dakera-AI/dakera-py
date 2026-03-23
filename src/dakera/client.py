@@ -1654,6 +1654,40 @@ class DakeraClient:
             data["strategy"] = strategy
         return self._request("POST", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
 
+    def autopilot_status(self) -> dict[str, Any]:
+        """Get AutoPilot status: current config and last-run statistics (PILOT-1)."""
+        return self._request("GET", "/v1/admin/autopilot/status")
+
+    def autopilot_update_config(
+        self,
+        enabled: Optional[bool] = None,
+        dedup_threshold: Optional[float] = None,
+        dedup_interval_hours: Optional[int] = None,
+        consolidation_interval_hours: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Update AutoPilot configuration at runtime (PILOT-2).
+
+        All parameters are optional — omit any to keep its current value.
+        """
+        data: dict[str, Any] = {}
+        if enabled is not None:
+            data["enabled"] = enabled
+        if dedup_threshold is not None:
+            data["dedup_threshold"] = dedup_threshold
+        if dedup_interval_hours is not None:
+            data["dedup_interval_hours"] = dedup_interval_hours
+        if consolidation_interval_hours is not None:
+            data["consolidation_interval_hours"] = consolidation_interval_hours
+        return self._request("PUT", "/v1/admin/autopilot/config", data=data)
+
+    def autopilot_trigger(self, action: str) -> dict[str, Any]:
+        """Manually trigger an AutoPilot cycle (PILOT-3).
+
+        Args:
+            action: One of ``"dedup"``, ``"consolidate"``, or ``"all"``.
+        """
+        return self._request("POST", "/v1/admin/autopilot/trigger", data={"action": action})
+
     # =========================================================================
     # API Key Operations
     # =========================================================================
