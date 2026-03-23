@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-03-23
+
+### Changed
+- `DakeraClient.hybrid_search()` — `vector` parameter is now optional (keyword-only, default `None`).
+  When omitted the server performs BM25-only full-text search. Existing callers that pass `vector`
+  continue to work unchanged. **Signature change**: `query` is now the second positional arg;
+  `vector` moves to a keyword argument. (core v0.8.0 / dakera-mcp PR#20)
+
 ## [0.7.3] - 2026-03-23
 
 ### Added
