@@ -252,6 +252,24 @@ class TestFullTextOperations:
         assert results[0].vector_score == 0.9
         assert results[0].text_score == 0.8
 
+    def test_hybrid_search_bm25_only(self, client, mock_responses):
+        """Test hybrid search with no vector (BM25-only fallback)."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/test-ns/fulltext/hybrid",
+            json={"results": [{"id": "doc2", "score": 0.75, "vector_score": 0, "text_score": 0.75}]},
+            status=200,
+        )
+
+        results = client.hybrid_search("test-ns", query="hello")
+
+        assert len(results) == 1
+        assert results[0].id == "doc2"
+        # Verify vector was not sent in request body
+        sent_body = mock_responses.calls[-1].request.body
+        import json
+        assert "vector" not in json.loads(sent_body)
+
 
 class TestNamespaceOperations:
     """Tests for namespace operations."""
