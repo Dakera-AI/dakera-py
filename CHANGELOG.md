@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-03-23
+
+### Added
+- `StoreMemoryRequest.expires_at` — optional explicit expiry Unix timestamp (seconds). Takes
+  precedence over `ttl_seconds` when both are set (core DECAY-3 / DAK-740).
+- `AsyncDakeraClient.store_memory()` — added `ttl_seconds` and `expires_at` parameters, matching
+  the sync `DakeraClient.store_memory()` interface.
+- `MemoryEvent`: SSE `connected` handshake event is now surfaced. When the server emits
+  `event: connected` on stream subscription, callers receive a `MemoryEvent` with
+  `event_type="connected"` and `agent_id=""`. Use this to distinguish *connected-and-idle*
+  from *not-yet-connected* (core DAK-720).
+
+### Changed
+- `MemoryEvent.agent_id` default changed from required to `""` to accommodate the `connected`
+  handshake event, which carries no agent context.
+
 ## [0.8.1] - 2026-03-23
 
 ### Fixed

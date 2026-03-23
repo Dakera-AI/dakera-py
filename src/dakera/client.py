@@ -1962,7 +1962,7 @@ class DakeraClient:
                     try:
                         payload = json.loads("\n".join(data_lines))
                         yield MemoryEvent.from_dict(payload)
-                    except (json.JSONDecodeError, TypeError, KeyError):
+                    except (json.JSONDecodeError, TypeError, KeyError, ValueError):
                         pass
 
     # =========================================================================
