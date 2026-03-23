@@ -903,8 +903,24 @@ class DakeraClient:
         importance: Optional[float] = None,
         metadata: Optional[dict[str, Any]] = None,
         session_id: Optional[str] = None,
+        ttl_seconds: Optional[int] = None,
+        expires_at: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Store a memory for an agent."""
+        """Store a memory for an agent.
+
+        Args:
+            agent_id: Agent identifier.
+            content: Memory content text.
+            memory_type: One of ``"episodic"``, ``"semantic"``, ``"procedural"``,
+                or ``"working"``.
+            importance: Importance score 0.0–1.0.
+            metadata: Arbitrary metadata dictionary.
+            session_id: Optional session ID to associate with.
+            ttl_seconds: Optional TTL in seconds. The memory is hard-deleted after
+                this many seconds from creation.
+            expires_at: Optional explicit expiry as a Unix timestamp (seconds).
+                Takes precedence over ``ttl_seconds`` when both are provided.
+        """
         data: dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
             data["importance"] = importance
@@ -912,6 +928,10 @@ class DakeraClient:
             data["metadata"] = metadata
         if session_id is not None:
             data["session_id"] = session_id
+        if ttl_seconds is not None:
+            data["ttl_seconds"] = ttl_seconds
+        if expires_at is not None:
+            data["expires_at"] = expires_at
         return self._request("POST", f"/v1/agents/{agent_id}/memories", data=data)
 
     def recall(
@@ -1687,6 +1707,49 @@ class DakeraClient:
             action: One of ``"dedup"``, ``"consolidate"``, or ``"all"``.
         """
         return self._request("POST", "/v1/admin/autopilot/trigger", data={"action": action})
+
+    def decay_config(self) -> dict[str, Any]:
+        """Get current decay engine configuration (DECAY-1).
+
+        Returns the active decay strategy, half-life, and minimum importance
+        threshold. Requires Admin scope.
+        """
+        return self._request("GET", "/v1/admin/decay/config")
+
+    def decay_update_config(
+        self,
+        strategy: Optional[str] = None,
+        half_life_hours: Optional[float] = None,
+        min_importance: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Update decay engine configuration at runtime (DECAY-1).
+
+        Changes take effect on the next decay cycle — no restart required.
+        All parameters are optional; omit any to keep its current value.
+
+        Args:
+            strategy: Decay strategy: ``"exponential"``, ``"linear"``, or
+                ``"step"``.
+            half_life_hours: Half-life in hours (must be > 0).
+            min_importance: Minimum importance threshold 0.0–1.0; memories
+                below this value are hard-deleted on the next cycle.
+        """
+        data: dict[str, Any] = {}
+        if strategy is not None:
+            data["strategy"] = strategy
+        if half_life_hours is not None:
+            data["half_life_hours"] = half_life_hours
+        if min_importance is not None:
+            data["min_importance"] = min_importance
+        return self._request("PUT", "/v1/admin/decay/config", data=data)
+
+    def decay_stats(self) -> dict[str, Any]:
+        """Get decay engine activity counters and last-cycle snapshot (DECAY-2).
+
+        Returns cumulative totals (memories decayed/deleted, cycles run) and
+        per-cycle statistics from the most recent run. Requires Admin scope.
+        """
+        return self._request("GET", "/v1/admin/decay/stats")
 
     # =========================================================================
     # API Key Operations
