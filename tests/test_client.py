@@ -257,7 +257,9 @@ class TestFullTextOperations:
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/namespaces/test-ns/fulltext/hybrid",
-            json={"results": [{"id": "doc2", "score": 0.75, "vector_score": 0, "text_score": 0.75}]},
+            json={
+                "results": [{"id": "doc2", "score": 0.75, "vector_score": 0, "text_score": 0.75}]
+            },
             status=200,
         )
 
