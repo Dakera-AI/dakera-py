@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/pypi/pyversions/dakera)](https://pypi.org/project/dakera/)
 
-Official Python client for [Dakera](https://dakera.ai) — a high-performance vector database for AI agent memory.
+Official Python client for [Dakera](https://dakera.ai) — an AI agent memory platform.
 
 ## Installation
 
@@ -379,7 +379,7 @@ ruff check src/
 
 | Repository | Description |
 |------------|-------------|
-| [dakera](https://github.com/dakera-ai/dakera) | Core vector database engine (Rust) |
+| [dakera](https://github.com/dakera-ai/dakera) | Core AI agent memory engine (Rust) |
 | [dakera-js](https://github.com/dakera-ai/dakera-js) | TypeScript/JavaScript SDK |
 | [dakera-go](https://github.com/dakera-ai/dakera-go) | Go SDK |
 | [dakera-rs](https://github.com/dakera-ai/dakera-rs) | Rust SDK |
