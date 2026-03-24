@@ -1,7 +1,6 @@
 """Tests for Dakera client."""
 
-import json as _json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import responses
