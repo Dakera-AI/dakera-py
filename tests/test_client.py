@@ -1,11 +1,17 @@
 """Tests for Dakera client."""
 
+import json as _json
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 import responses
 
 from dakera import (
+    AsyncDakeraClient,
     DakeraClient,
+    DakeraEvent,
     Document,
+    MemoryEvent,
     NotFoundError,
     ServerError,
     ValidationError,
@@ -1107,3 +1113,147 @@ class TestStoreMemoryExpiresAt:
         body = _json.loads(mock_responses.calls[0].request.body)
         assert body["ttl_seconds"] == 3600
         assert "expires_at" not in body
+
+
+# ===========================================================================
+# SSE Connected Event Parsing (DAK-720) — v0.8.3
+# ===========================================================================
+
+
+class TestDakeraEventConnectedParsing:
+    """DakeraEvent and MemoryEvent correctly parse the 'connected' handshake event."""
+
+    def test_dakera_event_from_dict_connected(self):
+        """DakeraEvent.from_dict() with type='connected' populates type field."""
+        data = {"type": "connected", "timestamp": 1700000000000}
+        event = DakeraEvent.from_dict(data)
+        assert event.type == "connected"
+
+    def test_dakera_event_connected_has_no_namespace(self):
+        """DakeraEvent connected event has no namespace or other fields set."""
+        data = {"type": "connected", "timestamp": 1700000000000}
+        event = DakeraEvent.from_dict(data)
+        assert event.namespace is None
+        assert event.dimension is None
+        assert event.operation_id is None
+
+    def test_memory_event_from_dict_connected_normalizes_type_key(self):
+        """MemoryEvent.from_dict() maps 'type' key to 'event_type' for connected events."""
+        data = {"type": "connected", "timestamp": 1700000000000}
+        event = MemoryEvent.from_dict(data)
+        assert event.event_type == "connected"
+
+    def test_memory_event_connected_defaults_agent_id_to_empty(self):
+        """MemoryEvent connected event has empty agent_id (no agent_id in payload)."""
+        data = {"type": "connected", "timestamp": 1700000000000}
+        event = MemoryEvent.from_dict(data)
+        assert event.agent_id == ""
+
+    def test_memory_event_connected_preserves_timestamp(self):
+        """MemoryEvent connected event carries the timestamp from the SSE payload."""
+        ts = 1774296453000
+        data = {"type": "connected", "timestamp": ts}
+        event = MemoryEvent.from_dict(data)
+        assert event.timestamp == ts
+
+    def test_memory_event_regular_event_unaffected(self):
+        """MemoryEvent.from_dict() still works correctly for normal events."""
+        data = {
+            "event_type": "stored",
+            "agent_id": "qa",
+            "timestamp": 1700000000000,
+            "memory_id": "mem_abc",
+            "content": "test memory",
+            "importance": 0.8,
+        }
+        event = MemoryEvent.from_dict(data)
+        assert event.event_type == "stored"
+        assert event.agent_id == "qa"
+        assert event.memory_id == "mem_abc"
+        assert event.importance == 0.8
+
+
+# ===========================================================================
+# AsyncDakeraClient.store_memory() parity (DAK-747) — v0.8.3
+# ===========================================================================
+
+
+class TestAsyncClientStoreMemoryParity:
+    """AsyncDakeraClient.store_memory() now has full parity with sync client for
+    ttl_seconds and expires_at (fixed in v0.8.3, DAK-747)."""
+
+    async def test_store_memory_with_ttl_seconds_includes_field(self):
+        """store_memory() sends ttl_seconds in request body when set."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured.update(data or {})
+            return {"id": "mem_1", "content": "test"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory("agent-1", "test content", ttl_seconds=3600)
+
+        assert captured.get("ttl_seconds") == 3600
+        assert "expires_at" not in captured
+
+    async def test_store_memory_with_expires_at_includes_field(self):
+        """store_memory() sends expires_at in request body when set."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured.update(data or {})
+            return {"id": "mem_1", "content": "test"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory("agent-1", "test content", expires_at=1800000000)
+
+        assert captured.get("expires_at") == 1800000000
+        assert "ttl_seconds" not in captured
+
+    async def test_store_memory_with_both_fields(self):
+        """store_memory() sends both ttl_seconds and expires_at when both are set."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured.update(data or {})
+            return {"id": "mem_1", "content": "test"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory(
+                "agent-1", "test content", ttl_seconds=3600, expires_at=1800000000
+            )
+
+        assert captured.get("ttl_seconds") == 3600
+        assert captured.get("expires_at") == 1800000000
+
+    async def test_store_memory_omits_expiry_fields_when_not_set(self):
+        """store_memory() does not include ttl_seconds or expires_at when neither is set."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured.update(data or {})
+            return {"id": "mem_1", "content": "test"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory("agent-1", "plain content")
+
+        assert "ttl_seconds" not in captured
+        assert "expires_at" not in captured
+
+    async def test_store_memory_posts_to_correct_endpoint(self):
+        """store_memory() calls POST /v1/agents/{agent_id}/memories."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path))
+            return {"id": "mem_1"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory("my-agent", "content")
+
+        assert calls == [("POST", "/v1/agents/my-agent/memories")]
