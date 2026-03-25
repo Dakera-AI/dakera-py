@@ -1182,9 +1182,10 @@ class AsyncDakeraClient:
     # =========================================================================
 
     async def ops_stats(self) -> dict[str, Any]:
-        """Get server stats (version, total_vectors, namespace_count, uptime_seconds, timestamp).
+        """Get server stats (version, total_vectors, namespace_count, uptime_seconds, timestamp, state).
 
         Requires Read scope — works with read-only API keys, unlike cluster_status.
+        The ``state`` field is ``"healthy"`` when storage is accessible, ``"degraded"`` otherwise.
         """
         return await self._request("GET", "/v1/ops/stats")
 
