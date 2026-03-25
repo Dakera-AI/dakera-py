@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, arm64]
     strategy:
       matrix:
         # Full matrix on PRs labeled 'full-matrix'; default: min + max only (saves ~50% CI minutes)
