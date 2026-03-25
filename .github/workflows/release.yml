@@ -10,7 +10,7 @@ permissions:
 jobs:
   publish:
     name: Publish to PyPI
-    runs-on: [self-hosted, linux, arm64]
+    runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write
