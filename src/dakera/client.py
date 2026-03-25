@@ -1594,6 +1594,13 @@ class DakeraClient:
     # Admin Operations (Extended)
     # =========================================================================
 
+    def ops_stats(self) -> dict[str, Any]:
+        """Get server stats (version, total_vectors, namespace_count, uptime_seconds, timestamp).
+
+        Requires Read scope — works with read-only API keys, unlike cluster_status.
+        """
+        return self._request("GET", "/v1/ops/stats")
+
     def cluster_status(self) -> dict[str, Any]:
         """Get cluster status."""
         return self._request("GET", "/v1/admin/cluster/status")
