@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-03-26
+
+### Added
+- **Memory Feedback Loop (INT-1):**
+  - `feedback_memory(memory_id, agent_id, signal, note)` / `async feedback_memory()` — submit
+    feedback (upvote/downvote/flag) for a memory (`POST /v1/memories/{id}/feedback`). Returns
+    `FeedbackResponse`.
+  - `patch_memory_importance(memory_id, agent_id, importance)` / `async patch_memory_importance()`
+    — directly set a memory's importance score (`PATCH /v1/memories/{id}/importance`). Returns
+    `FeedbackResponse`.
+  - `get_memory_feedback_history(memory_id)` / `async get_memory_feedback_history()` — retrieve
+    all feedback events for a memory (`GET /v1/memories/{id}/feedback/history`). Returns
+    `FeedbackHistoryResponse`.
+  - `get_agent_feedback_summary(agent_id)` / `async get_agent_feedback_summary()` — aggregate
+    feedback counts and health score for an agent (`GET /v1/agents/{id}/feedback/summary`).
+    Returns `AgentFeedbackSummary`.
+  - `get_feedback_health(agent_id)` / `async get_feedback_health()` — health score (mean
+    importance of non-expired memories) for an agent (`GET /v1/feedback/health`). Returns
+    `FeedbackHealthResponse`.
+  - New types: `FeedbackSignal` (enum: `UPVOTE` / `DOWNVOTE` / `FLAG`), `FeedbackResponse`,
+    `FeedbackHistoryEntry`, `FeedbackHistoryResponse`, `MemoryFeedbackBody`,
+    `MemoryImportancePatch`, `AgentFeedbackSummary`, `FeedbackHealthResponse` — all exported
+    from the top-level `dakera` package.
+
+### Security
+- **CVE-2026-25645** — bumped `requests` to `>=2.33.0` to fix an SSRF/redirect vulnerability.
+- Dropped Python 3.9 support (EOL October 2025). Minimum supported version is now **Python 3.10**.
+
 ## [0.9.0] - 2026-03-26
 
 ### Added
