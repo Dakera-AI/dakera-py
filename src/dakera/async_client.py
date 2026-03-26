@@ -28,7 +28,7 @@ import asyncio
 import json
 import random
 from collections.abc import AsyncGenerator
-from typing import Any, Optional
+from typing import Any
 
 try:
     import httpx
