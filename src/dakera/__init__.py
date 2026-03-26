@@ -77,7 +77,11 @@ from dakera.models import (
     MemoryEvent,
     MemoryGraph,
     NamespaceInfo,
+    NamespaceKeyInfo,
+    NamespaceKeyUsageResponse,
     NamespaceNerConfig,
+    CreateNamespaceKeyResponse,
+    ListNamespaceKeysResponse,
     OpStatus,
     QueryResult,
     RateLimitHeaders,
@@ -184,6 +188,11 @@ __all__ = [
     "AgentNetworkEdge",
     "AgentNetworkStats",
     "CrossAgentNetworkResponse",
+    # Namespace API Keys (SEC-1)
+    "NamespaceKeyInfo",
+    "CreateNamespaceKeyResponse",
+    "ListNamespaceKeysResponse",
+    "NamespaceKeyUsageResponse",
     # Exceptions
     "DakeraError",
     "ConnectionError",

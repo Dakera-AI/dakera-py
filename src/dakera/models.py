@@ -1645,3 +1645,106 @@ class FeedbackHealthResponse:
             memory_count=data["memory_count"],
             avg_importance=data["avg_importance"],
         )
+
+
+# =============================================================================
+# Namespace API Keys (SEC-1)
+# =============================================================================
+
+
+@dataclass
+class NamespaceKeyInfo:
+    """Namespace-scoped API key metadata (no secret) — SEC-1.
+
+    Returned by :meth:`~dakera.DakeraClient.list_namespace_keys` and
+    embedded in :class:`ListNamespaceKeysResponse`.
+    """
+
+    key_id: str
+    name: str
+    namespace: str
+    created_at: int
+    active: bool
+    expires_at: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NamespaceKeyInfo":
+        return cls(
+            key_id=data["key_id"],
+            name=data["name"],
+            namespace=data["namespace"],
+            created_at=data["created_at"],
+            active=data.get("active", True),
+            expires_at=data.get("expires_at"),
+        )
+
+
+@dataclass
+class CreateNamespaceKeyResponse:
+    """Response from ``POST /v1/namespaces/:namespace/keys`` (SEC-1).
+
+    The ``key`` field contains the raw API key and is **shown only once**.
+    Store it securely; it cannot be retrieved again.
+    """
+
+    key_id: str
+    key: str
+    name: str
+    namespace: str
+    created_at: int
+    warning: str
+    expires_at: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CreateNamespaceKeyResponse":
+        return cls(
+            key_id=data["key_id"],
+            key=data["key"],
+            name=data["name"],
+            namespace=data["namespace"],
+            created_at=data["created_at"],
+            warning=data.get("warning", "Save this key — it will not be shown again."),
+            expires_at=data.get("expires_at"),
+        )
+
+
+@dataclass
+class ListNamespaceKeysResponse:
+    """Response from ``GET /v1/namespaces/:namespace/keys`` (SEC-1)."""
+
+    namespace: str
+    keys: list[NamespaceKeyInfo]
+    total: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ListNamespaceKeysResponse":
+        return cls(
+            namespace=data["namespace"],
+            keys=[NamespaceKeyInfo.from_dict(k) for k in data.get("keys", [])],
+            total=data.get("total", 0),
+        )
+
+
+@dataclass
+class NamespaceKeyUsageResponse:
+    """Response from ``GET /v1/namespaces/:namespace/keys/:key_id/usage`` (SEC-1)."""
+
+    key_id: str
+    namespace: str
+    total_requests: int
+    successful_requests: int
+    failed_requests: int
+    bytes_transferred: int
+    avg_latency_ms: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NamespaceKeyUsageResponse":
+        return cls(
+            key_id=data["key_id"],
+            namespace=data["namespace"],
+            total_requests=data.get("total_requests", 0),
+            successful_requests=data.get("successful_requests", 0),
+            failed_requests=data.get("failed_requests", 0),
+            bytes_transferred=data.get("bytes_transferred", 0),
+            avg_latency_ms=data.get("avg_latency_ms", 0.0),
+        )
