@@ -2201,8 +2201,9 @@ class TestFeedbackLoopAsyncClient:
     @pytest.mark.asyncio
     async def test_feedback_memory_async(self):
         """AsyncDakeraClient.feedback_memory() calls correct endpoint."""
-        from dakera import FeedbackSignal
         import httpx
+
+        from dakera import FeedbackSignal
         with patch("httpx.AsyncClient.request") as mock_req:
             mock_req.return_value = httpx.Response(200, json=FEEDBACK_RESPONSE)
             async with AsyncDakeraClient("http://localhost:3000") as client:

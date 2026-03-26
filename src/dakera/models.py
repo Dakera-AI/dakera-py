@@ -1564,7 +1564,11 @@ class FeedbackHistoryEntry:
 
 @dataclass
 class FeedbackResponse:
-    """Response from ``POST /v1/memories/:id/feedback`` and ``PATCH /v1/memories/:id/importance`` (INT-1)."""
+    """Response from feedback and importance endpoints (INT-1).
+
+    Returned by ``POST /v1/memories/:id/feedback`` and
+    ``PATCH /v1/memories/:id/importance``.
+    """
 
     memory_id: str
     """ID of the memory that was updated."""
