@@ -2363,7 +2363,8 @@ class TestNamespaceKeysSEC1:
     """Tests for SEC-1 namespace-scoped API key client methods."""
 
     def test_create_namespace_key(self, client, mock_responses):
-        """create_namespace_key() POSTs to /v1/namespaces/:ns/keys and returns CreateNamespaceKeyResponse."""
+        """create_namespace_key() POSTs to /v1/namespaces/:ns/keys and
+        returns CreateNamespaceKeyResponse."""
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/namespaces/prod-ns/keys",
@@ -2395,7 +2396,8 @@ class TestNamespaceKeysSEC1:
         assert body["expires_in_days"] == 30
 
     def test_list_namespace_keys(self, client, mock_responses):
-        """list_namespace_keys() GETs /v1/namespaces/:ns/keys and returns ListNamespaceKeysResponse."""
+        """list_namespace_keys() GETs /v1/namespaces/:ns/keys and
+        returns ListNamespaceKeysResponse."""
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/namespaces/prod-ns/keys",
@@ -2441,8 +2443,10 @@ class TestNamespaceKeysSEC1:
 
     async def test_create_namespace_key_async(self):
         """AsyncDakeraClient.create_namespace_key() calls correct endpoint."""
-        import httpx
         from unittest.mock import AsyncMock, patch
+
+        import httpx
+
         from dakera import AsyncDakeraClient, CreateNamespaceKeyResponse
         mock_req = AsyncMock(return_value=httpx.Response(200, json=CREATE_NAMESPACE_KEY_RESPONSE))
         with patch("httpx.AsyncClient.request", mock_req):
