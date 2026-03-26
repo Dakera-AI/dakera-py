@@ -2065,6 +2065,42 @@ FEEDBACK_RESPONSE = {
     "signal": "upvote",
 }
 
+# SEC-1 fixtures
+NAMESPACE_KEY_INFO = {
+    "key_id": "key-abc",
+    "name": "ci-runner",
+    "namespace": "prod-ns",
+    "created_at": 1774000000,
+    "active": True,
+    "expires_at": None,
+}
+
+CREATE_NAMESPACE_KEY_RESPONSE = {
+    "key_id": "key-abc",
+    "key": "dak_live_xxxxxxxxxxxx",
+    "name": "ci-runner",
+    "namespace": "prod-ns",
+    "created_at": 1774000000,
+    "expires_at": None,
+    "warning": "Save this key — it will not be shown again.",
+}
+
+LIST_NAMESPACE_KEYS_RESPONSE = {
+    "namespace": "prod-ns",
+    "keys": [NAMESPACE_KEY_INFO],
+    "total": 1,
+}
+
+NAMESPACE_KEY_USAGE_RESPONSE = {
+    "key_id": "key-abc",
+    "namespace": "prod-ns",
+    "total_requests": 1000,
+    "successful_requests": 980,
+    "failed_requests": 20,
+    "bytes_transferred": 512000,
+    "avg_latency_ms": 12.4,
+}
+
 FEEDBACK_HISTORY_RESPONSE = {
     "memory_id": "mem-abc",
     "entries": [
@@ -2321,3 +2357,116 @@ class TestFeedbackLoopModels:
         assert health.health_score == pytest.approx(0.78)
         assert health.memory_count == 120
         assert health.avg_importance == pytest.approx(0.72)
+
+
+class TestNamespaceKeysSEC1:
+    """Tests for SEC-1 namespace-scoped API key client methods."""
+
+    def test_create_namespace_key(self, client, mock_responses):
+        """create_namespace_key() POSTs to /v1/namespaces/:ns/keys and
+        returns CreateNamespaceKeyResponse."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/prod-ns/keys",
+            json=CREATE_NAMESPACE_KEY_RESPONSE,
+            status=200,
+        )
+        from dakera import CreateNamespaceKeyResponse
+        result = client.create_namespace_key("prod-ns", "ci-runner")
+        assert isinstance(result, CreateNamespaceKeyResponse)
+        assert result.key_id == "key-abc"
+        assert result.key == "dak_live_xxxxxxxxxxxx"
+        assert result.namespace == "prod-ns"
+        assert result.name == "ci-runner"
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["name"] == "ci-runner"
+
+    def test_create_namespace_key_with_expiry(self, client, mock_responses):
+        """create_namespace_key() sends expires_in_days when provided."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/prod-ns/keys",
+            json=CREATE_NAMESPACE_KEY_RESPONSE,
+            status=200,
+        )
+        client.create_namespace_key("prod-ns", "ci-runner", expires_in_days=30)
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["expires_in_days"] == 30
+
+    def test_list_namespace_keys(self, client, mock_responses):
+        """list_namespace_keys() GETs /v1/namespaces/:ns/keys and
+        returns ListNamespaceKeysResponse."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/namespaces/prod-ns/keys",
+            json=LIST_NAMESPACE_KEYS_RESPONSE,
+            status=200,
+        )
+        from dakera import ListNamespaceKeysResponse, NamespaceKeyInfo
+        result = client.list_namespace_keys("prod-ns")
+        assert isinstance(result, ListNamespaceKeysResponse)
+        assert result.namespace == "prod-ns"
+        assert result.total == 1
+        assert len(result.keys) == 1
+        assert isinstance(result.keys[0], NamespaceKeyInfo)
+        assert result.keys[0].key_id == "key-abc"
+
+    def test_delete_namespace_key(self, client, mock_responses):
+        """delete_namespace_key() DELETEs /v1/namespaces/:ns/keys/:key_id."""
+        mock_responses.add(
+            responses.DELETE,
+            "http://localhost:3000/v1/namespaces/prod-ns/keys/key-abc",
+            json={"success": True, "message": "Key revoked."},
+            status=200,
+        )
+        result = client.delete_namespace_key("prod-ns", "key-abc")
+        assert result["success"] is True
+
+    def test_get_namespace_key_usage(self, client, mock_responses):
+        """get_namespace_key_usage() GETs /v1/namespaces/:ns/keys/:key_id/usage."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/namespaces/prod-ns/keys/key-abc/usage",
+            json=NAMESPACE_KEY_USAGE_RESPONSE,
+            status=200,
+        )
+        from dakera import NamespaceKeyUsageResponse
+        result = client.get_namespace_key_usage("prod-ns", "key-abc")
+        assert isinstance(result, NamespaceKeyUsageResponse)
+        assert result.key_id == "key-abc"
+        assert result.namespace == "prod-ns"
+        assert result.total_requests == 1000
+        assert result.successful_requests == 980
+        assert result.avg_latency_ms == pytest.approx(12.4)
+
+    async def test_create_namespace_key_async(self):
+        """AsyncDakeraClient.create_namespace_key() calls correct endpoint."""
+        from unittest.mock import AsyncMock, patch
+
+        import httpx
+
+        from dakera import AsyncDakeraClient, CreateNamespaceKeyResponse
+        mock_req = AsyncMock(return_value=httpx.Response(200, json=CREATE_NAMESPACE_KEY_RESPONSE))
+        with patch("httpx.AsyncClient.request", mock_req):
+            async with AsyncDakeraClient("http://localhost:3000") as client:
+                result = await client.create_namespace_key("prod-ns", "ci-runner")
+        assert isinstance(result, CreateNamespaceKeyResponse)
+        assert result.key == "dak_live_xxxxxxxxxxxx"
+
+    def test_namespace_key_info_from_dict(self):
+        """NamespaceKeyInfo.from_dict() parses all fields correctly."""
+        from dakera import NamespaceKeyInfo
+        info = NamespaceKeyInfo.from_dict(NAMESPACE_KEY_INFO)
+        assert info.key_id == "key-abc"
+        assert info.namespace == "prod-ns"
+        assert info.active is True
+        assert info.expires_at is None
+
+    def test_namespace_key_usage_defaults(self):
+        """NamespaceKeyUsageResponse.from_dict() uses 0 defaults for missing fields."""
+        from dakera import NamespaceKeyUsageResponse
+        resp = NamespaceKeyUsageResponse.from_dict({"key_id": "k", "namespace": "n"})
+        assert resp.total_requests == 0
+        assert resp.avg_latency_ms == 0.0

@@ -35,6 +35,7 @@ from dakera.models import (
     BatchTextQueryResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
+    CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
     DistanceMetric,
@@ -54,10 +55,12 @@ from dakera.models import (
     GraphPath,
     HybridSearchResult,
     IndexStats,
+    ListNamespaceKeysResponse,
     MemoryEntitiesResponse,
     MemoryEvent,
     MemoryGraph,
     NamespaceInfo,
+    NamespaceKeyUsageResponse,
     NamespaceNerConfig,
     RateLimitHeaders,
     ReadConsistency,
@@ -2277,6 +2280,75 @@ class DakeraClient:
 
         data = self._request("POST", "/v1/knowledge/network/cross-agent", data=payload)
         return CrossAgentNetworkResponse.from_dict(data)
+
+    # =========================================================================
+    # Namespace API Keys — SEC-1
+    # =========================================================================
+
+    def create_namespace_key(
+        self,
+        namespace: str,
+        name: str,
+        expires_in_days: int | None = None,
+    ) -> CreateNamespaceKeyResponse:
+        """Create a namespace-scoped API key (SEC-1).
+
+        The returned ``key`` value is shown **only once**. Store it securely.
+
+        Args:
+            namespace: The namespace to scope this key to.
+            name: Human-readable label for the key.
+            expires_in_days: Optional expiry in days from now.
+
+        Returns:
+            :class:`CreateNamespaceKeyResponse` containing the raw API key.
+        """
+        data: dict[str, Any] = {"name": name}
+        if expires_in_days is not None:
+            data["expires_in_days"] = expires_in_days
+        result = self._request("POST", f"/v1/namespaces/{namespace}/keys", data=data)
+        return CreateNamespaceKeyResponse.from_dict(result)
+
+    def list_namespace_keys(self, namespace: str) -> ListNamespaceKeysResponse:
+        """List all API keys scoped to a namespace (SEC-1).
+
+        Args:
+            namespace: The namespace whose keys to list.
+
+        Returns:
+            :class:`ListNamespaceKeysResponse` with key metadata (no secrets).
+        """
+        result = self._request("GET", f"/v1/namespaces/{namespace}/keys")
+        return ListNamespaceKeysResponse.from_dict(result)
+
+    def delete_namespace_key(self, namespace: str, key_id: str) -> dict[str, Any]:
+        """Revoke a namespace-scoped API key (SEC-1).
+
+        Args:
+            namespace: The namespace the key belongs to.
+            key_id: The key to revoke.
+
+        Returns:
+            Dict with ``success`` and ``message`` fields.
+        """
+        return self._request("DELETE", f"/v1/namespaces/{namespace}/keys/{key_id}")
+
+    def get_namespace_key_usage(
+        self, namespace: str, key_id: str
+    ) -> NamespaceKeyUsageResponse:
+        """Get usage statistics for a namespace-scoped API key (SEC-1).
+
+        Args:
+            namespace: The namespace the key belongs to.
+            key_id: The key whose usage to retrieve.
+
+        Returns:
+            :class:`NamespaceKeyUsageResponse` with request counts and latency.
+        """
+        result = self._request(
+            "GET", f"/v1/namespaces/{namespace}/keys/{key_id}/usage"
+        )
+        return NamespaceKeyUsageResponse.from_dict(result)
 
     # =========================================================================
     # Context Manager Support
