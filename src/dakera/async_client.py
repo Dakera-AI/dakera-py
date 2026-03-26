@@ -1615,6 +1615,64 @@ class AsyncDakeraClient:
         return CrossAgentNetworkResponse.from_dict(data)
 
     # =========================================================================
+    # SDK-10: Agent Memory Subscription
+    # =========================================================================
+
+    async def agents_subscribe(
+        self,
+        agent_id: str,
+        *,
+        tags: list[str] | None = None,
+        reconnect: bool = True,
+        reconnect_delay: float = 1.0,
+    ) -> AsyncGenerator[MemoryEvent, None]:
+        """Subscribe to real-time memory lifecycle events for an agent.
+
+        Opens a long-lived connection to ``GET /v1/events/stream`` and yields
+        :class:`~dakera.models.MemoryEvent` objects filtered to the given
+        ``agent_id``.  Reconnects automatically on connection drop when
+        ``reconnect=True``.
+
+        Requires a Read-scoped API key.
+
+        Args:
+            agent_id: Agent whose events to receive.
+            tags: Optional tag filter — only events whose tags overlap this list
+                are yielded.  Pass ``None`` (default) to receive all events for
+                the agent.
+            reconnect: Automatically reconnect on connection drop or error.
+                Defaults to ``True``.
+            reconnect_delay: Seconds to wait between reconnection attempts.
+                Defaults to ``1.0``.
+
+        Yields:
+            :class:`~dakera.models.MemoryEvent` — one per matching SSE event.
+            The ``connected`` handshake event is skipped.
+
+        Example::
+
+            async for event in client.agents_subscribe("my-bot", tags=["important"]):
+                print(f"{event.event_type}: {event.memory_id}")
+        """
+        while True:
+            try:
+                async for event in self.stream_memory_events():
+                    if event.event_type == "connected":
+                        continue
+                    if event.agent_id != agent_id:
+                        continue
+                    if tags and not any(t in (event.tags or []) for t in tags):
+                        continue
+                    yield event
+                # Stream closed cleanly — reconnect if requested.
+                if not reconnect:
+                    return
+            except Exception:
+                if not reconnect:
+                    raise
+            await asyncio.sleep(reconnect_delay)
+
+    # =========================================================================
     # Context Manager Support
     # =========================================================================
 
