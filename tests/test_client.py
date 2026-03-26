@@ -1776,10 +1776,9 @@ class TestAgentsSubscribe:
             yield  # make it a generator
 
         client = AsyncDakeraClient("http://localhost:3000")
-        with patch.object(client, "stream_memory_events", return_value=failing_stream()):
-            with pytest.raises(ConnectionError, match="stream dropped"):
-                async for _ in client.agents_subscribe("bot", reconnect=False):
-                    pass
+        with patch.object(client, "stream_memory_events", return_value=failing_stream()), pytest.raises(ConnectionError, match="stream dropped"):
+            async for _ in client.agents_subscribe("bot", reconnect=False):
+                pass
 
     async def test_reconnect_true_retries_on_error(self):
         """With reconnect=True the generator reconnects after a stream error."""
@@ -1793,12 +1792,11 @@ class TestAgentsSubscribe:
             yield make_memory_event("stored", "bot", memory_id="m1")
 
         client = AsyncDakeraClient("http://localhost:3000")
-        with patch.object(client, "stream_memory_events", side_effect=flaky_stream):
-            with patch("asyncio.sleep"):
-                collected = []
-                async for ev in client.agents_subscribe("bot", reconnect=True, reconnect_delay=0):
-                    collected.append(ev)
-                    break  # stop after first successful event
+        with patch.object(client, "stream_memory_events", side_effect=flaky_stream), patch("asyncio.sleep"):
+            collected = []
+            async for ev in client.agents_subscribe("bot", reconnect=True, reconnect_delay=0):
+                collected.append(ev)
+                break  # stop after first successful event
 
         assert call_count == 2
         assert collected[0].memory_id == "m1"
