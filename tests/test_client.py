@@ -1776,7 +1776,10 @@ class TestAgentsSubscribe:
             yield  # make it a generator
 
         client = AsyncDakeraClient("http://localhost:3000")
-        with patch.object(client, "stream_memory_events", return_value=failing_stream()), pytest.raises(ConnectionError, match="stream dropped"):
+        mock_stream = patch.object(
+            client, "stream_memory_events", return_value=failing_stream()
+        )
+        with mock_stream, pytest.raises(ConnectionError, match="stream dropped"):
             async for _ in client.agents_subscribe("bot", reconnect=False):
                 pass
 
@@ -1792,7 +1795,10 @@ class TestAgentsSubscribe:
             yield make_memory_event("stored", "bot", memory_id="m1")
 
         client = AsyncDakeraClient("http://localhost:3000")
-        with patch.object(client, "stream_memory_events", side_effect=flaky_stream), patch("asyncio.sleep"):
+        mock_stream = patch.object(
+            client, "stream_memory_events", side_effect=flaky_stream
+        )
+        with mock_stream, patch("asyncio.sleep"):
             collected = []
             async for ev in client.agents_subscribe("bot", reconnect=True, reconnect_delay=0):
                 collected.append(ev)
