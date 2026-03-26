@@ -67,7 +67,6 @@ from dakera.models import (
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
-    ExtractedEntity,
     FilterDict,
     FullTextSearchResult,
     GraphExport,
@@ -914,7 +913,7 @@ class AsyncDakeraClient:
         self,
         namespace: str,
         extract_entities: bool,
-        entity_types: Optional[list[str]] = None,
+        entity_types: list[str] | None = None,
     ) -> dict[str, Any]:
         """Configure entity extraction for a namespace.
 
@@ -939,12 +938,14 @@ class AsyncDakeraClient:
             extract_entities=extract_entities,
             entity_types=entity_types,
         )
-        return await self._request("PATCH", f"/v1/namespaces/{namespace}/config", data=config.to_dict())
+        return await self._request(
+            "PATCH", f"/v1/namespaces/{namespace}/config", data=config.to_dict()
+        )
 
     async def extract_entities(
         self,
         text: str,
-        entity_types: Optional[list[str]] = None,
+        entity_types: list[str] | None = None,
     ) -> EntityExtractionResponse:
         """Extract entities from arbitrary text without storing a memory.
 
