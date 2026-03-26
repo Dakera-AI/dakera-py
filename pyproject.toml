@@ -11,14 +11,13 @@ license = {text = "MIT"}
 authors = [
     {name = "Dakera Team"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -28,9 +27,8 @@ classifiers = [
 ]
 keywords = ["vector", "database", "embedding", "similarity", "search", "ai", "ml", "memory", "dakera"]
 dependencies = [
-    "requests>=2.32.3",
+    "requests>=2.33.0",
     "urllib3>=2.6.3",
-    "typing-extensions>=4.0.0;python_version<'3.10'",
 ]
 
 [project.optional-dependencies]
@@ -59,7 +57,7 @@ where = ["src"]
 dakera = ["py.typed"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -71,11 +69,11 @@ ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "ANN", "B", "C4", "SIM"]
-ignore = ["ANN101", "ANN102", "ANN401"]
+ignore = ["ANN101", "ANN102", "ANN401", "UP007"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["ANN"]

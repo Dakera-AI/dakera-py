@@ -6,7 +6,7 @@ Dataclasses representing Dakera data structures.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 # ============================================================================
 # Consistency & Query Types (Turbopuffer-inspired)
@@ -129,13 +129,13 @@ class WarmCacheRequest:
     """Cache warming request with priority hints."""
 
     namespace: str
-    vector_ids: Optional[list[str]] = None
+    vector_ids: list[str] | None = None
     priority: WarmingPriority = WarmingPriority.NORMAL
     target_tier: WarmingTargetTier = WarmingTargetTier.L2
     background: bool = False
-    ttl_hint_seconds: Optional[int] = None
+    ttl_hint_seconds: int | None = None
     access_pattern: AccessPatternHint = AccessPatternHint.RANDOM
-    max_vectors: Optional[int] = None
+    max_vectors: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -164,9 +164,9 @@ class WarmCacheResponse:
     message: str
     target_tier: WarmingTargetTier
     priority: WarmingPriority
-    job_id: Optional[str] = None
-    estimated_completion: Optional[str] = None
-    bytes_warmed: Optional[int] = None
+    job_id: str | None = None
+    estimated_completion: str | None = None
+    bytes_warmed: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "WarmCacheResponse":
@@ -201,7 +201,7 @@ class ConfigureNamespaceRequest:
     """Vector dimension.  Required on first creation; must match existing
     dimension on subsequent calls."""
 
-    distance: Optional[DistanceMetric] = None
+    distance: DistanceMetric | None = None
     """Distance metric.  Defaults to ``cosine`` when not supplied."""
 
     def to_dict(self) -> dict[str, Any]:
@@ -248,7 +248,7 @@ class Vector:
 
     id: str
     values: list[float]
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API requests."""
@@ -273,8 +273,8 @@ class QueryResult:
 
     id: str
     score: float
-    values: Optional[list[float]] = None
-    metadata: Optional[dict[str, Any]] = None
+    values: list[float] | None = None
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "QueryResult":
@@ -292,8 +292,8 @@ class SearchResult:
     """Result container for vector search operations."""
 
     results: list[QueryResult]
-    total_searched: Optional[int] = None
-    search_time_ms: Optional[float] = None
+    total_searched: int | None = None
+    search_time_ms: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SearchResult":
@@ -311,11 +311,11 @@ class NamespaceInfo:
 
     name: str
     vector_count: int
-    dimensions: Optional[int] = None
-    index_type: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    dimensions: int | None = None
+    index_type: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NamespaceInfo":
@@ -338,10 +338,10 @@ class IndexStats:
     total_vectors: int
     dimensions: int
     index_type: str
-    memory_usage_bytes: Optional[int] = None
-    disk_usage_bytes: Optional[int] = None
-    build_progress: Optional[float] = None
-    is_trained: Optional[bool] = None
+    memory_usage_bytes: int | None = None
+    disk_usage_bytes: int | None = None
+    build_progress: float | None = None
+    is_trained: bool | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "IndexStats":
@@ -363,7 +363,7 @@ class Document:
 
     id: str
     content: str
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API requests."""
@@ -388,9 +388,9 @@ class FullTextSearchResult:
 
     id: str
     score: float
-    content: Optional[str] = None
-    highlights: Optional[list[str]] = None
-    metadata: Optional[dict[str, Any]] = None
+    content: str | None = None
+    highlights: list[str] | None = None
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FullTextSearchResult":
@@ -410,11 +410,11 @@ class HybridSearchResult:
 
     id: str
     score: float
-    vector_score: Optional[float] = None
-    text_score: Optional[float] = None
-    values: Optional[list[float]] = None
-    content: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    vector_score: float | None = None
+    text_score: float | None = None
+    values: list[float] | None = None
+    content: str | None = None
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "HybridSearchResult":
@@ -459,10 +459,10 @@ class TextDocument:
     text: str
     """Raw text content to be embedded."""
 
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     """Optional metadata for the document."""
 
-    ttl_seconds: Optional[int] = None
+    ttl_seconds: int | None = None
     """Optional TTL in seconds."""
 
     def to_dict(self) -> dict[str, Any]:
@@ -485,13 +485,13 @@ class TextSearchResult:
     score: float
     """Similarity score."""
 
-    text: Optional[str] = None
+    text: str | None = None
     """Original text (if includeText was true)."""
 
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     """Document metadata (excluding internal _text field)."""
 
-    vector: Optional[list[float]] = None
+    vector: list[float] | None = None
     """Vector values (if includeVectors was true)."""
 
     @classmethod
@@ -600,12 +600,12 @@ class StoreMemoryRequest:
     """Request to store a memory."""
     content: str
     memory_type: str = "episodic"
-    importance: Optional[float] = None
-    metadata: Optional[dict[str, Any]] = None
-    ttl_seconds: Optional[int] = None
-    expires_at: Optional[int] = None
-    session_id: Optional[str] = None
-    embedding: Optional[list[float]] = None
+    importance: float | None = None
+    metadata: dict[str, Any] | None = None
+    ttl_seconds: int | None = None
+    expires_at: int | None = None
+    session_id: str | None = None
+    embedding: list[float] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"content": self.content, "memory_type": self.memory_type}
@@ -631,10 +631,10 @@ class Memory:
     content: str
     memory_type: str
     importance: float
-    metadata: Optional[dict[str, Any]] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    access_count: Optional[int] = None
+    metadata: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    access_count: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Memory":
@@ -658,8 +658,8 @@ class RecalledMemory:
     memory_type: str
     importance: float
     score: float
-    metadata: Optional[dict[str, Any]] = None
-    created_at: Optional[str] = None
+    metadata: dict[str, Any] | None = None
+    created_at: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
@@ -700,9 +700,9 @@ class Session:
     """A session."""
     session_id: str
     agent_id: str
-    started_at: Optional[str] = None
-    ended_at: Optional[str] = None
-    metadata: Optional[dict[str, Any]] = None
+    started_at: str | None = None
+    ended_at: str | None = None
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
@@ -746,9 +746,9 @@ class AgentStats:
     memories_by_type: dict[str, int]
     total_sessions: int
     active_sessions: int
-    avg_importance: Optional[float] = None
-    oldest_memory_at: Optional[str] = None
-    newest_memory_at: Optional[str] = None
+    avg_importance: float | None = None
+    oldest_memory_at: str | None = None
+    newest_memory_at: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentStats":
@@ -774,9 +774,9 @@ class KnowledgeNode:
     """A node in the knowledge graph."""
     id: str
     content: str
-    memory_type: Optional[str] = None
-    importance: Optional[float] = None
-    metadata: Optional[dict[str, Any]] = None
+    memory_type: str | None = None
+    importance: float | None = None
+    metadata: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "KnowledgeNode":
@@ -795,7 +795,7 @@ class KnowledgeEdge:
     source: str
     target: str
     similarity: float
-    relationship: Optional[str] = None
+    relationship: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "KnowledgeEdge":
@@ -812,7 +812,7 @@ class KnowledgeGraphResponse:
     """Response from knowledge graph operations."""
     nodes: list["KnowledgeNode"]
     edges: list["KnowledgeEdge"]
-    clusters: Optional[list[list[str]]] = None
+    clusters: list[list[str]] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "KnowledgeGraphResponse":
@@ -828,7 +828,7 @@ class SummarizeResponse:
     """Response from summarization."""
     summary: str
     source_count: int
-    new_memory_id: Optional[str] = None
+    new_memory_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SummarizeResponse":
@@ -946,25 +946,25 @@ class DakeraEvent:
 
     type: str
     # namespace_created / namespace_deleted / vectors_mutated / operation_progress
-    namespace: Optional[str] = None
+    namespace: str | None = None
     # namespace_created
-    dimension: Optional[int] = None
+    dimension: int | None = None
     # operation_progress
-    operation_id: Optional[str] = None
-    op_type: Optional[str] = None
-    progress: Optional[int] = None
-    status: Optional[str] = None
-    message: Optional[str] = None
-    updated_at: Optional[int] = None
+    operation_id: str | None = None
+    op_type: str | None = None
+    progress: int | None = None
+    status: str | None = None
+    message: str | None = None
+    updated_at: int | None = None
     # job_progress
-    job_id: Optional[str] = None
-    job_type: Optional[str] = None
+    job_id: str | None = None
+    job_type: str | None = None
     # vectors_mutated
-    op: Optional[str] = None
-    count: Optional[int] = None
+    op: str | None = None
+    count: int | None = None
     # stream_lagged
-    dropped: Optional[int] = None
-    hint: Optional[str] = None
+    dropped: int | None = None
+    hint: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DakeraEvent":
@@ -1008,11 +1008,11 @@ class MemoryEvent:
     event_type: str
     timestamp: int
     agent_id: str = ""
-    memory_id: Optional[str] = None
-    content: Optional[str] = None
-    importance: Optional[float] = None
-    tags: Optional[list[str]] = None
-    session_id: Optional[str] = None
+    memory_id: str | None = None
+    content: str | None = None
+    importance: float | None = None
+    tags: list[str] | None = None
+    session_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryEvent":
@@ -1156,20 +1156,20 @@ class RateLimitHeaders:
     (e.g. non-namespaced endpoints where quota does not apply).
     """
 
-    limit: Optional[int] = None
+    limit: int | None = None
     """``X-RateLimit-Limit`` — max requests allowed in the current window."""
-    remaining: Optional[int] = None
+    remaining: int | None = None
     """``X-RateLimit-Remaining`` — requests left in the current window."""
-    reset: Optional[int] = None
+    reset: int | None = None
     """``X-RateLimit-Reset`` — Unix timestamp (seconds) when the window resets."""
-    quota_used: Optional[int] = None
+    quota_used: int | None = None
     """``X-Quota-Used`` — namespace vectors / storage consumed."""
-    quota_limit: Optional[int] = None
+    quota_limit: int | None = None
     """``X-Quota-Limit`` — namespace quota ceiling."""
 
     @classmethod
     def from_headers(cls, headers: dict[str, str]) -> "RateLimitHeaders":
-        def _int(key: str) -> Optional[int]:
+        def _int(key: str) -> int | None:
             val = headers.get(key)
             try:
                 return int(val) if val is not None else None
@@ -1198,19 +1198,19 @@ class BatchMemoryFilter:
     (server-side safety guard).
     """
 
-    tags: Optional[list[str]] = None
+    tags: list[str] | None = None
     """Restrict to memories that carry **all** listed tags."""
-    min_importance: Optional[float] = None
+    min_importance: float | None = None
     """Minimum importance (inclusive)."""
-    max_importance: Optional[float] = None
+    max_importance: float | None = None
     """Maximum importance (inclusive)."""
-    created_after: Optional[int] = None
+    created_after: int | None = None
     """Only memories created at or after this Unix timestamp (seconds)."""
-    created_before: Optional[int] = None
+    created_before: int | None = None
     """Only memories created before or at this Unix timestamp (seconds)."""
-    memory_type: Optional[str] = None
+    memory_type: str | None = None
     """Restrict to a specific memory type (e.g. ``"episodic"``)."""
-    session_id: Optional[str] = None
+    session_id: str | None = None
     """Restrict to memories from a specific session."""
 
     def to_dict(self) -> dict[str, Any]:
@@ -1238,7 +1238,7 @@ class BatchRecallRequest:
 
     agent_id: str
     """Agent whose memory namespace to search."""
-    filter: Optional[BatchMemoryFilter] = None
+    filter: BatchMemoryFilter | None = None
     """Filter predicates to apply.  An empty filter returns all memories up to ``limit``."""
     limit: int = 100
     """Maximum number of results to return (default: 100)."""
@@ -1469,7 +1469,7 @@ class GraphExport:
 class NamespaceNerConfig:
     """Entity extraction configuration for a namespace."""
     extract_entities: bool = False
-    entity_types: Optional[list[str]] = None
+    entity_types: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"extract_entities": self.extract_entities}
