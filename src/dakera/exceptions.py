@@ -5,7 +5,7 @@ Custom exception hierarchy for Dakera operations.
 """
 
 import enum
-from typing import Any, Optional
+from typing import Any
 
 
 class ErrorCode(enum.Enum):
@@ -42,9 +42,9 @@ class DakeraError(Exception):
     def __init__(
         self,
         message: str,
-        status_code: Optional[int] = None,
-        response_body: Optional[Any] = None,
-        code: Optional[ErrorCode] = None,
+        status_code: int | None = None,
+        response_body: Any | None = None,
+        code: ErrorCode | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
@@ -84,9 +84,9 @@ class RateLimitError(DakeraError):
     def __init__(
         self,
         message: str,
-        status_code: Optional[int] = None,
-        response_body: Optional[Any] = None,
-        retry_after: Optional[int] = None,
+        status_code: int | None = None,
+        response_body: Any | None = None,
+        retry_after: int | None = None,
     ) -> None:
         super().__init__(message, status_code, response_body)
         self.retry_after = retry_after

@@ -8,7 +8,7 @@ import json
 import random
 import time
 from collections.abc import Generator
-from typing import Any, Optional, Union
+from typing import Any, Union
 from urllib.parse import urljoin
 
 import requests
@@ -90,12 +90,12 @@ class DakeraClient:
     def __init__(
         self,
         base_url: str,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         timeout: float = 30.0,
-        connect_timeout: Optional[float] = None,
+        connect_timeout: float | None = None,
         max_retries: int = 3,
-        retry_config: Optional[RetryConfig] = None,
-        headers: Optional[dict[str, str]] = None,
+        retry_config: RetryConfig | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """
         Initialize Dakera client.
@@ -134,10 +134,10 @@ class DakeraClient:
             self._session.headers.update(headers)
 
         # OPS-1: last seen rate-limit headers (updated after every response)
-        self._last_rate_limit_headers: Optional[RateLimitHeaders] = None
+        self._last_rate_limit_headers: RateLimitHeaders | None = None
 
     @property
-    def last_rate_limit_headers(self) -> Optional[RateLimitHeaders]:
+    def last_rate_limit_headers(self) -> RateLimitHeaders | None:
         """Rate-limit headers from the most recent API response (OPS-1).
 
         Returns ``None`` until the first successful request has been made.
@@ -246,8 +246,8 @@ class DakeraClient:
         self,
         method: str,
         path: str,
-        data: Optional[dict[str, Any]] = None,
-        params: Optional[dict[str, Any]] = None,
+        data: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         """Make HTTP request with retry logic and exponential backoff."""
         url = self._url(path)
@@ -334,12 +334,12 @@ class DakeraClient:
         namespace: str,
         vector: list[float],
         top_k: int = 10,
-        filter: Optional[FilterDict] = None,
+        filter: FilterDict | None = None,
         include_values: bool = False,
         include_metadata: bool = True,
-        distance_metric: Optional[DistanceMetric] = None,
-        consistency: Optional[ReadConsistency] = None,
-        staleness_config: Optional[StalenessConfig] = None,
+        distance_metric: DistanceMetric | None = None,
+        consistency: ReadConsistency | None = None,
+        staleness_config: StalenessConfig | None = None,
     ) -> SearchResult:
         """
         Query vectors by similarity.
@@ -395,8 +395,8 @@ class DakeraClient:
     def delete(
         self,
         namespace: str,
-        ids: Optional[list[str]] = None,
-        filter: Optional[FilterDict] = None,
+        ids: list[str] | None = None,
+        filter: FilterDict | None = None,
         delete_all: bool = False,
     ) -> dict[str, Any]:
         """
@@ -501,7 +501,7 @@ class DakeraClient:
         self,
         namespace: str,
         documents: list[TextDocumentInput],
-        model: Optional[EmbeddingModel] = None,
+        model: EmbeddingModel | None = None,
     ) -> TextUpsertResponse:
         """
         Upsert text documents with automatic embedding generation.
@@ -547,10 +547,10 @@ class DakeraClient:
         namespace: str,
         text: str,
         top_k: int = 10,
-        filter: Optional[FilterDict] = None,
+        filter: FilterDict | None = None,
         include_text: bool = True,
         include_vectors: bool = False,
-        model: Optional[EmbeddingModel] = None,
+        model: EmbeddingModel | None = None,
     ) -> TextQueryResponse:
         """
         Query using natural language text with automatic embedding.
@@ -597,9 +597,9 @@ class DakeraClient:
         namespace: str,
         queries: list[str],
         top_k: int = 10,
-        filter: Optional[FilterDict] = None,
+        filter: FilterDict | None = None,
         include_vectors: bool = False,
-        model: Optional[EmbeddingModel] = None,
+        model: EmbeddingModel | None = None,
     ) -> BatchTextQueryResponse:
         """
         Batch query using multiple text queries with automatic embedding.
@@ -683,7 +683,7 @@ class DakeraClient:
         namespace: str,
         query: str,
         top_k: int = 10,
-        filter: Optional[FilterDict] = None,
+        filter: FilterDict | None = None,
     ) -> list[FullTextSearchResult]:
         """
         Perform full-text search.
@@ -715,10 +715,10 @@ class DakeraClient:
         self,
         namespace: str,
         query: str,
-        vector: Optional[list[float]] = None,
+        vector: list[float] | None = None,
         top_k: int = 10,
         alpha: float = 0.5,
-        filter: Optional[FilterDict] = None,
+        filter: FilterDict | None = None,
     ) -> list[HybridSearchResult]:
         """
         Perform hybrid search combining vector and full-text.
@@ -796,9 +796,9 @@ class DakeraClient:
     def create_namespace(
         self,
         namespace: str,
-        dimensions: Optional[int] = None,
-        index_type: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
+        dimensions: int | None = None,
+        index_type: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> NamespaceInfo:
         """
         Create a new namespace.
@@ -827,7 +827,7 @@ class DakeraClient:
         self,
         namespace: str,
         dimension: int,
-        distance: Optional[DistanceMetric] = None,
+        distance: DistanceMetric | None = None,
     ) -> ConfigureNamespaceResponse:
         """
         Create or update a namespace configuration (upsert semantics).
@@ -916,11 +916,11 @@ class DakeraClient:
         agent_id: str,
         content: str,
         memory_type: str = "episodic",
-        importance: Optional[float] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        session_id: Optional[str] = None,
-        ttl_seconds: Optional[int] = None,
-        expires_at: Optional[int] = None,
+        importance: float | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
     ) -> dict[str, Any]:
         """Store a memory for an agent.
 
@@ -955,8 +955,8 @@ class DakeraClient:
         agent_id: str,
         query: str,
         top_k: int = 5,
-        memory_type: Optional[str] = None,
-        min_importance: Optional[float] = None,
+        memory_type: str | None = None,
+        min_importance: float | None = None,
     ) -> list[dict[str, Any]]:
         """Recall memories for an agent."""
         data: dict[str, Any] = {"query": query, "top_k": top_k}
@@ -975,9 +975,9 @@ class DakeraClient:
         self,
         agent_id: str,
         memory_id: str,
-        content: Optional[str] = None,
-        metadata: Optional[dict[str, Any]] = None,
-        memory_type: Optional[str] = None,
+        content: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        memory_type: str | None = None,
     ) -> dict[str, Any]:
         """Update an existing memory."""
         data: dict[str, Any] = {}
@@ -1042,8 +1042,8 @@ class DakeraClient:
         agent_id: str,
         query: str,
         top_k: int = 10,
-        memory_type: Optional[str] = None,
-        min_importance: Optional[float] = None,
+        memory_type: str | None = None,
+        min_importance: float | None = None,
     ) -> list[dict[str, Any]]:
         """Search memories for an agent."""
         data: dict[str, Any] = {"query": query, "top_k": top_k}
@@ -1067,8 +1067,8 @@ class DakeraClient:
     def consolidate(
         self,
         agent_id: str,
-        memory_type: Optional[str] = None,
-        threshold: Optional[float] = None,
+        memory_type: str | None = None,
+        threshold: float | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Consolidate memories for an agent."""
@@ -1084,7 +1084,7 @@ class DakeraClient:
         agent_id: str,
         memory_id: str,
         feedback: str,
-        relevance_score: Optional[float] = None,
+        relevance_score: float | None = None,
     ) -> dict[str, Any]:
         """Submit feedback on a memory recall."""
         data: dict[str, Any] = {"memory_id": memory_id, "feedback": feedback}
@@ -1100,7 +1100,7 @@ class DakeraClient:
         self,
         memory_id: str,
         depth: int = 1,
-        types: Optional[list[str]] = None,
+        types: list[str] | None = None,
     ) -> MemoryGraph:
         """Traverse the knowledge graph from a memory node.
 
@@ -1172,7 +1172,7 @@ class DakeraClient:
         self,
         namespace: str,
         extract_entities: bool,
-        entity_types: Optional[list[str]] = None,
+        entity_types: list[str] | None = None,
     ) -> dict[str, Any]:
         """Configure entity extraction for a namespace.
 
@@ -1202,7 +1202,7 @@ class DakeraClient:
     def extract_entities(
         self,
         text: str,
-        entity_types: Optional[list[str]] = None,
+        entity_types: list[str] | None = None,
     ) -> EntityExtractionResponse:
         """Extract entities from arbitrary text without storing a memory.
 
@@ -1252,7 +1252,7 @@ class DakeraClient:
     def start_session(
         self,
         agent_id: str,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Start a new session."""
         data: dict[str, Any] = {"agent_id": agent_id}
@@ -1270,10 +1270,10 @@ class DakeraClient:
 
     def list_sessions(
         self,
-        agent_id: Optional[str] = None,
-        active_only: Optional[bool] = None,
-        limit: Optional[int] = None,
-        offset: Optional[int] = None,
+        agent_id: str | None = None,
+        active_only: bool | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[dict[str, Any]]:
         """List sessions."""
         params: dict[str, Any] = {}
@@ -1302,8 +1302,8 @@ class DakeraClient:
     def agent_memories(
         self,
         agent_id: str,
-        memory_type: Optional[str] = None,
-        limit: Optional[int] = None,
+        memory_type: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get memories for an agent."""
         params: dict[str, Any] = {}
@@ -1320,8 +1320,8 @@ class DakeraClient:
     def agent_sessions(
         self,
         agent_id: str,
-        active_only: Optional[bool] = None,
-        limit: Optional[int] = None,
+        active_only: bool | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get sessions for an agent."""
         params: dict[str, Any] = {}
@@ -1338,13 +1338,13 @@ class DakeraClient:
     def warm_cache(
         self,
         namespace: str,
-        vector_ids: Optional[list[str]] = None,
+        vector_ids: list[str] | None = None,
         priority: WarmingPriority = WarmingPriority.NORMAL,
         target_tier: WarmingTargetTier = WarmingTargetTier.L2,
         background: bool = False,
-        ttl_hint_seconds: Optional[int] = None,
+        ttl_hint_seconds: int | None = None,
         access_pattern: AccessPatternHint = AccessPatternHint.RANDOM,
-        max_vectors: Optional[int] = None,
+        max_vectors: int | None = None,
     ) -> WarmCacheResponse:
         """
         Warm cache for vectors in a namespace.
@@ -1396,13 +1396,13 @@ class DakeraClient:
         self,
         namespace: str,
         positive: list[list[float]],
-        negative: Optional[list[list[float]]] = None,
+        negative: list[list[float]] | None = None,
         top_k: int = 10,
-        filter: Optional[dict[str, Any]] = None,
+        filter: dict[str, Any] | None = None,
         include_metadata: bool = True,
         include_vectors: bool = False,
-        mmr_lambda: Optional[float] = None,
-        mmr_prefetch_k: Optional[int] = None,
+        mmr_lambda: float | None = None,
+        mmr_prefetch_k: int | None = None,
     ) -> dict[str, Any]:
         """
         Multi-vector search with positive/negative vectors and optional MMR.
@@ -1440,15 +1440,15 @@ class DakeraClient:
     def unified_query(
         self,
         namespace: str,
-        vector: Optional[list[float]] = None,
-        text: Optional[str] = None,
+        vector: list[float] | None = None,
+        text: str | None = None,
         top_k: int = 10,
-        filter: Optional[dict[str, Any]] = None,
+        filter: dict[str, Any] | None = None,
         include_metadata: bool = True,
         include_vectors: bool = False,
-        vector_weight: Optional[float] = None,
-        text_weight: Optional[float] = None,
-        fusion_method: Optional[str] = None,
+        vector_weight: float | None = None,
+        text_weight: float | None = None,
+        fusion_method: str | None = None,
         rerank: bool = False,
     ) -> dict[str, Any]:
         """
@@ -1493,12 +1493,12 @@ class DakeraClient:
     def aggregate(
         self,
         namespace: str,
-        vector: Optional[list[float]] = None,
-        group_by: Optional[str] = None,
-        metrics: Optional[list[str]] = None,
-        top_k: Optional[int] = None,
-        filter: Optional[dict[str, Any]] = None,
-        top_groups: Optional[int] = None,
+        vector: list[float] | None = None,
+        group_by: str | None = None,
+        metrics: list[str] | None = None,
+        top_k: int | None = None,
+        filter: dict[str, Any] | None = None,
+        top_groups: int | None = None,
     ) -> dict[str, Any]:
         """
         Aggregate vectors with grouping.
@@ -1533,9 +1533,9 @@ class DakeraClient:
     def export_vectors(
         self,
         namespace: str,
-        cursor: Optional[str] = None,
-        limit: Optional[int] = None,
-        filter: Optional[dict[str, Any]] = None,
+        cursor: str | None = None,
+        limit: int | None = None,
+        filter: dict[str, Any] | None = None,
         include_vectors: bool = True,
     ) -> dict[str, Any]:
         """
@@ -1567,7 +1567,7 @@ class DakeraClient:
         namespace: str,
         vector: list[float],
         top_k: int = 10,
-        filter: Optional[dict[str, Any]] = None,
+        filter: dict[str, Any] | None = None,
         include_metadata: bool = True,
     ) -> dict[str, Any]:
         """
@@ -1597,9 +1597,9 @@ class DakeraClient:
         namespace: str,
         ids: list[str],
         vectors: list[list[float]],
-        attributes: Optional[dict[str, list[Any]]] = None,
-        ttl_seconds: Optional[int] = None,
-        dimension: Optional[int] = None,
+        attributes: dict[str, list[Any]] | None = None,
+        ttl_seconds: int | None = None,
+        dimension: int | None = None,
     ) -> dict[str, Any]:
         """
         Column-format vector upsert for efficient bulk operations.
@@ -1634,9 +1634,9 @@ class DakeraClient:
     def knowledge_graph(
         self,
         agent_id: str,
-        memory_id: Optional[str] = None,
-        depth: Optional[int] = None,
-        min_similarity: Optional[float] = None,
+        memory_id: str | None = None,
+        depth: int | None = None,
+        min_similarity: float | None = None,
     ) -> dict[str, Any]:
         """Build a knowledge graph from a seed memory."""
         data: dict[str, Any] = {"agent_id": agent_id}
@@ -1651,10 +1651,10 @@ class DakeraClient:
     def full_knowledge_graph(
         self,
         agent_id: str,
-        max_nodes: Optional[int] = None,
-        min_similarity: Optional[float] = None,
-        cluster_threshold: Optional[float] = None,
-        max_edges_per_node: Optional[int] = None,
+        max_nodes: int | None = None,
+        min_similarity: float | None = None,
+        cluster_threshold: float | None = None,
+        max_edges_per_node: int | None = None,
     ) -> dict[str, Any]:
         """Build a full knowledge graph for an agent."""
         data: dict[str, Any] = {"agent_id": agent_id}
@@ -1671,8 +1671,8 @@ class DakeraClient:
     def summarize(
         self,
         agent_id: str,
-        memory_ids: Optional[list[str]] = None,
-        target_type: Optional[str] = None,
+        memory_ids: list[str] | None = None,
+        target_type: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Summarize memories."""
@@ -1686,8 +1686,8 @@ class DakeraClient:
     def deduplicate(
         self,
         agent_id: str,
-        threshold: Optional[float] = None,
-        memory_type: Optional[str] = None,
+        threshold: float | None = None,
+        memory_type: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Deduplicate memories."""
@@ -1704,8 +1704,8 @@ class DakeraClient:
 
     def analytics_overview(
         self,
-        period: Optional[str] = None,
-        namespace: Optional[str] = None,
+        period: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Get analytics overview."""
         params: dict[str, Any] = {}
@@ -1717,8 +1717,8 @@ class DakeraClient:
 
     def analytics_latency(
         self,
-        period: Optional[str] = None,
-        namespace: Optional[str] = None,
+        period: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Get latency analytics."""
         params: dict[str, Any] = {}
@@ -1730,8 +1730,8 @@ class DakeraClient:
 
     def analytics_throughput(
         self,
-        period: Optional[str] = None,
-        namespace: Optional[str] = None,
+        period: str | None = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Get throughput analytics."""
         params: dict[str, Any] = {}
@@ -1743,7 +1743,7 @@ class DakeraClient:
 
     def analytics_storage(
         self,
-        namespace: Optional[str] = None,
+        namespace: str | None = None,
     ) -> dict[str, Any]:
         """Get storage analytics."""
         params: dict[str, Any] = {}
@@ -1788,9 +1788,9 @@ class DakeraClient:
         """Get cache statistics."""
         return self._request("GET", "/v1/admin/cache/stats")
 
-    def cache_clear(self, namespace: Optional[str] = None) -> dict[str, Any]:
+    def cache_clear(self, namespace: str | None = None) -> dict[str, Any]:
         """Clear cache, optionally for a specific namespace."""
-        data: Optional[dict[str, Any]] = None
+        data: dict[str, Any] | None = None
         if namespace is not None:
             data = {"namespace": namespace}
         return self._request("POST", "/v1/admin/cache/clear", data=data)
@@ -1813,8 +1813,8 @@ class DakeraClient:
 
     def slow_queries(
         self,
-        limit: Optional[int] = None,
-        min_duration_ms: Optional[int] = None,
+        limit: int | None = None,
+        min_duration_ms: int | None = None,
     ) -> list[dict[str, Any]]:
         """Get slow queries."""
         params: dict[str, Any] = {}
@@ -1844,7 +1844,7 @@ class DakeraClient:
         self,
         namespace: str,
         ttl_seconds: int,
-        strategy: Optional[str] = None,
+        strategy: str | None = None,
     ) -> dict[str, Any]:
         """Configure TTL for a namespace."""
         data: dict[str, Any] = {"ttl_seconds": ttl_seconds}
@@ -1858,10 +1858,10 @@ class DakeraClient:
 
     def autopilot_update_config(
         self,
-        enabled: Optional[bool] = None,
-        dedup_threshold: Optional[float] = None,
-        dedup_interval_hours: Optional[int] = None,
-        consolidation_interval_hours: Optional[int] = None,
+        enabled: bool | None = None,
+        dedup_threshold: float | None = None,
+        dedup_interval_hours: int | None = None,
+        consolidation_interval_hours: int | None = None,
     ) -> dict[str, Any]:
         """Update AutoPilot configuration at runtime (PILOT-2).
 
@@ -1896,9 +1896,9 @@ class DakeraClient:
 
     def decay_update_config(
         self,
-        strategy: Optional[str] = None,
-        half_life_hours: Optional[float] = None,
-        min_importance: Optional[float] = None,
+        strategy: str | None = None,
+        half_life_hours: float | None = None,
+        min_importance: float | None = None,
     ) -> dict[str, Any]:
         """Update decay engine configuration at runtime (DECAY-1).
 
@@ -1936,8 +1936,8 @@ class DakeraClient:
     def create_key(
         self,
         name: str,
-        permissions: Optional[list[str]] = None,
-        expires_at: Optional[str] = None,
+        permissions: list[str] | None = None,
+        expires_at: str | None = None,
     ) -> dict[str, Any]:
         """Create a new API key."""
         data: dict[str, Any] = {"name": name}
@@ -1975,7 +1975,7 @@ class DakeraClient:
     # SSE Streaming (CE-1)
     # =========================================================================
 
-    def _parse_sse_block(self, block: str) -> Optional[DakeraEvent]:
+    def _parse_sse_block(self, block: str) -> DakeraEvent | None:
         """Parse a single SSE event block into a :class:`~dakera.models.DakeraEvent`."""
         data_lines: list[str] = []
         for line in block.split("\n"):
@@ -1993,7 +1993,7 @@ class DakeraClient:
     def stream_namespace_events(
         self,
         namespace: str,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> Generator[DakeraEvent, None, None]:
         """Stream SSE events scoped to *namespace*.
 
@@ -2024,7 +2024,7 @@ class DakeraClient:
 
     def stream_global_events(
         self,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> Generator[DakeraEvent, None, None]:
         """Stream all system events from the global event bus.
 
@@ -2045,7 +2045,7 @@ class DakeraClient:
     def _stream_sse(
         self,
         url: str,
-        timeout: Optional[float],
+        timeout: float | None,
     ) -> Generator[DakeraEvent, None, None]:
         """Low-level SSE streaming helper."""
         headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
@@ -2078,7 +2078,7 @@ class DakeraClient:
 
     def stream_memory_events(
         self,
-        timeout: Optional[float] = None,
+        timeout: float | None = None,
     ) -> Generator[MemoryEvent, None, None]:
         """Stream memory lifecycle events from the DASH-B SSE endpoint.
 
@@ -2141,7 +2141,7 @@ class DakeraClient:
 
     def cross_agent_network(
         self,
-        agent_ids: Optional[list[str]] = None,
+        agent_ids: list[str] | None = None,
         min_similarity: float = 0.3,
         max_nodes_per_agent: int = 50,
         min_importance: float = 0.0,
