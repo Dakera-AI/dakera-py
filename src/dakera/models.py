@@ -1515,3 +1515,133 @@ class MemoryEntitiesResponse:
             memory_id=data["memory_id"],
             entities=[ExtractedEntity.from_dict(e) for e in data.get("entities", [])],
         )
+
+
+# ============================================================================
+# Memory Feedback Loop (INT-1)
+# ============================================================================
+
+
+class FeedbackSignal(str, Enum):
+    """Feedback signal for memory active learning (INT-1).
+
+    - ``upvote``: Boost importance ×1.15, capped at 1.0.
+    - ``downvote``: Penalise importance ×0.85, floor 0.0.
+    - ``flag``: Mark as irrelevant — sets ``decay_flag=true``, no immediate importance change.
+    - ``positive``: Backward-compatible alias for ``upvote``.
+    - ``negative``: Backward-compatible alias for ``downvote``.
+    """
+
+    UPVOTE = "upvote"
+    DOWNVOTE = "downvote"
+    FLAG = "flag"
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+
+
+@dataclass
+class FeedbackHistoryEntry:
+    """A single recorded feedback event stored in memory metadata (INT-1)."""
+
+    signal: FeedbackSignal
+    """Feedback signal that was applied."""
+    timestamp: int
+    """Unix timestamp (seconds) when feedback was submitted."""
+    old_importance: float
+    """Memory importance before this feedback was applied."""
+    new_importance: float
+    """Memory importance after this feedback was applied."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FeedbackHistoryEntry":
+        return cls(
+            signal=FeedbackSignal(data["signal"]),
+            timestamp=data["timestamp"],
+            old_importance=data["old_importance"],
+            new_importance=data["new_importance"],
+        )
+
+
+@dataclass
+class FeedbackResponse:
+    """Response from feedback and importance endpoints (INT-1).
+
+    Returned by ``POST /v1/memories/:id/feedback`` and
+    ``PATCH /v1/memories/:id/importance``.
+    """
+
+    memory_id: str
+    """ID of the memory that was updated."""
+    new_importance: float
+    """New importance score after the feedback was applied (0.0–1.0)."""
+    signal: FeedbackSignal
+    """The feedback signal that was recorded."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FeedbackResponse":
+        return cls(
+            memory_id=data["memory_id"],
+            new_importance=data["new_importance"],
+            signal=FeedbackSignal(data["signal"]),
+        )
+
+
+@dataclass
+class FeedbackHistoryResponse:
+    """Response from ``GET /v1/memories/:id/feedback`` (INT-1)."""
+
+    memory_id: str
+    """ID of the memory."""
+    entries: list[FeedbackHistoryEntry]
+    """Ordered list of feedback events (oldest first, capped at 100)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FeedbackHistoryResponse":
+        return cls(
+            memory_id=data["memory_id"],
+            entries=[FeedbackHistoryEntry.from_dict(e) for e in data.get("entries", [])],
+        )
+
+
+@dataclass
+class AgentFeedbackSummary:
+    """Response from ``GET /v1/agents/:id/feedback/summary`` (INT-1)."""
+
+    agent_id: str
+    upvotes: int
+    downvotes: int
+    flags: int
+    total_feedback: int
+    health_score: float
+    """Weighted-average importance across all non-expired memories (0.0–1.0)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentFeedbackSummary":
+        return cls(
+            agent_id=data["agent_id"],
+            upvotes=data["upvotes"],
+            downvotes=data["downvotes"],
+            flags=data["flags"],
+            total_feedback=data["total_feedback"],
+            health_score=data["health_score"],
+        )
+
+
+@dataclass
+class FeedbackHealthResponse:
+    """Response from ``GET /v1/feedback/health`` (INT-1)."""
+
+    agent_id: str
+    health_score: float
+    """Mean importance of all non-expired memories (0.0–1.0). Higher = healthier."""
+    memory_count: int
+    avg_importance: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FeedbackHealthResponse":
+        return cls(
+            agent_id=data["agent_id"],
+            health_score=data["health_score"],
+            memory_count=data["memory_count"],
+            avg_importance=data["avg_importance"],
+        )

@@ -2053,3 +2053,271 @@ class TestEntityExtractionModels:
         cfg = NamespaceNerConfig(extract_entities=True, entity_types=["person", "date"])
         d = cfg.to_dict()
         assert d["entity_types"] == ["person", "date"]
+
+
+# ===========================================================================
+# INT-1 Memory Feedback Loop test fixtures
+# ===========================================================================
+
+FEEDBACK_RESPONSE = {
+    "memory_id": "mem-abc",
+    "new_importance": 0.92,
+    "signal": "upvote",
+}
+
+FEEDBACK_HISTORY_RESPONSE = {
+    "memory_id": "mem-abc",
+    "entries": [
+        {
+            "signal": "upvote",
+            "timestamp": 1774000000,
+            "old_importance": 0.5,
+            "new_importance": 0.575,
+        },
+        {
+            "signal": "downvote",
+            "timestamp": 1774001000,
+            "old_importance": 0.575,
+            "new_importance": 0.489,
+        },
+    ],
+}
+
+AGENT_FEEDBACK_SUMMARY = {
+    "agent_id": "agent-1",
+    "upvotes": 42,
+    "downvotes": 7,
+    "flags": 2,
+    "total_feedback": 51,
+    "health_score": 0.78,
+}
+
+FEEDBACK_HEALTH_RESPONSE = {
+    "agent_id": "agent-1",
+    "health_score": 0.78,
+    "memory_count": 120,
+    "avg_importance": 0.72,
+}
+
+
+class TestFeedbackLoopSyncClient:
+    """Tests for INT-1 feedback loop sync client methods."""
+
+    def test_feedback_memory_upvote(self, client, mock_responses):
+        """feedback_memory() POSTs to /v1/memories/:id/feedback and returns FeedbackResponse."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/feedback",
+            json=FEEDBACK_RESPONSE,
+            status=200,
+        )
+        from dakera import FeedbackSignal
+        result = client.feedback_memory("mem-abc", "agent-1", FeedbackSignal.UPVOTE)
+        assert result.memory_id == "mem-abc"
+        assert result.new_importance == pytest.approx(0.92)
+        assert result.signal == FeedbackSignal.UPVOTE
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["agent_id"] == "agent-1"
+        assert body["signal"] == "upvote"
+
+    def test_feedback_memory_accepts_string_signal(self, client, mock_responses):
+        """feedback_memory() accepts a raw string for signal."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/feedback",
+            json=FEEDBACK_RESPONSE,
+            status=200,
+        )
+        result = client.feedback_memory("mem-abc", "agent-1", "upvote")
+        assert result.memory_id == "mem-abc"
+
+    def test_get_memory_feedback_history(self, client, mock_responses):
+        """get_memory_feedback_history() GETs /v1/memories/:id/feedback."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memories/mem-abc/feedback",
+            json=FEEDBACK_HISTORY_RESPONSE,
+            status=200,
+        )
+        result = client.get_memory_feedback_history("mem-abc")
+        assert result.memory_id == "mem-abc"
+        assert len(result.entries) == 2
+        from dakera import FeedbackSignal
+        assert result.entries[0].signal == FeedbackSignal.UPVOTE
+        assert result.entries[1].signal == FeedbackSignal.DOWNVOTE
+
+    def test_get_agent_feedback_summary(self, client, mock_responses):
+        """get_agent_feedback_summary() GETs /v1/agents/:id/feedback/summary."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/agents/agent-1/feedback/summary",
+            json=AGENT_FEEDBACK_SUMMARY,
+            status=200,
+        )
+        result = client.get_agent_feedback_summary("agent-1")
+        assert result.agent_id == "agent-1"
+        assert result.upvotes == 42
+        assert result.downvotes == 7
+        assert result.flags == 2
+        assert result.total_feedback == 51
+        assert result.health_score == pytest.approx(0.78)
+
+    def test_patch_memory_importance(self, client, mock_responses):
+        """patch_memory_importance() PATCHes /v1/memories/:id/importance."""
+        mock_responses.add(
+            responses.PATCH,
+            "http://localhost:3000/v1/memories/mem-abc/importance",
+            json=FEEDBACK_RESPONSE,
+            status=200,
+        )
+        result = client.patch_memory_importance("mem-abc", "agent-1", 0.92)
+        assert result.memory_id == "mem-abc"
+        assert result.new_importance == pytest.approx(0.92)
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["agent_id"] == "agent-1"
+        assert body["importance"] == pytest.approx(0.92)
+
+    def test_get_feedback_health(self, client, mock_responses):
+        """get_feedback_health() GETs /v1/feedback/health?agent_id=..."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/feedback/health",
+            json=FEEDBACK_HEALTH_RESPONSE,
+            status=200,
+        )
+        result = client.get_feedback_health("agent-1")
+        assert result.agent_id == "agent-1"
+        assert result.health_score == pytest.approx(0.78)
+        assert result.memory_count == 120
+        assert result.avg_importance == pytest.approx(0.72)
+        assert "agent_id=agent-1" in mock_responses.calls[0].request.url
+
+
+class TestFeedbackLoopAsyncClient:
+    """Tests for INT-1 feedback loop async client methods."""
+
+    @pytest.mark.asyncio
+    async def test_feedback_memory_async(self):
+        """AsyncDakeraClient.feedback_memory() calls correct endpoint."""
+        import httpx
+
+        from dakera import FeedbackSignal
+        with patch("httpx.AsyncClient.request") as mock_req:
+            mock_req.return_value = httpx.Response(200, json=FEEDBACK_RESPONSE)
+            async with AsyncDakeraClient("http://localhost:3000") as client:
+                result = await client.feedback_memory("mem-abc", "agent-1", FeedbackSignal.UPVOTE)
+        assert result.memory_id == "mem-abc"
+        assert result.signal == FeedbackSignal.UPVOTE
+        _, kwargs = mock_req.call_args
+        assert kwargs["url"].endswith("/v1/memories/mem-abc/feedback")
+
+    @pytest.mark.asyncio
+    async def test_get_memory_feedback_history_async(self):
+        """AsyncDakeraClient.get_memory_feedback_history() GETs history."""
+        import httpx
+        with patch("httpx.AsyncClient.request") as mock_req:
+            mock_req.return_value = httpx.Response(200, json=FEEDBACK_HISTORY_RESPONSE)
+            async with AsyncDakeraClient("http://localhost:3000") as client:
+                result = await client.get_memory_feedback_history("mem-abc")
+        assert len(result.entries) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_agent_feedback_summary_async(self):
+        """AsyncDakeraClient.get_agent_feedback_summary() returns summary."""
+        import httpx
+        with patch("httpx.AsyncClient.request") as mock_req:
+            mock_req.return_value = httpx.Response(200, json=AGENT_FEEDBACK_SUMMARY)
+            async with AsyncDakeraClient("http://localhost:3000") as client:
+                result = await client.get_agent_feedback_summary("agent-1")
+        assert result.upvotes == 42
+        assert result.health_score == pytest.approx(0.78)
+
+    @pytest.mark.asyncio
+    async def test_patch_memory_importance_async(self):
+        """AsyncDakeraClient.patch_memory_importance() PATCHes importance."""
+        import httpx
+        with patch("httpx.AsyncClient.request") as mock_req:
+            mock_req.return_value = httpx.Response(200, json=FEEDBACK_RESPONSE)
+            async with AsyncDakeraClient("http://localhost:3000") as client:
+                result = await client.patch_memory_importance("mem-abc", "agent-1", 0.92)
+        assert result.new_importance == pytest.approx(0.92)
+
+    @pytest.mark.asyncio
+    async def test_get_feedback_health_async(self):
+        """AsyncDakeraClient.get_feedback_health() returns health response."""
+        import httpx
+        with patch("httpx.AsyncClient.request") as mock_req:
+            mock_req.return_value = httpx.Response(200, json=FEEDBACK_HEALTH_RESPONSE)
+            async with AsyncDakeraClient("http://localhost:3000") as client:
+                result = await client.get_feedback_health("agent-1")
+        assert result.health_score == pytest.approx(0.78)
+        assert result.memory_count == 120
+
+
+class TestFeedbackLoopModels:
+    """Unit tests for INT-1 feedback loop model dataclasses."""
+
+    def test_feedback_signal_values(self):
+        """FeedbackSignal enum has all INT-1 signal values."""
+        from dakera import FeedbackSignal
+        assert FeedbackSignal.UPVOTE.value == "upvote"
+        assert FeedbackSignal.DOWNVOTE.value == "downvote"
+        assert FeedbackSignal.FLAG.value == "flag"
+        assert FeedbackSignal.POSITIVE.value == "positive"
+        assert FeedbackSignal.NEGATIVE.value == "negative"
+
+    def test_feedback_response_from_dict(self):
+        """FeedbackResponse.from_dict() parses all fields."""
+        from dakera import FeedbackResponse, FeedbackSignal
+        resp = FeedbackResponse.from_dict(FEEDBACK_RESPONSE)
+        assert resp.memory_id == "mem-abc"
+        assert resp.new_importance == pytest.approx(0.92)
+        assert resp.signal == FeedbackSignal.UPVOTE
+
+    def test_feedback_history_entry_from_dict(self):
+        """FeedbackHistoryEntry.from_dict() parses entry fields."""
+        from dakera import FeedbackHistoryEntry, FeedbackSignal
+        entry = FeedbackHistoryEntry.from_dict(
+            {
+                "signal": "downvote",
+                "timestamp": 1774001000,
+                "old_importance": 0.5,
+                "new_importance": 0.425,
+            }
+        )
+        assert entry.signal == FeedbackSignal.DOWNVOTE
+        assert entry.timestamp == 1774001000
+        assert entry.old_importance == pytest.approx(0.5)
+        assert entry.new_importance == pytest.approx(0.425)
+
+    def test_feedback_history_response_from_dict(self):
+        """FeedbackHistoryResponse.from_dict() builds entry list."""
+        from dakera import FeedbackHistoryResponse
+        resp = FeedbackHistoryResponse.from_dict(FEEDBACK_HISTORY_RESPONSE)
+        assert resp.memory_id == "mem-abc"
+        assert len(resp.entries) == 2
+
+    def test_feedback_history_response_empty_entries(self):
+        """FeedbackHistoryResponse.from_dict() handles empty entries."""
+        from dakera import FeedbackHistoryResponse
+        resp = FeedbackHistoryResponse.from_dict({"memory_id": "x", "entries": []})
+        assert resp.entries == []
+
+    def test_agent_feedback_summary_from_dict(self):
+        """AgentFeedbackSummary.from_dict() parses all fields."""
+        from dakera import AgentFeedbackSummary
+        summary = AgentFeedbackSummary.from_dict(AGENT_FEEDBACK_SUMMARY)
+        assert summary.agent_id == "agent-1"
+        assert summary.total_feedback == 51
+        assert summary.health_score == pytest.approx(0.78)
+
+    def test_feedback_health_response_from_dict(self):
+        """FeedbackHealthResponse.from_dict() parses all fields."""
+        from dakera import FeedbackHealthResponse
+        health = FeedbackHealthResponse.from_dict(FEEDBACK_HEALTH_RESPONSE)
+        assert health.agent_id == "agent-1"
+        assert health.health_score == pytest.approx(0.78)
+        assert health.memory_count == 120
+        assert health.avg_importance == pytest.approx(0.72)
