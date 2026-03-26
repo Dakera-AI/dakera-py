@@ -1256,3 +1256,413 @@ class TestAsyncClientStoreMemoryParity:
             await client.store_memory("my-agent", "content")
 
         assert calls == [("POST", "/v1/agents/my-agent/memories")]
+
+# ===========================================================================
+# Memory Knowledge Graph Tests (CE-5 / SDK-9)
+# ===========================================================================
+
+GRAPH_RESPONSE = {
+    "root_id": "mem-abc",
+    "depth": 2,
+    "nodes": [
+        {"memory_id": "mem-abc", "content_preview": "Root memory", "importance": 0.9, "depth": 0},
+        {"memory_id": "mem-def", "content_preview": "Related memory", "importance": 0.7, "depth": 1},
+        {"memory_id": "mem-ghi", "content_preview": "Linked memory", "importance": 0.5, "depth": 2},
+    ],
+    "edges": [
+        {
+            "id": "edge-1",
+            "source_id": "mem-abc",
+            "target_id": "mem-def",
+            "edge_type": "related_to",
+            "weight": 0.92,
+            "created_at": 1774000000,
+        },
+        {
+            "id": "edge-2",
+            "source_id": "mem-def",
+            "target_id": "mem-ghi",
+            "edge_type": "linked_by",
+            "weight": 1.0,
+            "created_at": 1774001000,
+        },
+    ],
+}
+
+PATH_RESPONSE = {
+    "source_id": "mem-abc",
+    "target_id": "mem-ghi",
+    "path": ["mem-abc", "mem-def", "mem-ghi"],
+    "hops": 2,
+    "edges": [
+        {
+            "id": "edge-1",
+            "source_id": "mem-abc",
+            "target_id": "mem-def",
+            "edge_type": "related_to",
+            "weight": 0.92,
+            "created_at": 1774000000,
+        },
+        {
+            "id": "edge-2",
+            "source_id": "mem-def",
+            "target_id": "mem-ghi",
+            "edge_type": "linked_by",
+            "weight": 1.0,
+            "created_at": 1774001000,
+        },
+    ],
+}
+
+LINK_RESPONSE = {
+    "edge": {
+        "id": "edge-new",
+        "source_id": "mem-abc",
+        "target_id": "mem-xyz",
+        "edge_type": "linked_by",
+        "weight": 1.0,
+        "created_at": 1774002000,
+    }
+}
+
+EXPORT_RESPONSE = {
+    "agent_id": "test-agent",
+    "format": "json",
+    "data": '{"nodes": [], "edges": []}',
+    "node_count": 10,
+    "edge_count": 7,
+}
+
+
+class TestMemoryGraphSyncClient:
+    """Tests for Memory Knowledge Graph sync client methods (CE-5 / SDK-9)."""
+
+    def test_memory_graph_default_depth(self, client, mock_responses):
+        """memory_graph() defaults to depth=1."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memories/mem-abc/graph",
+            json=GRAPH_RESPONSE,
+            status=200,
+        )
+        result = client.memory_graph("mem-abc")
+        assert result.root_id == "mem-abc"
+        assert result.depth == 2
+        assert len(result.nodes) == 3
+        assert len(result.edges) == 2
+        assert "depth=1" in mock_responses.calls[0].request.url
+
+    def test_memory_graph_custom_depth_and_types(self, client, mock_responses):
+        """memory_graph() passes depth and types query params."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memories/mem-abc/graph",
+            json=GRAPH_RESPONSE,
+            status=200,
+        )
+        result = client.memory_graph("mem-abc", depth=2, types=["related_to", "linked_by"])
+        assert result.root_id == "mem-abc"
+        url = mock_responses.calls[0].request.url
+        assert "depth=2" in url
+        assert "related_to" in url
+
+    def test_memory_graph_edge_types_parsed(self, client, mock_responses):
+        """memory_graph() returns edges with correct EdgeType enum values."""
+        from dakera import EdgeType
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memories/mem-abc/graph",
+            json=GRAPH_RESPONSE,
+            status=200,
+        )
+        result = client.memory_graph("mem-abc")
+        assert result.edges[0].edge_type == EdgeType.RELATED_TO
+        assert result.edges[1].edge_type == EdgeType.LINKED_BY
+
+    def test_memory_graph_node_depth_populated(self, client, mock_responses):
+        """GraphNode.depth is populated correctly."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memories/mem-abc/graph",
+            json=GRAPH_RESPONSE,
+            status=200,
+        )
+        result = client.memory_graph("mem-abc")
+        depths = {n.memory_id: n.depth for n in result.nodes}
+        assert depths["mem-abc"] == 0
+        assert depths["mem-def"] == 1
+        assert depths["mem-ghi"] == 2
+
+    def test_memory_path(self, client, mock_responses):
+        """memory_path() returns shortest path between two memories."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memories/mem-abc/path",
+            json=PATH_RESPONSE,
+            status=200,
+        )
+        result = client.memory_path("mem-abc", "mem-ghi")
+        assert result.source_id == "mem-abc"
+        assert result.target_id == "mem-ghi"
+        assert result.path == ["mem-abc", "mem-def", "mem-ghi"]
+        assert result.hops == 2
+        assert len(result.edges) == 2
+        assert "target=mem-ghi" in mock_responses.calls[0].request.url
+
+    def test_memory_link_default_edge_type(self, client, mock_responses):
+        """memory_link() defaults to EdgeType.LINKED_BY."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/links",
+            json=LINK_RESPONSE,
+            status=200,
+        )
+        result = client.memory_link("mem-abc", "mem-xyz")
+        assert result.edge.id == "edge-new"
+        assert result.edge.edge_type.value == "linked_by"
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["target_id"] == "mem-xyz"
+        assert body["edge_type"] == "linked_by"
+
+    def test_memory_link_custom_edge_type_string(self, client, mock_responses):
+        """memory_link() accepts a plain string edge_type."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/links",
+            json=LINK_RESPONSE,
+            status=200,
+        )
+        result = client.memory_link("mem-abc", "mem-xyz", edge_type="linked_by")
+        assert result.edge.id == "edge-new"
+
+    def test_agent_graph_export_json(self, client, mock_responses):
+        """agent_graph_export() defaults to json format."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/agents/test-agent/graph/export",
+            json=EXPORT_RESPONSE,
+            status=200,
+        )
+        result = client.agent_graph_export("test-agent")
+        assert result.agent_id == "test-agent"
+        assert result.format == "json"
+        assert result.node_count == 10
+        assert result.edge_count == 7
+        assert "format=json" in mock_responses.calls[0].request.url
+
+    def test_agent_graph_export_graphml(self, client, mock_responses):
+        """agent_graph_export() passes format=graphml."""
+        graphml_resp = {**EXPORT_RESPONSE, "format": "graphml", "data": "<graphml/>"}
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/agents/test-agent/graph/export",
+            json=graphml_resp,
+            status=200,
+        )
+        result = client.agent_graph_export("test-agent", format="graphml")
+        assert result.format == "graphml"
+        assert "format=graphml" in mock_responses.calls[0].request.url
+
+
+@pytest.mark.asyncio
+class TestMemoryGraphAsyncClient:
+    """Tests for Memory Knowledge Graph async client methods (CE-5 / SDK-9)."""
+
+    async def test_memory_graph_calls_correct_endpoint(self):
+        """memory_graph() calls GET /v1/memories/{id}/graph."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, params=None, **kwargs):
+            calls.append((method, path, params or {}))
+            return GRAPH_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.memory_graph("mem-abc", depth=2)
+
+        assert calls[0][0] == "GET"
+        assert calls[0][1] == "/v1/memories/mem-abc/graph"
+        assert calls[0][2]["depth"] == 2
+        assert result.root_id == "mem-abc"
+        assert len(result.nodes) == 3
+
+    async def test_memory_graph_types_filter(self):
+        """memory_graph() includes types param when specified."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, params=None, **kwargs):
+            calls.append((method, path, params or {}))
+            return GRAPH_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.memory_graph("mem-abc", depth=1, types=["related_to"])
+
+        assert calls[0][2]["types"] == "related_to"
+
+    async def test_memory_graph_no_types_filter(self):
+        """memory_graph() omits types param when not specified."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, params=None, **kwargs):
+            calls.append((method, path, params or {}))
+            return GRAPH_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.memory_graph("mem-abc")
+
+        assert "types" not in calls[0][2]
+
+    async def test_memory_path_calls_correct_endpoint(self):
+        """memory_path() calls GET /v1/memories/{id}/path?target={id}."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, params=None, **kwargs):
+            calls.append((method, path, params or {}))
+            return PATH_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.memory_path("mem-abc", "mem-ghi")
+
+        assert calls[0][0] == "GET"
+        assert calls[0][1] == "/v1/memories/mem-abc/path"
+        assert calls[0][2]["target"] == "mem-ghi"
+        assert result.hops == 2
+        assert result.path == ["mem-abc", "mem-def", "mem-ghi"]
+
+    async def test_memory_link_default_edge_type(self):
+        """memory_link() defaults to linked_by and POSTs to /links."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path, data or {}))
+            return LINK_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.memory_link("mem-abc", "mem-xyz")
+
+        assert calls[0][0] == "POST"
+        assert calls[0][1] == "/v1/memories/mem-abc/links"
+        assert calls[0][2]["target_id"] == "mem-xyz"
+        assert calls[0][2]["edge_type"] == "linked_by"
+        assert result.edge.id == "edge-new"
+
+    async def test_memory_link_enum_edge_type(self):
+        """memory_link() accepts EdgeType enum values."""
+        from dakera import EdgeType
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path, data or {}))
+            return LINK_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.memory_link("mem-abc", "mem-xyz", edge_type=EdgeType.LINKED_BY)
+
+        assert calls[0][2]["edge_type"] == "linked_by"
+
+    async def test_agent_graph_export(self):
+        """agent_graph_export() calls GET /v1/agents/{id}/graph/export."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, params=None, **kwargs):
+            calls.append((method, path, params or {}))
+            return EXPORT_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.agent_graph_export("my-agent", format="graphml")
+
+        assert calls[0][0] == "GET"
+        assert calls[0][1] == "/v1/agents/my-agent/graph/export"
+        assert calls[0][2]["format"] == "graphml"
+        assert result.agent_id == "test-agent"
+        assert result.node_count == 10
+
+    async def test_agent_graph_export_default_format(self):
+        """agent_graph_export() defaults to json format."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, params=None, **kwargs):
+            calls.append((method, path, params or {}))
+            return EXPORT_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.agent_graph_export("my-agent")
+
+        assert calls[0][2]["format"] == "json"
+
+
+class TestGraphModels:
+    """Unit tests for graph model dataclasses and EdgeType enum."""
+
+    def test_edge_type_values(self):
+        """EdgeType enum has all expected values."""
+        from dakera import EdgeType
+        assert EdgeType.RELATED_TO.value == "related_to"
+        assert EdgeType.SHARES_ENTITY.value == "shares_entity"
+        assert EdgeType.PRECEDES.value == "precedes"
+        assert EdgeType.LINKED_BY.value == "linked_by"
+
+    def test_edge_type_from_string(self):
+        """EdgeType can be constructed from string value."""
+        from dakera import EdgeType
+        assert EdgeType("related_to") == EdgeType.RELATED_TO
+
+    def test_graph_edge_from_dict(self):
+        """GraphEdge.from_dict() parses all fields."""
+        from dakera import EdgeType, GraphEdge
+        edge = GraphEdge.from_dict({
+            "id": "e1",
+            "source_id": "mem-a",
+            "target_id": "mem-b",
+            "edge_type": "related_to",
+            "weight": 0.88,
+            "created_at": 1774000000,
+        })
+        assert edge.id == "e1"
+        assert edge.edge_type == EdgeType.RELATED_TO
+        assert edge.weight == 0.88
+
+    def test_graph_node_from_dict(self):
+        """GraphNode.from_dict() parses all fields."""
+        from dakera import GraphNode
+        node = GraphNode.from_dict({
+            "memory_id": "mem-x",
+            "content_preview": "test content",
+            "importance": 0.75,
+            "depth": 1,
+        })
+        assert node.memory_id == "mem-x"
+        assert node.depth == 1
+
+    def test_memory_graph_from_dict(self):
+        """MemoryGraph.from_dict() parses nodes and edges."""
+        from dakera import MemoryGraph
+        result = MemoryGraph.from_dict(GRAPH_RESPONSE)
+        assert result.root_id == "mem-abc"
+        assert len(result.nodes) == 3
+        assert len(result.edges) == 2
+
+    def test_graph_path_hops_computed_from_path(self):
+        """GraphPath.hops falls back to len(path)-1 if not in response."""
+        from dakera import GraphPath
+        data = {**PATH_RESPONSE}
+        del data["hops"]
+        path = GraphPath.from_dict(data)
+        assert path.hops == 2  # len(["mem-abc","mem-def","mem-ghi"]) - 1
+
+    def test_graph_export_from_dict(self):
+        """GraphExport.from_dict() parses all fields."""
+        from dakera import GraphExport
+        export = GraphExport.from_dict(EXPORT_RESPONSE)
+        assert export.agent_id == "test-agent"
+        assert export.format == "json"
+        assert export.node_count == 10
+        assert export.edge_count == 7

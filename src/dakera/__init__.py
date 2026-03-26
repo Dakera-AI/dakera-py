@@ -51,8 +51,14 @@ from dakera.models import (
     DeduplicateResponse,
     DistanceMetric,
     Document,
+    EdgeType,
     EmbeddingModel,
     FullTextSearchResult,
+    GraphEdge,
+    GraphExport,
+    GraphLinkResponse,
+    GraphNode,
+    GraphPath,
     HybridSearchResult,
     IndexStats,
     KnowledgeEdge,
@@ -60,6 +66,7 @@ from dakera.models import (
     KnowledgeNode,
     Memory,
     MemoryEvent,
+    MemoryGraph,
     NamespaceInfo,
     OpStatus,
     QueryResult,
@@ -124,12 +131,20 @@ __all__ = [
     # Agent types
     "AgentSummary",
     "AgentStats",
-    # Knowledge Graph types
+    # Knowledge Graph types (internal graph — knowledge.rs)
     "KnowledgeNode",
     "KnowledgeEdge",
     "KnowledgeGraphResponse",
     "SummarizeResponse",
     "DeduplicateResponse",
+    # Memory Knowledge Graph types (CE-5 / SDK-9)
+    "EdgeType",
+    "GraphEdge",
+    "GraphNode",
+    "MemoryGraph",
+    "GraphPath",
+    "GraphLinkResponse",
+    "GraphExport",
     # Analytics types
     "AnalyticsOverview",
     # Inference / embedding types (v0.6.0)

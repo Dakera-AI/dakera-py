@@ -64,12 +64,17 @@ from dakera.models import (
     DistanceMetric,
     Document,
     DocumentInput,
+    EdgeType,
     EmbeddingModel,
     FilterDict,
     FullTextSearchResult,
+    GraphExport,
+    GraphLinkResponse,
+    GraphPath,
     HybridSearchResult,
     IndexStats,
     MemoryEvent,
+    MemoryGraph,
     NamespaceInfo,
     RateLimitHeaders,
     ReadConsistency,
@@ -783,6 +788,119 @@ class AsyncDakeraClient:
         if relevance_score is not None:
             data["relevance_score"] = relevance_score
         return await self._request("POST", f"/v1/agents/{agent_id}/memories/feedback", data=data)
+
+    # =========================================================================
+    # Memory Knowledge Graph Operations (CE-5 / SDK-9)
+    # =========================================================================
+
+    async def memory_graph(
+        self,
+        memory_id: str,
+        depth: int = 1,
+        types: list[str] | None = None,
+    ) -> MemoryGraph:
+        """Traverse the knowledge graph from a memory node.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            memory_id: Root memory ID to start traversal from.
+            depth: Maximum traversal depth (default: 1, max: 3).
+            types: Filter by edge types — any of ``"related_to"``,
+                ``"shares_entity"``, ``"precedes"``, ``"linked_by"``.
+                ``None`` returns all edge types.
+
+        Returns:
+            :class:`MemoryGraph` containing all nodes and edges reachable
+            within *depth* hops.
+
+        Example:
+            >>> graph = await client.memory_graph("mem-abc", depth=2)
+            >>> print(f"{len(graph.nodes)} nodes, {len(graph.edges)} edges")
+        """
+        params: dict[str, Any] = {"depth": depth}
+        if types:
+            params["types"] = ",".join(types)
+        result = await self._request("GET", f"/v1/memories/{memory_id}/graph", params=params)
+        return MemoryGraph.from_dict(result)
+
+    async def memory_path(
+        self,
+        source_id: str,
+        target_id: str,
+    ) -> GraphPath:
+        """Find the shortest path between two memories in the knowledge graph.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            source_id: Starting memory ID.
+            target_id: Destination memory ID.
+
+        Returns:
+            :class:`GraphPath` with the ordered list of memory IDs and edges.
+            If no path exists, ``path`` will be an empty list and ``hops`` will be -1.
+
+        Example:
+            >>> path = await client.memory_path("mem-abc", "mem-xyz")
+            >>> print(" → ".join(path.path))
+        """
+        params: dict[str, Any] = {"target": target_id}
+        result = await self._request("GET", f"/v1/memories/{source_id}/path", params=params)
+        return GraphPath.from_dict(result)
+
+    async def memory_link(
+        self,
+        source_id: str,
+        target_id: str,
+        edge_type: str | EdgeType = EdgeType.LINKED_BY,
+    ) -> GraphLinkResponse:
+        """Create an explicit edge between two memories.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            source_id: Source memory ID.
+            target_id: Target memory ID.
+            edge_type: Edge type — must be ``"linked_by"`` for user-created
+                edges (automatic edges use other types).
+
+        Returns:
+            :class:`GraphLinkResponse` containing the newly created edge.
+
+        Example:
+            >>> resp = await client.memory_link("mem-abc", "mem-xyz")
+            >>> print(resp.edge.id)
+        """
+        edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
+        data: dict[str, Any] = {"target_id": target_id, "edge_type": edge_type_str}
+        result = await self._request("POST", f"/v1/memories/{source_id}/links", data=data)
+        return GraphLinkResponse.from_dict(result)
+
+    async def agent_graph_export(
+        self,
+        agent_id: str,
+        format: str = "json",
+    ) -> GraphExport:
+        """Export the full knowledge graph for an agent.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            agent_id: Agent whose graph to export.
+            format: Export format — ``"json"`` (default), ``"graphml"``, or ``"csv"``.
+
+        Returns:
+            :class:`GraphExport` with serialised graph data and statistics.
+
+        Example:
+            >>> export = await client.agent_graph_export("my-agent", format="graphml")
+            >>> with open("graph.graphml", "w") as f:
+            ...     f.write(export.data)
+        """
+        params: dict[str, Any] = {"format": format}
+        result = await self._request("GET", f"/v1/agents/{agent_id}/graph/export", params=params)
+        return GraphExport.from_dict(result)
 
     # =========================================================================
     # Session Operations

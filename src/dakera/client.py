@@ -39,12 +39,17 @@ from dakera.models import (
     DistanceMetric,
     Document,
     DocumentInput,
+    EdgeType,
     EmbeddingModel,
     FilterDict,
     FullTextSearchResult,
+    GraphExport,
+    GraphLinkResponse,
+    GraphPath,
     HybridSearchResult,
     IndexStats,
     MemoryEvent,
+    MemoryGraph,
     NamespaceInfo,
     RateLimitHeaders,
     ReadConsistency,
@@ -1083,6 +1088,78 @@ class DakeraClient:
         if relevance_score is not None:
             data["relevance_score"] = relevance_score
         return self._request("POST", f"/v1/agents/{agent_id}/memories/feedback", data=data)
+
+    # =========================================================================
+    # Memory Knowledge Graph Operations (CE-5 / SDK-9)
+    # =========================================================================
+
+    def memory_graph(
+        self,
+        memory_id: str,
+        depth: int = 1,
+        types: Optional[list[str]] = None,
+    ) -> MemoryGraph:
+        """Traverse the knowledge graph from a memory node.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            memory_id: Root memory ID to start traversal from.
+            depth: Maximum traversal depth (default: 1, max: 3).
+            types: Filter by edge types — any of ``"related_to"``,
+                ``"shares_entity"``, ``"precedes"``, ``"linked_by"``.
+                ``None`` returns all edge types.
+        """
+        params: dict[str, Any] = {"depth": depth}
+        if types:
+            params["types"] = ",".join(types)
+        result = self._request("GET", f"/v1/memories/{memory_id}/graph", params=params)
+        return MemoryGraph.from_dict(result)
+
+    def memory_path(
+        self,
+        source_id: str,
+        target_id: str,
+    ) -> GraphPath:
+        """Find the shortest path between two memories in the knowledge graph.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+        """
+        params: dict[str, Any] = {"target": target_id}
+        result = self._request("GET", f"/v1/memories/{source_id}/path", params=params)
+        return GraphPath.from_dict(result)
+
+    def memory_link(
+        self,
+        source_id: str,
+        target_id: str,
+        edge_type: Union[str, EdgeType] = EdgeType.LINKED_BY,
+    ) -> GraphLinkResponse:
+        """Create an explicit edge between two memories.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+        """
+        edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
+        data: dict[str, Any] = {"target_id": target_id, "edge_type": edge_type_str}
+        result = self._request("POST", f"/v1/memories/{source_id}/links", data=data)
+        return GraphLinkResponse.from_dict(result)
+
+    def agent_graph_export(
+        self,
+        agent_id: str,
+        format: str = "json",
+    ) -> GraphExport:
+        """Export the full knowledge graph for an agent.
+
+        Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            agent_id: Agent whose graph to export.
+            format: Export format — ``"json"`` (default), ``"graphml"``, or ``"csv"``.
+        """
+        params: dict[str, Any] = {"format": format}
+        result = self._request("GET", f"/v1/agents/{agent_id}/graph/export", params=params)
+        return GraphExport.from_dict(result)
 
     # =========================================================================
     # Session Operations
