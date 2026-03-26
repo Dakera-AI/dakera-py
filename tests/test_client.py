@@ -1667,3 +1667,138 @@ class TestGraphModels:
         assert export.format == "json"
         assert export.node_count == 10
         assert export.edge_count == 7
+
+
+# ===========================================================================
+# agents_subscribe (SDK-10)
+# ===========================================================================
+
+
+def make_memory_event(event_type: str, agent_id: str, tags=None, memory_id=None) -> MemoryEvent:
+    return MemoryEvent.from_dict({
+        "event_type": event_type,
+        "agent_id": agent_id,
+        "timestamp": 1774533000000,
+        **({"memory_id": memory_id} if memory_id else {}),
+        **({"tags": tags} if tags else {}),
+    })
+
+
+@pytest.mark.asyncio
+class TestAgentsSubscribe:
+    """agents_subscribe() filters memory events by agent_id and tags."""
+
+    async def test_filters_by_agent_id(self):
+        """Only events for the given agent_id are yielded."""
+        events = [
+            make_memory_event("stored", "agent-a", memory_id="m1"),
+            make_memory_event("stored", "agent-b", memory_id="m2"),
+            make_memory_event("recalled", "agent-a", memory_id="m3"),
+        ]
+
+        async def fake_stream():
+            for e in events:
+                yield e
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        with patch.object(client, "stream_memory_events", return_value=fake_stream()):
+            collected = []
+            async for ev in client.agents_subscribe("agent-a", reconnect=False):
+                collected.append(ev)
+
+        assert len(collected) == 2
+        assert all(e.agent_id == "agent-a" for e in collected)
+        assert {e.memory_id for e in collected} == {"m1", "m3"}
+
+    async def test_skips_connected_handshake(self):
+        """The 'connected' handshake event is never yielded."""
+        events = [
+            MemoryEvent.from_dict({"type": "connected", "timestamp": 1774533000000}),
+            make_memory_event("stored", "bot", memory_id="m1"),
+        ]
+
+        async def fake_stream():
+            for e in events:
+                yield e
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        with patch.object(client, "stream_memory_events", return_value=fake_stream()):
+            collected = []
+            async for ev in client.agents_subscribe("bot", reconnect=False):
+                collected.append(ev)
+
+        assert len(collected) == 1
+        assert collected[0].memory_id == "m1"
+
+    async def test_tag_filter(self):
+        """Only events with at least one matching tag are yielded."""
+        events = [
+            make_memory_event("stored", "bot", tags=["important", "work"], memory_id="m1"),
+            make_memory_event("stored", "bot", tags=["trivial"], memory_id="m2"),
+            make_memory_event("stored", "bot", tags=["important"], memory_id="m3"),
+        ]
+
+        async def fake_stream():
+            for e in events:
+                yield e
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        with patch.object(client, "stream_memory_events", return_value=fake_stream()):
+            collected = []
+            async for ev in client.agents_subscribe("bot", tags=["important"], reconnect=False):
+                collected.append(ev)
+
+        assert {e.memory_id for e in collected} == {"m1", "m3"}
+
+    async def test_no_tag_filter_yields_all_agent_events(self):
+        """When tags=None, all events for the agent are yielded."""
+        events = [
+            make_memory_event("stored", "bot", tags=["x"], memory_id="m1"),
+            make_memory_event("forgotten", "bot", memory_id="m2"),
+        ]
+
+        async def fake_stream():
+            for e in events:
+                yield e
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        with patch.object(client, "stream_memory_events", return_value=fake_stream()):
+            collected = []
+            async for ev in client.agents_subscribe("bot", reconnect=False):
+                collected.append(ev)
+
+        assert len(collected) == 2
+
+    async def test_reconnect_false_raises_on_error(self):
+        """With reconnect=False an exception propagates to the caller."""
+        async def failing_stream():
+            raise ConnectionError("stream dropped")
+            yield  # make it a generator
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        with patch.object(client, "stream_memory_events", return_value=failing_stream()):
+            with pytest.raises(ConnectionError, match="stream dropped"):
+                async for _ in client.agents_subscribe("bot", reconnect=False):
+                    pass
+
+    async def test_reconnect_true_retries_on_error(self):
+        """With reconnect=True the generator reconnects after a stream error."""
+        call_count = 0
+
+        async def flaky_stream():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("first attempt fails")
+            yield make_memory_event("stored", "bot", memory_id="m1")
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        with patch.object(client, "stream_memory_events", side_effect=flaky_stream):
+            with patch("asyncio.sleep"):
+                collected = []
+                async for ev in client.agents_subscribe("bot", reconnect=True, reconnect_delay=0):
+                    collected.append(ev)
+                    break  # stop after first successful event
+
+        assert call_count == 2
+        assert collected[0].memory_id == "m1"
