@@ -52,6 +52,7 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
+    AgentFeedbackSummary,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchRecallRequest,
@@ -67,6 +68,10 @@ from dakera.models import (
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
+    FeedbackHealthResponse,
+    FeedbackHistoryResponse,
+    FeedbackResponse,
+    FeedbackSignal,
     FilterDict,
     FullTextSearchResult,
     GraphExport,
@@ -791,6 +796,92 @@ class AsyncDakeraClient:
         if relevance_score is not None:
             data["relevance_score"] = relevance_score
         return await self._request("POST", f"/v1/agents/{agent_id}/memories/feedback", data=data)
+
+    # =========================================================================
+    # Memory Feedback Loop — INT-1
+    # =========================================================================
+
+    async def feedback_memory(
+        self,
+        memory_id: str,
+        agent_id: str,
+        signal: FeedbackSignal | str,
+    ) -> FeedbackResponse:
+        """Submit upvote/downvote/flag feedback on a memory (INT-1).
+
+        Args:
+            memory_id: The memory to give feedback on.
+            agent_id: The agent that owns the memory.
+            signal: :class:`FeedbackSignal` value — ``upvote``, ``downvote``, or ``flag``.
+
+        Returns:
+            :class:`FeedbackResponse` with the updated importance and applied signal.
+        """
+        data: dict[str, Any] = {
+            "agent_id": agent_id,
+            "signal": signal.value if isinstance(signal, FeedbackSignal) else signal,
+        }
+        result = await self._request("POST", f"/v1/memories/{memory_id}/feedback", data=data)
+        return FeedbackResponse.from_dict(result)
+
+    async def get_memory_feedback_history(self, memory_id: str) -> FeedbackHistoryResponse:
+        """Get the full feedback history for a memory (INT-1).
+
+        Args:
+            memory_id: The memory whose feedback history to retrieve.
+
+        Returns:
+            :class:`FeedbackHistoryResponse` with ordered list of feedback events.
+        """
+        result = await self._request("GET", f"/v1/memories/{memory_id}/feedback")
+        return FeedbackHistoryResponse.from_dict(result)
+
+    async def get_agent_feedback_summary(self, agent_id: str) -> AgentFeedbackSummary:
+        """Get aggregate feedback counts and health score for an agent (INT-1).
+
+        Args:
+            agent_id: The agent to summarise feedback for.
+
+        Returns:
+            :class:`AgentFeedbackSummary` with upvote/downvote/flag counts and health score.
+        """
+        result = await self._request("GET", f"/v1/agents/{agent_id}/feedback/summary")
+        return AgentFeedbackSummary.from_dict(result)
+
+    async def patch_memory_importance(
+        self,
+        memory_id: str,
+        agent_id: str,
+        importance: float,
+    ) -> FeedbackResponse:
+        """Directly override a memory's importance score (INT-1).
+
+        Args:
+            memory_id: The memory to update.
+            agent_id: The agent that owns the memory.
+            importance: New importance value (0.0–1.0).
+
+        Returns:
+            :class:`FeedbackResponse` with the new importance value.
+        """
+        data: dict[str, Any] = {"agent_id": agent_id, "importance": importance}
+        result = await self._request("PATCH", f"/v1/memories/{memory_id}/importance", data=data)
+        return FeedbackResponse.from_dict(result)
+
+    async def get_feedback_health(self, agent_id: str) -> FeedbackHealthResponse:
+        """Get overall feedback health score for an agent (INT-1).
+
+        The health score is the mean importance of all non-expired memories (0.0–1.0).
+        A higher score indicates a healthier, more relevant memory store.
+
+        Args:
+            agent_id: The agent to get health score for.
+
+        Returns:
+            :class:`FeedbackHealthResponse` with health score, memory count, and avg importance.
+        """
+        result = await self._request("GET", "/v1/feedback/health", params={"agent_id": agent_id})
+        return FeedbackHealthResponse.from_dict(result)
 
     # =========================================================================
     # Memory Knowledge Graph Operations (CE-5 / SDK-9)

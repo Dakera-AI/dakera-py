@@ -31,6 +31,7 @@ from dakera.exceptions import (
 )
 from dakera.models import (
     AccessPatternHint,
+    AgentFeedbackSummary,
     AgentNetworkEdge,
     AgentNetworkInfo,
     AgentNetworkNode,
@@ -55,6 +56,11 @@ from dakera.models import (
     EmbeddingModel,
     EntityExtractionResponse,
     ExtractedEntity,
+    FeedbackHealthResponse,
+    FeedbackHistoryEntry,
+    FeedbackHistoryResponse,
+    FeedbackResponse,
+    FeedbackSignal,
     FullTextSearchResult,
     GraphEdge,
     GraphExport,
@@ -91,7 +97,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.8.6"
+__version__ = "0.9.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -154,6 +160,13 @@ __all__ = [
     "ExtractedEntity",
     "EntityExtractionResponse",
     "MemoryEntitiesResponse",
+    # Memory Feedback Loop (INT-1)
+    "FeedbackSignal",
+    "FeedbackHistoryEntry",
+    "FeedbackResponse",
+    "FeedbackHistoryResponse",
+    "AgentFeedbackSummary",
+    "FeedbackHealthResponse",
     # Analytics types
     "AnalyticsOverview",
     # Inference / embedding types (v0.6.0)
