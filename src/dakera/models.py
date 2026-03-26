@@ -1297,3 +1297,164 @@ class BatchForgetResponse:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchForgetResponse":
         return cls(deleted_count=data.get("deleted_count", 0))
+
+
+# ============================================================================
+# Memory Knowledge Graph Types (CE-5 / SDK-9)
+# ============================================================================
+
+
+class EdgeType(str, Enum):
+    """Edge type for memory knowledge graph relationships (CE-5).
+
+    - ``related_to``: Cosine similarity ≥ 0.85 — two memories are semantically similar.
+    - ``shares_entity``: Both memories reference the same named entity (CE-4 tags).
+    - ``precedes``: Temporal ordering — one memory was created before the other.
+    - ``linked_by``: Explicit user/agent-created link via ``POST /v1/memories/{id}/links``.
+    """
+
+    RELATED_TO = "related_to"
+    SHARES_ENTITY = "shares_entity"
+    PRECEDES = "precedes"
+    LINKED_BY = "linked_by"
+
+
+@dataclass
+class GraphEdge:
+    """A directed edge in the memory knowledge graph."""
+
+    id: str
+    """Unique edge identifier."""
+    source_id: str
+    """Source memory ID."""
+    target_id: str
+    """Target memory ID."""
+    edge_type: EdgeType
+    """Relationship type between the two memories."""
+    weight: float
+    """Edge weight (0.0–1.0). For ``related_to`` this is the cosine similarity score."""
+    created_at: int
+    """Unix timestamp of edge creation."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GraphEdge":
+        return cls(
+            id=data["id"],
+            source_id=data["source_id"],
+            target_id=data["target_id"],
+            edge_type=EdgeType(data["edge_type"]),
+            weight=data.get("weight", 0.0),
+            created_at=data.get("created_at", 0),
+        )
+
+
+@dataclass
+class GraphNode:
+    """A node (memory) in the knowledge graph traversal result."""
+
+    memory_id: str
+    """Memory identifier."""
+    content_preview: str
+    """First 200 characters of memory content."""
+    importance: float
+    """Memory importance score."""
+    depth: int
+    """Traversal depth from the root node (root = 0)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GraphNode":
+        return cls(
+            memory_id=data["memory_id"],
+            content_preview=data.get("content_preview", ""),
+            importance=data.get("importance", 0.0),
+            depth=data.get("depth", 0),
+        )
+
+
+@dataclass
+class MemoryGraph:
+    """Graph traversal result from ``GET /v1/memories/{id}/graph``."""
+
+    root_id: str
+    """The root memory ID from which traversal started."""
+    depth: int
+    """Maximum traversal depth used."""
+    nodes: list[GraphNode]
+    """All memory nodes reachable within the requested depth."""
+    edges: list[GraphEdge]
+    """All edges connecting the returned nodes."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryGraph":
+        return cls(
+            root_id=data["root_id"],
+            depth=data.get("depth", 1),
+            nodes=[GraphNode.from_dict(n) for n in data.get("nodes", [])],
+            edges=[GraphEdge.from_dict(e) for e in data.get("edges", [])],
+        )
+
+
+@dataclass
+class GraphPath:
+    """Shortest path between two memories from ``GET /v1/memories/{id}/path``."""
+
+    source_id: str
+    """Starting memory ID."""
+    target_id: str
+    """Destination memory ID."""
+    path: list[str]
+    """Ordered list of memory IDs from source to target (inclusive)."""
+    hops: int
+    """Number of edges traversed (``len(path) - 1``)."""
+    edges: list[GraphEdge]
+    """Edges along the path, in traversal order."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GraphPath":
+        edges = [GraphEdge.from_dict(e) for e in data.get("edges", [])]
+        path: list[str] = data.get("path", [])
+        return cls(
+            source_id=data["source_id"],
+            target_id=data["target_id"],
+            path=path,
+            hops=data.get("hops", max(0, len(path) - 1)),
+            edges=edges,
+        )
+
+
+@dataclass
+class GraphLinkResponse:
+    """Response from ``POST /v1/memories/{id}/links``."""
+
+    edge: GraphEdge
+    """The newly created edge."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GraphLinkResponse":
+        return cls(edge=GraphEdge.from_dict(data["edge"]))
+
+
+@dataclass
+class GraphExport:
+    """Agent graph export from ``GET /v1/agents/{id}/graph/export``."""
+
+    agent_id: str
+    """Agent whose graph was exported."""
+    format: str
+    """Export format: ``json``, ``graphml``, or ``csv``."""
+    data: str
+    """Serialised graph in the requested format."""
+    node_count: int
+    """Total number of memory nodes in the export."""
+    edge_count: int
+    """Total number of edges in the export."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "GraphExport":
+        return cls(
+            agent_id=data["agent_id"],
+            format=data["format"],
+            data=data["data"],
+            node_count=data.get("node_count", 0),
+            edge_count=data.get("edge_count", 0),
+        )
