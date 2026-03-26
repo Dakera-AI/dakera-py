@@ -1266,7 +1266,8 @@ GRAPH_RESPONSE = {
     "depth": 2,
     "nodes": [
         {"memory_id": "mem-abc", "content_preview": "Root memory", "importance": 0.9, "depth": 0},
-        {"memory_id": "mem-def", "content_preview": "Related memory", "importance": 0.7, "depth": 1},
+        {"memory_id": "mem-def", "content_preview": "Related memory", "importance": 0.7,
+         "depth": 1},
         {"memory_id": "mem-ghi", "content_preview": "Linked memory", "importance": 0.5, "depth": 2},
     ],
     "edges": [

@@ -8,7 +8,7 @@ import json
 import random
 import time
 from collections.abc import Generator
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from urllib.parse import urljoin
 
 import requests
