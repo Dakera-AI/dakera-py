@@ -66,6 +66,7 @@ from dakera.models import (
     DocumentInput,
     EdgeType,
     EmbeddingModel,
+    EntityExtractionResponse,
     FilterDict,
     FullTextSearchResult,
     GraphExport,
@@ -73,9 +74,11 @@ from dakera.models import (
     GraphPath,
     HybridSearchResult,
     IndexStats,
+    MemoryEntitiesResponse,
     MemoryEvent,
     MemoryGraph,
     NamespaceInfo,
+    NamespaceNerConfig,
     RateLimitHeaders,
     ReadConsistency,
     RetryConfig,
@@ -901,6 +904,89 @@ class AsyncDakeraClient:
         params: dict[str, Any] = {"format": format}
         result = await self._request("GET", f"/v1/agents/{agent_id}/graph/export", params=params)
         return GraphExport.from_dict(result)
+
+    # =========================================================================
+    # Entity Extraction Operations (CE-4)
+    # =========================================================================
+
+    async def configure_namespace_ner(
+        self,
+        namespace: str,
+        extract_entities: bool,
+        entity_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Configure entity extraction for a namespace.
+
+        Enables or disables GLiNER zero-shot NER + rule-based entity tagging
+        on memories stored in this namespace.  Requires ``Scope::Write``.
+
+        Args:
+            namespace: Target namespace.
+            extract_entities: Enable automatic entity extraction on store.
+            entity_types: Entity types to extract, e.g. ``["person", "org",
+                "location", "date"]``.  ``None`` keeps existing types.
+
+        Returns:
+            Updated namespace config dict.
+
+        Note:
+            Requires CE-4 (GLiNER) on the server.  The server falls back to
+            rule-based extraction only when the GLiNER model has not yet been
+            downloaded.
+        """
+        config = NamespaceNerConfig(
+            extract_entities=extract_entities,
+            entity_types=entity_types,
+        )
+        return await self._request(
+            "PATCH", f"/v1/namespaces/{namespace}/config", data=config.to_dict()
+        )
+
+    async def extract_entities(
+        self,
+        text: str,
+        entity_types: list[str] | None = None,
+    ) -> EntityExtractionResponse:
+        """Extract entities from arbitrary text without storing a memory.
+
+        Uses the same GLiNER + rule-based pipeline as automatic extraction.
+        Requires ``Scope::Read``.
+
+        Args:
+            text: Text to extract entities from.
+            entity_types: Entity types to extract.  ``None`` uses server
+                defaults (person, org, location, date, url, email).
+
+        Returns:
+            :class:`EntityExtractionResponse` with extracted entities.
+
+        Note:
+            Requires CE-4 (GLiNER) on the server.
+        """
+        data: dict[str, Any] = {"text": text}
+        if entity_types is not None:
+            data["entity_types"] = entity_types
+        result = await self._request("POST", "/v1/memories/extract", data=data)
+        return EntityExtractionResponse.from_dict(result)
+
+    async def memory_entities(self, memory_id: str) -> MemoryEntitiesResponse:
+        """Get entity tags attached to a stored memory.
+
+        Returns entities that were extracted automatically when the memory
+        was stored (requires ``extract_entities=True`` on the namespace) or
+        via a manual extraction.  Requires ``Scope::Read``.
+
+        Args:
+            memory_id: Memory ID to fetch entities for.
+
+        Returns:
+            :class:`MemoryEntitiesResponse` with entity list.
+
+        Note:
+            Requires CE-4 (GLiNER) on the server.
+        """
+        result = await self._request("GET", f"/v1/memory/entities/{memory_id}")
+        return MemoryEntitiesResponse.from_dict(result)
 
     # =========================================================================
     # Session Operations

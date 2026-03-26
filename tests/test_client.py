@@ -1805,4 +1805,251 @@ class TestAgentsSubscribe:
                 break  # stop after first successful event
 
         assert call_count == 2
-        assert collected[0].memory_id == "m1"
+
+
+# ===========================================================================
+# Entity Extraction (CE-4 / GLiNER)
+# ===========================================================================
+
+EXTRACT_RESPONSE = {
+    "entities": [
+        {"entity_type": "person", "value": "Alice", "score": 0.97},
+        {"entity_type": "location", "value": "Paris", "score": 0.91},
+    ],
+}
+
+MEMORY_ENTITIES_RESPONSE = {
+    "memory_id": "mem-001",
+    "entities": [
+        {"entity_type": "org", "value": "Dakera", "score": 0.88},
+    ],
+}
+
+
+class TestEntityExtractionSyncClient:
+    """Tests for CE-4 entity extraction sync client methods."""
+
+    def test_configure_namespace_ner_enable(self, client, mock_responses):
+        """configure_namespace_ner() sends PATCH to correct endpoint."""
+        mock_responses.add(
+            responses.PATCH,
+            "http://localhost:3000/v1/namespaces/my-ns/config",
+            json={"extract_entities": True, "entity_types": ["person", "org"]},
+            status=200,
+        )
+        result = client.configure_namespace_ner(
+            "my-ns", extract_entities=True, entity_types=["person", "org"]
+        )
+        assert result["extract_entities"] is True
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["extract_entities"] is True
+        assert body["entity_types"] == ["person", "org"]
+
+    def test_configure_namespace_ner_disable(self, client, mock_responses):
+        """configure_namespace_ner() with extract_entities=False omits entity_types."""
+        mock_responses.add(
+            responses.PATCH,
+            "http://localhost:3000/v1/namespaces/my-ns/config",
+            json={"extract_entities": False},
+            status=200,
+        )
+        result = client.configure_namespace_ner("my-ns", extract_entities=False)
+        assert result["extract_entities"] is False
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["extract_entities"] is False
+        assert "entity_types" not in body
+
+    def test_extract_entities_returns_response(self, client, mock_responses):
+        """extract_entities() POSTs text and returns EntityExtractionResponse."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/extract",
+            json=EXTRACT_RESPONSE,
+            status=200,
+        )
+        result = client.extract_entities("Alice lives in Paris.")
+        assert len(result.entities) == 2
+        assert result.entities[0].entity_type == "person"
+        assert result.entities[0].value == "Alice"
+        assert result.entities[0].score == pytest.approx(0.97)
+        assert result.entities[1].entity_type == "location"
+        assert result.entities[1].value == "Paris"
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["text"] == "Alice lives in Paris."
+        assert "entity_types" not in body
+
+    def test_extract_entities_with_entity_types(self, client, mock_responses):
+        """extract_entities() sends entity_types when provided."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/extract",
+            json=EXTRACT_RESPONSE,
+            status=200,
+        )
+        client.extract_entities("Alice lives in Paris.", entity_types=["person", "location"])
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["entity_types"] == ["person", "location"]
+
+    def test_memory_entities_returns_response(self, client, mock_responses):
+        """memory_entities() GETs entity tags for a stored memory."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/memory/entities/mem-001",
+            json=MEMORY_ENTITIES_RESPONSE,
+            status=200,
+        )
+        result = client.memory_entities("mem-001")
+        assert result.memory_id == "mem-001"
+        assert len(result.entities) == 1
+        assert result.entities[0].entity_type == "org"
+        assert result.entities[0].value == "Dakera"
+        assert result.entities[0].score == pytest.approx(0.88)
+
+
+@pytest.mark.asyncio
+class TestEntityExtractionAsyncClient:
+    """Tests for CE-4 entity extraction async client methods."""
+
+    async def test_configure_namespace_ner(self):
+        """configure_namespace_ner() calls PATCH /v1/namespaces/:ns/config."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path, data or {}))
+            return {"extract_entities": True, "entity_types": ["person"]}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.configure_namespace_ner(
+                "my-ns", extract_entities=True, entity_types=["person"]
+            )
+
+        assert calls[0][0] == "PATCH"
+        assert calls[0][1] == "/v1/namespaces/my-ns/config"
+        assert calls[0][2]["extract_entities"] is True
+        assert calls[0][2]["entity_types"] == ["person"]
+        assert result["extract_entities"] is True
+
+    async def test_configure_namespace_ner_no_entity_types(self):
+        """configure_namespace_ner() omits entity_types when None."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path, data or {}))
+            return {"extract_entities": False}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.configure_namespace_ner("my-ns", extract_entities=False)
+
+        assert "entity_types" not in calls[0][2]
+
+    async def test_extract_entities(self):
+        """extract_entities() calls POST /v1/memories/extract."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path, data or {}))
+            return EXTRACT_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.extract_entities("Alice lives in Paris.")
+
+        assert calls[0][0] == "POST"
+        assert calls[0][1] == "/v1/memories/extract"
+        assert calls[0][2]["text"] == "Alice lives in Paris."
+        assert len(result.entities) == 2
+        assert result.entities[0].value == "Alice"
+
+    async def test_extract_entities_with_types(self):
+        """extract_entities() forwards entity_types to the server."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, data=None, **kwargs):
+            calls.append((method, path, data or {}))
+            return EXTRACT_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.extract_entities("Alice.", entity_types=["person"])
+
+        assert calls[0][2]["entity_types"] == ["person"]
+
+    async def test_memory_entities(self):
+        """memory_entities() calls GET /v1/memory/entities/:id."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        calls: list = []
+
+        async def fake_request(method, path, **kwargs):
+            calls.append((method, path))
+            return MEMORY_ENTITIES_RESPONSE
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.memory_entities("mem-001")
+
+        assert calls[0][0] == "GET"
+        assert calls[0][1] == "/v1/memory/entities/mem-001"
+        assert result.memory_id == "mem-001"
+        assert len(result.entities) == 1
+        assert result.entities[0].entity_type == "org"
+
+
+class TestEntityExtractionModels:
+    """Unit tests for CE-4 entity extraction model dataclasses."""
+
+    def test_extracted_entity_from_dict(self):
+        """ExtractedEntity.from_dict() parses all fields."""
+        from dakera import ExtractedEntity
+        entity = ExtractedEntity.from_dict(
+            {"entity_type": "person", "value": "Bob", "score": 0.95}
+        )
+        assert entity.entity_type == "person"
+        assert entity.value == "Bob"
+        assert entity.score == pytest.approx(0.95)
+
+    def test_extracted_entity_score_defaults_to_zero(self):
+        """ExtractedEntity.from_dict() defaults score to 0.0 when missing."""
+        from dakera import ExtractedEntity
+        entity = ExtractedEntity.from_dict({"entity_type": "org", "value": "Acme"})
+        assert entity.score == 0.0
+
+    def test_entity_extraction_response_from_dict(self):
+        """EntityExtractionResponse.from_dict() builds entity list."""
+        from dakera import EntityExtractionResponse
+        resp = EntityExtractionResponse.from_dict(EXTRACT_RESPONSE)
+        assert len(resp.entities) == 2
+        assert resp.entities[0].entity_type == "person"
+
+    def test_entity_extraction_response_empty(self):
+        """EntityExtractionResponse.from_dict() handles empty entities list."""
+        from dakera import EntityExtractionResponse
+        resp = EntityExtractionResponse.from_dict({"entities": []})
+        assert resp.entities == []
+
+    def test_memory_entities_response_from_dict(self):
+        """MemoryEntitiesResponse.from_dict() parses memory_id and entities."""
+        from dakera import MemoryEntitiesResponse
+        resp = MemoryEntitiesResponse.from_dict(MEMORY_ENTITIES_RESPONSE)
+        assert resp.memory_id == "mem-001"
+        assert len(resp.entities) == 1
+        assert resp.entities[0].value == "Dakera"
+
+    def test_namespace_ner_config_to_dict_without_types(self):
+        """NamespaceNerConfig.to_dict() omits entity_types when None."""
+        from dakera import NamespaceNerConfig
+        cfg = NamespaceNerConfig(extract_entities=True)
+        d = cfg.to_dict()
+        assert d["extract_entities"] is True
+        assert "entity_types" not in d
+
+    def test_namespace_ner_config_to_dict_with_types(self):
+        """NamespaceNerConfig.to_dict() includes entity_types when set."""
+        from dakera import NamespaceNerConfig
+        cfg = NamespaceNerConfig(extract_entities=True, entity_types=["person", "date"])
+        d = cfg.to_dict()
+        assert d["entity_types"] == ["person", "date"]

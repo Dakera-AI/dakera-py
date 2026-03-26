@@ -53,6 +53,8 @@ from dakera.models import (
     Document,
     EdgeType,
     EmbeddingModel,
+    EntityExtractionResponse,
+    ExtractedEntity,
     FullTextSearchResult,
     GraphEdge,
     GraphExport,
@@ -65,9 +67,11 @@ from dakera.models import (
     KnowledgeGraphResponse,
     KnowledgeNode,
     Memory,
+    MemoryEntitiesResponse,
     MemoryEvent,
     MemoryGraph,
     NamespaceInfo,
+    NamespaceNerConfig,
     OpStatus,
     QueryResult,
     RateLimitHeaders,
@@ -145,6 +149,11 @@ __all__ = [
     "GraphPath",
     "GraphLinkResponse",
     "GraphExport",
+    # Entity Extraction types (CE-4 / GLiNER)
+    "NamespaceNerConfig",
+    "ExtractedEntity",
+    "EntityExtractionResponse",
+    "MemoryEntitiesResponse",
     # Analytics types
     "AnalyticsOverview",
     # Inference / embedding types (v0.6.0)
