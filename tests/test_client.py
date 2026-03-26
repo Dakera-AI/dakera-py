@@ -2068,8 +2068,18 @@ FEEDBACK_RESPONSE = {
 FEEDBACK_HISTORY_RESPONSE = {
     "memory_id": "mem-abc",
     "entries": [
-        {"signal": "upvote", "timestamp": 1774000000, "old_importance": 0.5, "new_importance": 0.575},
-        {"signal": "downvote", "timestamp": 1774001000, "old_importance": 0.575, "new_importance": 0.489},
+        {
+            "signal": "upvote",
+            "timestamp": 1774000000,
+            "old_importance": 0.5,
+            "new_importance": 0.575,
+        },
+        {
+            "signal": "downvote",
+            "timestamp": 1774001000,
+            "old_importance": 0.575,
+            "new_importance": 0.489,
+        },
     ],
 }
 
@@ -2191,8 +2201,8 @@ class TestFeedbackLoopAsyncClient:
     @pytest.mark.asyncio
     async def test_feedback_memory_async(self):
         """AsyncDakeraClient.feedback_memory() calls correct endpoint."""
-        import httpx
         from dakera import FeedbackSignal
+        import httpx
         with patch("httpx.AsyncClient.request") as mock_req:
             mock_req.return_value = httpx.Response(200, json=FEEDBACK_RESPONSE)
             async with AsyncDakeraClient("http://localhost:3000") as client:
@@ -2269,7 +2279,12 @@ class TestFeedbackLoopModels:
         """FeedbackHistoryEntry.from_dict() parses entry fields."""
         from dakera import FeedbackHistoryEntry, FeedbackSignal
         entry = FeedbackHistoryEntry.from_dict(
-            {"signal": "downvote", "timestamp": 1774001000, "old_importance": 0.5, "new_importance": 0.425}
+            {
+                "signal": "downvote",
+                "timestamp": 1774001000,
+                "old_importance": 0.5,
+                "new_importance": 0.425,
+            }
         )
         assert entry.signal == FeedbackSignal.DOWNVOTE
         assert entry.timestamp == 1774001000
