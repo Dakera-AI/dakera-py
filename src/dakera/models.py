@@ -1458,3 +1458,60 @@ class GraphExport:
             node_count=data.get("node_count", 0),
             edge_count=data.get("edge_count", 0),
         )
+
+
+# ============================================================================
+# Entity Extraction Types (CE-4 / GLiNER)
+# ============================================================================
+
+
+@dataclass
+class NamespaceNerConfig:
+    """Entity extraction configuration for a namespace."""
+    extract_entities: bool = False
+    entity_types: Optional[list[str]] = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"extract_entities": self.extract_entities}
+        if self.entity_types is not None:
+            d["entity_types"] = self.entity_types
+        return d
+
+@dataclass
+class ExtractedEntity:
+    """A single extracted entity."""
+    entity_type: str
+    value: str
+    score: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExtractedEntity":
+        return cls(
+            entity_type=data["entity_type"],
+            value=data["value"],
+            score=float(data.get("score", 0.0)),
+        )
+
+@dataclass
+class EntityExtractionResponse:
+    """Response from POST /v1/memories/extract."""
+    entities: list[ExtractedEntity]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "EntityExtractionResponse":
+        return cls(
+            entities=[ExtractedEntity.from_dict(e) for e in data.get("entities", [])],
+        )
+
+@dataclass
+class MemoryEntitiesResponse:
+    """Response from GET /v1/memory/entities/:id."""
+    memory_id: str
+    entities: list[ExtractedEntity]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryEntitiesResponse":
+        return cls(
+            memory_id=data["memory_id"],
+            entities=[ExtractedEntity.from_dict(e) for e in data.get("entities", [])],
+        )
