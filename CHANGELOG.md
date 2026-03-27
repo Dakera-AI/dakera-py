@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-03-27
+
+### Added
+- **Namespace-scoped API Keys (SEC-1):**
+  - `create_namespace_key(namespace, name, expires_in_days)` /
+    `async create_namespace_key()` — create a scoped API key for a namespace
+    (`POST /v1/namespaces/{ns}/keys`). Returns `CreateNamespaceKeyResponse`.
+    The raw key is shown **only once** — store it securely.
+  - `list_namespace_keys(namespace)` / `async list_namespace_keys()` — list all
+    API keys for a namespace (`GET /v1/namespaces/{ns}/keys`). Returns
+    `ListNamespaceKeysResponse` (key secrets are never exposed in listings).
+  - `delete_namespace_key(namespace, key_id)` / `async delete_namespace_key()` —
+    revoke a namespace API key (`DELETE /v1/namespaces/{ns}/keys/{key_id}`).
+    Returns a dict with `success` and `message` fields.
+  - `get_namespace_key_usage(namespace, key_id)` /
+    `async get_namespace_key_usage()` — retrieve usage stats for a key
+    (`GET /v1/namespaces/{ns}/keys/{key_id}/usage`). Returns
+    `NamespaceKeyUsageResponse`.
+  - New types: `NamespaceKeyInfo`, `CreateNamespaceKeyResponse`,
+    `ListNamespaceKeysResponse`, `NamespaceKeyUsageResponse` — all exported from
+    the top-level `dakera` package.
+
+### Fixed
+- `__version__` in `dakera/__init__.py` was not updated during the v0.9.1 release;
+  corrected to match `pyproject.toml`.
+
 ## [0.9.1] - 2026-03-26
 
 ### Added
