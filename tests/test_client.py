@@ -2470,3 +2470,47 @@ class TestNamespaceKeysSEC1:
         resp = NamespaceKeyUsageResponse.from_dict({"key_id": "k", "namespace": "n"})
         assert resp.total_requests == 0
         assert resp.avg_latency_ms == 0.0
+
+
+class TestOpsMetricsINFRA3:
+    """Tests for INFRA-3 Prometheus metrics endpoint (v0.9.3)."""
+
+    PROMETHEUS_TEXT = (
+        "# HELP dakera_memory_store_total Total memory store operations\n"
+        "# TYPE dakera_memory_store_total counter\n"
+        "dakera_memory_store_total 42\n"
+        "# HELP dakera_memory_count Current stored memory count\n"
+        "# TYPE dakera_memory_count gauge\n"
+        "dakera_memory_count 1024\n"
+    )
+
+    def test_ops_metrics_returns_prometheus_text(self, client, mock_responses):
+        """ops_metrics() GETs /v1/ops/metrics and returns Prometheus text body."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/ops/metrics",
+            body=self.PROMETHEUS_TEXT,
+            content_type="text/plain; version=0.0.4; charset=utf-8",
+            status=200,
+        )
+
+        result = client.ops_metrics()
+
+        assert isinstance(result, str)
+        assert "dakera_memory_store_total" in result
+        assert "dakera_memory_count" in result
+        assert mock_responses.calls[0].request.method == "GET"
+        assert "/v1/ops/metrics" in mock_responses.calls[0].request.url
+
+    def test_ops_metrics_requires_admin_scope_error(self, client, mock_responses):
+        """ops_metrics() raises AuthorizationError on 403 (insufficient scope)."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/ops/metrics",
+            json={"error": "Admin scope required", "code": "AUTHORIZATION_ERROR"},
+            status=403,
+        )
+
+        from dakera import AuthorizationError
+        with pytest.raises(AuthorizationError):
+            client.ops_metrics()
