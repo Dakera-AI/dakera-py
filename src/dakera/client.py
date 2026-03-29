@@ -1858,6 +1858,14 @@ class DakeraClient:
         """
         return self._request("GET", "/v1/ops/stats")
 
+    def ops_metrics(self) -> str:
+        """Get Prometheus metrics in text exposition format (INFRA-3).
+
+        Requires Admin scope. Returns the raw Prometheus text exposition
+        format string suitable for scraping by a Prometheus server.
+        """
+        return self._request("GET", "/v1/ops/metrics")
+
     def cluster_status(self) -> dict[str, Any]:
         """Get cluster status."""
         return self._request("GET", "/v1/admin/cluster/status")
