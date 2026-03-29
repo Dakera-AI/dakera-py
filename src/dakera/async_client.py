@@ -1488,6 +1488,14 @@ class AsyncDakeraClient:
         """
         return await self._request("GET", "/v1/ops/stats")
 
+    async def ops_metrics(self) -> str:
+        """Get Prometheus metrics in text exposition format (INFRA-3).
+
+        Requires Admin scope. Returns the raw Prometheus text exposition
+        format string suitable for scraping by a Prometheus server.
+        """
+        return await self._request("GET", "/v1/ops/metrics")
+
     async def cluster_status(self) -> dict[str, Any]:
         """Get cluster status."""
         return await self._request("GET", "/v1/admin/cluster/status")
