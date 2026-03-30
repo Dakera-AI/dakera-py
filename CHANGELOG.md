@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-03-30
+
 ### Added
 - **GLiNER Entity Extraction via ODE sidecar (ODE-2):**
   - `ode_extract_entities(content, agent_id, memory_id?, entity_types?)` — extract
