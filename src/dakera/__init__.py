@@ -64,6 +64,8 @@ from dakera.models import (
     EmbeddingModel,
     EntityExtractionResponse,
     ExtractedEntity,
+    # ODE-2
+    ExtractEntitiesResponse,
     ExtractionProviderInfo,
     # EXT-1
     ExtractionResult,
@@ -95,6 +97,7 @@ from dakera.models import (
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
+    OdeEntity,
     OpStatus,
     QueryResult,
     RateLimitHeaders,
@@ -225,6 +228,9 @@ __all__ = [
     # AES-256-GCM Encryption Key Rotation (SEC-3)
     "RotateEncryptionKeyRequest",
     "RotateEncryptionKeyResponse",
+    # GLiNER Entity Extraction via ODE sidecar (ODE-2)
+    "OdeEntity",
+    "ExtractEntitiesResponse",
     # Exceptions
     "DakeraError",
     "ConnectionError",

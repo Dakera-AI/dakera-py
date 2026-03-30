@@ -1980,3 +1980,54 @@ class RotateEncryptionKeyResponse:
             skipped=data.get("skipped", 0),
             namespaces=data.get("namespaces", []),
         )
+
+
+# ==============================================================================
+# ODE-2: GLiNER Entity Extraction (dakera-ode sidecar)
+# ==============================================================================
+
+
+@dataclass
+class OdeEntity:
+    """A single entity extracted by the GLiNER model (ODE-2)."""
+
+    text: str
+    """Span text as it appears in the input."""
+    label: str
+    """Entity type label (e.g. ``"person"``, ``"organization"``)."""
+    start: int
+    """Start character offset (inclusive) within the input text."""
+    end: int
+    """End character offset (exclusive) within the input text."""
+    score: float
+    """Confidence score in the range [0, 1]."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OdeEntity":
+        return cls(
+            text=data["text"],
+            label=data["label"],
+            start=int(data["start"]),
+            end=int(data["end"]),
+            score=float(data["score"]),
+        )
+
+
+@dataclass
+class ExtractEntitiesResponse:
+    """Response from ``POST /ode/extract`` on the ODE sidecar (ODE-2)."""
+
+    entities: list[OdeEntity]
+    """Extracted entities ordered by their start offset."""
+    model: str
+    """GLiNER model variant used for extraction."""
+    processing_time_ms: int
+    """Wall-clock time taken by the ODE sidecar in milliseconds."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExtractEntitiesResponse":
+        return cls(
+            entities=[OdeEntity.from_dict(e) for e in data.get("entities", [])],
+            model=data.get("model", ""),
+            processing_time_ms=int(data.get("processing_time_ms", 0)),
+        )

@@ -2579,3 +2579,118 @@ class TestRotateEncryptionKeyModelSEC3:
         assert resp.rotated == 0
         assert resp.skipped == 0
         assert resp.namespaces == []
+
+
+class TestOdeExtractEntitiesODE2:
+    """Tests for ODE-2 GLiNER entity extraction via dakera-ode sidecar."""
+
+    ODE_RESPONSE = {
+        "entities": [
+            {"text": "Alice", "label": "person", "start": 0, "end": 5, "score": 0.97},
+            {"text": "Paris", "label": "location", "start": 16, "end": 21, "score": 0.92},
+        ],
+        "model": "gliner-multi-v2.1",
+        "processing_time_ms": 34,
+    }
+
+    @pytest.fixture
+    def ode_client(self):
+        return DakeraClient("http://localhost:3000", ode_url="http://localhost:8080")
+
+    def test_ode_extract_entities_returns_response(self, ode_client, mock_responses):
+        """ode_extract_entities() POSTs /ode/extract and returns ExtractEntitiesResponse."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:8080/ode/extract",
+            json=self.ODE_RESPONSE,
+            status=200,
+        )
+
+        from dakera import ExtractEntitiesResponse, OdeEntity
+
+        result = ode_client.ode_extract_entities("Alice lives in Paris.", "agent-1")
+
+        assert isinstance(result, ExtractEntitiesResponse)
+        assert len(result.entities) == 2
+        assert isinstance(result.entities[0], OdeEntity)
+        assert result.entities[0].text == "Alice"
+        assert result.entities[0].label == "person"
+        assert result.entities[0].start == 0
+        assert result.entities[0].end == 5
+        assert result.entities[1].text == "Paris"
+        assert result.model == "gliner-multi-v2.1"
+        assert result.processing_time_ms == 34
+        assert mock_responses.calls[0].request.method == "POST"
+        assert "/ode/extract" in mock_responses.calls[0].request.url
+
+    def test_ode_extract_entities_sends_optional_fields(self, ode_client, mock_responses):
+        """ode_extract_entities() includes memory_id and entity_types when provided."""
+        import json as _json
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:8080/ode/extract",
+            json=self.ODE_RESPONSE,
+            status=200,
+        )
+
+        ode_client.ode_extract_entities(
+            "Alice works at Dakera.",
+            "agent-2",
+            memory_id="mem-abc",
+            entity_types=["person", "org"],
+        )
+
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body["content"] == "Alice works at Dakera."
+        assert body["agent_id"] == "agent-2"
+        assert body["memory_id"] == "mem-abc"
+        assert body["entity_types"] == ["person", "org"]
+
+    def test_ode_extract_entities_raises_without_ode_url(self, client, mock_responses):
+        """ode_extract_entities() raises ValueError when ode_url is not set."""
+        with pytest.raises(ValueError, match="ode_url"):
+            client.ode_extract_entities("some text", "agent-1")
+
+
+class TestOdeEntityModelODE2:
+    """Unit tests for OdeEntity and ExtractEntitiesResponse models."""
+
+    def test_ode_entity_from_dict(self):
+        """OdeEntity.from_dict() maps all fields correctly."""
+        from dakera import OdeEntity
+
+        entity = OdeEntity.from_dict(
+            {"text": "Berlin", "label": "location", "start": 10, "end": 16, "score": 0.88}
+        )
+        assert entity.text == "Berlin"
+        assert entity.label == "location"
+        assert entity.start == 10
+        assert entity.end == 16
+        assert entity.score == 0.88
+
+    def test_extract_entities_response_from_dict(self):
+        """ExtractEntitiesResponse.from_dict() maps entities, model, and processing_time_ms."""
+        from dakera import ExtractEntitiesResponse
+
+        resp = ExtractEntitiesResponse.from_dict({
+            "entities": [
+                {"text": "Bob", "label": "person", "start": 0, "end": 3, "score": 0.95}
+            ],
+            "model": "gliner-multi-v2.1",
+            "processing_time_ms": 12,
+        })
+        assert len(resp.entities) == 1
+        assert resp.entities[0].text == "Bob"
+        assert resp.model == "gliner-multi-v2.1"
+        assert resp.processing_time_ms == 12
+
+    def test_extract_entities_response_empty(self):
+        """ExtractEntitiesResponse.from_dict() handles empty entity list."""
+        from dakera import ExtractEntitiesResponse
+
+        resp = ExtractEntitiesResponse.from_dict(
+            {"entities": [], "model": "m", "processing_time_ms": 5}
+        )
+        assert resp.entities == []
+        assert resp.model == "m"

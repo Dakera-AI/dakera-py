@@ -74,6 +74,8 @@ from dakera.models import (
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
+    # ODE-2
+    ExtractEntitiesResponse,
     ExtractionProviderInfo,
     # EXT-1
     ExtractionResult,
@@ -139,6 +141,7 @@ class AsyncDakeraClient:
         max_retries: int = 3,
         retry_config: RetryConfig | None = None,
         headers: dict[str, str] | None = None,
+        ode_url: str | None = None,
     ) -> None:
         """
         Initialize async Dakera client.
@@ -155,8 +158,12 @@ class AsyncDakeraClient:
                 ``max_retries`` is ignored in favour of
                 ``retry_config.max_retries``.
             headers: Additional headers to include in all requests
+            ode_url: Base URL of the dakera-ode sidecar
+                (e.g., ``"http://localhost:8080"``).  Required to call
+                :meth:`extract_entities`.
         """
         self.base_url = base_url.rstrip("/")
+        self.ode_url = ode_url.rstrip("/") if ode_url else None
         self.api_key = api_key
         self.timeout = timeout
         self.connect_timeout = connect_timeout if connect_timeout is not None else timeout
@@ -2131,6 +2138,53 @@ class AsyncDakeraClient:
         if model is not None:
             body["model"] = model
         return await self._request("PATCH", f"/v1/namespaces/{namespace}/extractor", data=body)
+
+    # =========================================================================
+    # ODE-2: GLiNER Entity Extraction (dakera-ode sidecar)
+    # =========================================================================
+
+    async def ode_extract_entities(
+        self,
+        content: str,
+        agent_id: str,
+        memory_id: str | None = None,
+        entity_types: list[str] | None = None,
+    ) -> ExtractEntitiesResponse:
+        """Extract named entities from text using the GLiNER sidecar (ODE-2).
+
+        Calls ``POST /ode/extract`` on the dakera-ode sidecar service.
+        Requires :attr:`ode_url` to be configured on the client.
+
+        Args:
+            content: The text to extract entities from.
+            agent_id: Agent context for the extraction.
+            memory_id: Optional memory ID to associate with the extraction.
+            entity_types: Optional list of entity type labels to extract.
+                When omitted, the ODE sidecar uses its default set of types.
+
+        Returns:
+            :class:`ExtractEntitiesResponse` containing extracted entities,
+            the GLiNER model variant used, and processing time in ms.
+
+        Raises:
+            ValueError: If :attr:`ode_url` is not configured.
+        """
+        if not self.ode_url:
+            raise ValueError(
+                "ode_url must be configured to use ode_extract_entities(). "
+                "Pass ode_url='http://localhost:8080' to AsyncDakeraClient."
+            )
+        body: dict[str, Any] = {"content": content, "agent_id": agent_id}
+        if memory_id is not None:
+            body["memory_id"] = memory_id
+        if entity_types is not None:
+            body["entity_types"] = entity_types
+        response = await self._client.post(
+            f"{self.ode_url}/ode/extract",
+            json=body,
+        )
+        data = self._handle_response(response)
+        return ExtractEntitiesResponse.from_dict(data)
 
     # =========================================================================
     # Context Manager Support
