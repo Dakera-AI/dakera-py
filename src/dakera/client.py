@@ -76,6 +76,8 @@ from dakera.models import (
     RateLimitHeaders,
     ReadConsistency,
     RetryConfig,
+    # SEC-3
+    RotateEncryptionKeyResponse,
     SearchResult,
     StalenessConfig,
     TextDocument,
@@ -2059,6 +2061,37 @@ class DakeraClient:
         per-cycle statistics from the most recent run. Requires Admin scope.
         """
         return self._request("GET", "/v1/admin/decay/stats")
+
+    def rotate_encryption_key(
+        self,
+        new_key: str,
+        namespace: str | None = None,
+    ) -> RotateEncryptionKeyResponse:
+        """Re-encrypt all memory content blobs with a new AES-256-GCM key (SEC-3).
+
+        After this call the new key is active in the running process.
+        The operator must update ``DAKERA_ENCRYPTION_KEY`` and restart the
+        server to make the rotation durable across restarts.
+
+        Only blobs stored with the ``$enc$v1$`` prefix are re-encrypted.
+        Plaintext blobs (stored before encryption was enabled) are encrypted
+        with the new key as part of the rotation.
+
+        Requires Admin scope.
+
+        Args:
+            new_key: New passphrase or 64-char hex key.
+            namespace: Rotate only this namespace. Omit to rotate all.
+
+        Returns:
+            :class:`RotateEncryptionKeyResponse` with counts of rotated,
+            skipped, and affected namespace names.
+        """
+        data: dict[str, Any] = {"new_key": new_key}
+        if namespace is not None:
+            data["namespace"] = namespace
+        result = self._request("POST", "/v1/admin/encryption/rotate-key", data=data)
+        return RotateEncryptionKeyResponse.from_dict(result)
 
     # =========================================================================
     # API Key Operations

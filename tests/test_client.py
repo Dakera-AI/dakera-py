@@ -2514,3 +2514,68 @@ class TestOpsMetricsINFRA3:
         from dakera import AuthorizationError
         with pytest.raises(AuthorizationError):
             client.ops_metrics()
+
+
+class TestRotateEncryptionKeySEC3:
+    """Tests for SEC-3 AES-256-GCM encryption key rotation endpoint."""
+
+    def test_rotate_encryption_key_returns_response(self, client, mock_responses):
+        """rotate_encryption_key() POSTs /v1/admin/encryption/rotate-key and returns counts."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/encryption/rotate-key",
+            json={"rotated": 42, "skipped": 3, "namespaces": ["ns-a", "ns-b"]},
+            status=200,
+        )
+
+        from dakera import RotateEncryptionKeyResponse
+
+        result = client.rotate_encryption_key("new-secret-passphrase")
+
+        assert isinstance(result, RotateEncryptionKeyResponse)
+        assert result.rotated == 42
+        assert result.skipped == 3
+        assert result.namespaces == ["ns-a", "ns-b"]
+        assert mock_responses.calls[0].request.method == "POST"
+        assert "/v1/admin/encryption/rotate-key" in mock_responses.calls[0].request.url
+
+    def test_rotate_encryption_key_with_namespace(self, client, mock_responses):
+        """rotate_encryption_key() sends namespace field when provided."""
+        import json
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/encryption/rotate-key",
+            json={"rotated": 5, "skipped": 0, "namespaces": ["my-ns"]},
+            status=200,
+        )
+
+        client.rotate_encryption_key("new-key", namespace="my-ns")
+
+        body = json.loads(mock_responses.calls[0].request.body)
+        assert body["namespace"] == "my-ns"
+        assert body["new_key"] == "new-key"
+
+
+class TestRotateEncryptionKeyModelSEC3:
+    """Unit tests for RotateEncryptionKeyRequest / RotateEncryptionKeyResponse models."""
+
+    def test_response_from_dict(self):
+        """RotateEncryptionKeyResponse.from_dict() maps all fields."""
+        from dakera import RotateEncryptionKeyResponse
+
+        resp = RotateEncryptionKeyResponse.from_dict(
+            {"rotated": 10, "skipped": 2, "namespaces": ["a", "b"]}
+        )
+        assert resp.rotated == 10
+        assert resp.skipped == 2
+        assert resp.namespaces == ["a", "b"]
+
+    def test_response_defaults(self):
+        """RotateEncryptionKeyResponse.from_dict() uses 0 / [] defaults."""
+        from dakera import RotateEncryptionKeyResponse
+
+        resp = RotateEncryptionKeyResponse.from_dict({})
+        assert resp.rotated == 0
+        assert resp.skipped == 0
+        assert resp.namespaces == []
