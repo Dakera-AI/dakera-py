@@ -1748,3 +1748,193 @@ class NamespaceKeyUsageResponse:
             bytes_transferred=data.get("bytes_transferred", 0),
             avg_latency_ms=data.get("avg_latency_ms", 0.0),
         )
+
+
+# =============================================================================
+# CE-6: DBSCAN Adaptive Consolidation
+# =============================================================================
+
+
+@dataclass
+class ConsolidationConfig:
+    """Algorithm config for DBSCAN adaptive consolidation (CE-6).
+
+    Pass to :meth:`~dakera.DakeraClient.consolidate` via the *config* argument
+    to control which clustering algorithm is used.
+    """
+
+    algorithm: str | None = None  # "dbscan" | "greedy"
+    min_samples: int | None = None
+    eps: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.algorithm is not None:
+            d["algorithm"] = self.algorithm
+        if self.min_samples is not None:
+            d["min_samples"] = self.min_samples
+        if self.eps is not None:
+            d["eps"] = self.eps
+        return d
+
+
+@dataclass
+class ConsolidationLogEntry:
+    """One step in the consolidation execution log (CE-6)."""
+
+    step: str
+    memories_before: int
+    memories_after: int
+    duration_ms: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ConsolidationLogEntry":
+        return cls(
+            step=data.get("step", ""),
+            memories_before=data.get("memories_before", 0),
+            memories_after=data.get("memories_after", 0),
+            duration_ms=data.get("duration_ms", 0.0),
+        )
+
+
+# =============================================================================
+# DX-1: Memory Import / Export
+# =============================================================================
+
+
+@dataclass
+class MemoryImportResponse:
+    """Response from ``POST /v1/import`` (DX-1)."""
+
+    imported_count: int
+    skipped_count: int
+    errors: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryImportResponse":
+        return cls(
+            imported_count=data.get("imported_count", 0),
+            skipped_count=data.get("skipped_count", 0),
+            errors=data.get("errors", []),
+        )
+
+
+@dataclass
+class MemoryExportResponse:
+    """Response from ``GET /v1/export`` (DX-1)."""
+
+    data: list[dict[str, Any]]
+    format: str
+    count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryExportResponse":
+        raw = data.get("data", [])
+        return cls(
+            data=raw if isinstance(raw, list) else [],
+            format=data.get("format", "jsonl"),
+            count=data.get("count", len(raw) if isinstance(raw, list) else 0),
+        )
+
+
+# =============================================================================
+# OBS-1: Business-Event Audit Log
+# =============================================================================
+
+
+@dataclass
+class AuditEvent:
+    """A single business-event entry from the audit log (OBS-1)."""
+
+    id: str
+    event_type: str
+    agent_id: str | None
+    namespace: str | None
+    timestamp: int
+    details: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AuditEvent":
+        return cls(
+            id=data.get("id", ""),
+            event_type=data.get("event_type", ""),
+            agent_id=data.get("agent_id"),
+            namespace=data.get("namespace"),
+            timestamp=data.get("timestamp", 0),
+            details=data.get("details", {}),
+        )
+
+
+@dataclass
+class AuditListResponse:
+    """Response from ``GET /v1/audit`` (OBS-1)."""
+
+    events: list[AuditEvent]
+    total: int
+    cursor: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AuditListResponse":
+        return cls(
+            events=[AuditEvent.from_dict(e) for e in data.get("events", [])],
+            total=data.get("total", 0),
+            cursor=data.get("cursor"),
+        )
+
+
+@dataclass
+class AuditExportResponse:
+    """Response from ``POST /v1/audit/export`` (OBS-1)."""
+
+    data: str
+    format: str
+    count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AuditExportResponse":
+        return cls(
+            data=data.get("data", ""),
+            format=data.get("format", "jsonl"),
+            count=data.get("count", 0),
+        )
+
+
+# =============================================================================
+# EXT-1: External Extraction Providers
+# =============================================================================
+
+
+@dataclass
+class ExtractionResult:
+    """Result from ``POST /v1/extract`` (EXT-1)."""
+
+    entities: list[dict[str, Any]]
+    provider: str
+    model: str | None
+    duration_ms: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExtractionResult":
+        return cls(
+            entities=data.get("entities", []),
+            provider=data.get("provider", ""),
+            model=data.get("model"),
+            duration_ms=data.get("duration_ms", 0.0),
+        )
+
+
+@dataclass
+class ExtractionProviderInfo:
+    """Metadata for an available extraction provider (EXT-1)."""
+
+    name: str
+    available: bool
+    models: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ExtractionProviderInfo":
+        return cls(
+            name=data.get("name", ""),
+            available=data.get("available", True),
+            models=data.get("models", []),
+        )

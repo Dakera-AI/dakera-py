@@ -39,6 +39,10 @@ from dakera.models import (
     AgentStats,
     AgentSummary,
     AnalyticsOverview,
+    # OBS-1
+    AuditEvent,
+    AuditExportResponse,
+    AuditListResponse,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchMemoryFilter,
@@ -47,6 +51,9 @@ from dakera.models import (
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
     ConsolidateResponse,
+    # CE-6
+    ConsolidationConfig,
+    ConsolidationLogEntry,
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
@@ -57,6 +64,9 @@ from dakera.models import (
     EmbeddingModel,
     EntityExtractionResponse,
     ExtractedEntity,
+    ExtractionProviderInfo,
+    # EXT-1
+    ExtractionResult,
     FeedbackHealthResponse,
     FeedbackHistoryEntry,
     FeedbackHistoryResponse,
@@ -77,7 +87,10 @@ from dakera.models import (
     Memory,
     MemoryEntitiesResponse,
     MemoryEvent,
+    MemoryExportResponse,
     MemoryGraph,
+    # DX-1
+    MemoryImportResponse,
     NamespaceInfo,
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
@@ -101,7 +114,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -193,6 +206,19 @@ __all__ = [
     "CreateNamespaceKeyResponse",
     "ListNamespaceKeysResponse",
     "NamespaceKeyUsageResponse",
+    # DBSCAN Adaptive Consolidation (CE-6)
+    "ConsolidationConfig",
+    "ConsolidationLogEntry",
+    # Memory Import / Export (DX-1)
+    "MemoryImportResponse",
+    "MemoryExportResponse",
+    # Business-Event Audit Log (OBS-1)
+    "AuditEvent",
+    "AuditListResponse",
+    "AuditExportResponse",
+    # External Extraction Providers (EXT-1)
+    "ExtractionResult",
+    "ExtractionProviderInfo",
     # Exceptions
     "DakeraError",
     "ConnectionError",

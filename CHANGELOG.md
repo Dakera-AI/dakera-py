@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-03-30
+
+### Added
+- **Memory Import/Export (DX-1):**
+  - `import_memories(data, format, agent_id?, namespace?)` — import memories from
+    Mem0, Zep, JSONL, or CSV format (`POST /v1/import`). Returns
+    `MemoryImportResponse` with counts and errors.
+  - `export_memories(format, agent_id?, namespace?, limit?)` — export memories to
+    a portable format (`GET /v1/export`). Returns `MemoryExportResponse`.
+  - New types: `MemoryImportResponse`, `MemoryExportResponse`.
+  - Async variants available on `AsyncDakeraClient`.
+- **Business-Event Audit Log (OBS-1):**
+  - `list_audit_events(agent_id?, event_type?, from_ts?, to_ts?, limit?, cursor?)`
+    — paginated audit log query (`GET /v1/audit`). Returns `AuditListResponse`.
+  - `stream_audit_events(agent_id?, event_type?, timeout?)` — live SSE stream of
+    audit events (`GET /v1/audit/stream`). Yields `DakeraEvent` objects.
+  - `export_audit(format?, agent_id?, event_type?, from_ts?, to_ts?)` — bulk
+    export audit entries (`POST /v1/audit/export`). Returns `AuditExportResponse`.
+  - New types: `AuditEvent`, `AuditListResponse`, `AuditExportResponse`.
+  - Async variants available on `AsyncDakeraClient`.
+- **DBSCAN Adaptive Consolidation (CE-6):** `consolidate()` now accepts an
+  optional `config: ConsolidationConfig` parameter to select the clustering
+  algorithm (`"dbscan"` or `"greedy"`) and tune `min_samples`/`eps`.
+  Response may include a `log` list of `ConsolidationLogEntry` steps.
+  New types: `ConsolidationConfig`, `ConsolidationLogEntry`.
+- **External Extraction Providers (EXT-1):**
+  - `extract_text(text, namespace?, provider?, model?)` — extract entities from
+    text via a pluggable provider (`POST /v1/extract`). Providers: `gliner`
+    (zero-config, bundled), `openai`, `anthropic`, `openrouter`, `ollama`.
+    Returns `ExtractionResult`.
+  - `list_extract_providers()` — list available providers and their models
+    (`GET /v1/extract/providers`). Returns `list[ExtractionProviderInfo]`.
+  - `configure_namespace_extractor(namespace, provider, model?)` — set the
+    default extractor for a namespace (`PATCH /v1/namespaces/{ns}/extractor`).
+  - New types: `ExtractionResult`, `ExtractionProviderInfo`.
+  - Async variants available on `AsyncDakeraClient`.
+- **Redis Health (OPS-3):** `cluster_status()` response now includes a
+  `redis_healthy` boolean field indicating Redis connectivity.
+- **Cluster Env Aliases (DIST-1):** Documented new server-side environment
+  variable aliases: `DAKERA_CLUSTER_NODE_ID`, `SEED_NODES`, `BIND_ADDR`.
+- **Memory Encryption (SEC-3):** Server supports AES-256-GCM at-rest encryption
+  via `DAKERA_ENCRYPTION_KEY`. No SDK changes required — transparent to clients.
+
 ## [0.9.3] - 2026-03-29
 
 ### Added

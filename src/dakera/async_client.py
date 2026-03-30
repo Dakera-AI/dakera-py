@@ -53,6 +53,9 @@ from dakera.exceptions import (
 from dakera.models import (
     AccessPatternHint,
     AgentFeedbackSummary,
+    # OBS-1
+    AuditExportResponse,
+    AuditListResponse,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchRecallRequest,
@@ -60,6 +63,8 @@ from dakera.models import (
     BatchTextQueryResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
+    # CE-6
+    ConsolidationConfig,
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
@@ -69,6 +74,9 @@ from dakera.models import (
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
+    ExtractionProviderInfo,
+    # EXT-1
+    ExtractionResult,
     FeedbackHealthResponse,
     FeedbackHistoryResponse,
     FeedbackResponse,
@@ -83,7 +91,10 @@ from dakera.models import (
     ListNamespaceKeysResponse,
     MemoryEntitiesResponse,
     MemoryEvent,
+    MemoryExportResponse,
     MemoryGraph,
+    # DX-1
+    MemoryImportResponse,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
@@ -778,13 +789,29 @@ class AsyncDakeraClient:
         memory_type: str | None = None,
         threshold: float | None = None,
         dry_run: bool = False,
+        config: ConsolidationConfig | None = None,
     ) -> dict[str, Any]:
-        """Consolidate memories for an agent."""
+        """Consolidate memories for an agent (CE-6).
+
+        Args:
+            agent_id: Agent whose memories to consolidate.
+            memory_type: Optional filter — only consolidate this memory type.
+            threshold: Similarity threshold for grouping (0–1).
+            dry_run: Preview changes without applying them.
+            config: Optional :class:`~dakera.ConsolidationConfig` to select the
+                clustering algorithm and tune its parameters.
+
+        Returns:
+            Dict with ``consolidated_count``, ``removed_count``, ``new_memories``
+            and optionally a ``log`` list of consolidation steps.
+        """
         data: dict[str, Any] = {"dry_run": dry_run}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if threshold is not None:
             data["threshold"] = threshold
+        if config is not None:
+            data["config"] = config.to_dict()
         return await self._request("POST", f"/v1/agents/{agent_id}/memories/consolidate", data=data)
 
     async def memory_feedback(
@@ -1928,6 +1955,157 @@ class AsyncDakeraClient:
             "GET", f"/v1/namespaces/{namespace}/keys/{key_id}/usage"
         )
         return NamespaceKeyUsageResponse.from_dict(result)
+
+    # =========================================================================
+    # DX-1: Memory Import / Export
+    # =========================================================================
+
+    async def import_memories(
+        self,
+        data: Any,
+        format: str = "jsonl",
+        agent_id: str | None = None,
+        namespace: str | None = None,
+    ) -> MemoryImportResponse:
+        """Import memories from an external format (DX-1)."""
+        body: dict[str, Any] = {"data": data, "format": format}
+        if agent_id is not None:
+            body["agent_id"] = agent_id
+        if namespace is not None:
+            body["namespace"] = namespace
+        result = await self._request("POST", "/v1/import", data=body)
+        return MemoryImportResponse.from_dict(result)
+
+    async def export_memories(
+        self,
+        format: str = "jsonl",
+        agent_id: str | None = None,
+        namespace: str | None = None,
+        limit: int | None = None,
+    ) -> MemoryExportResponse:
+        """Export memories in a portable format (DX-1)."""
+        params: dict[str, Any] = {"format": format}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if namespace is not None:
+            params["namespace"] = namespace
+        if limit is not None:
+            params["limit"] = limit
+        result = await self._request("GET", "/v1/export", params=params)
+        return MemoryExportResponse.from_dict(result)
+
+    # =========================================================================
+    # OBS-1: Business-Event Audit Log
+    # =========================================================================
+
+    async def list_audit_events(
+        self,
+        agent_id: str | None = None,
+        event_type: str | None = None,
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> AuditListResponse:
+        """List business-event audit log entries (OBS-1)."""
+        params: dict[str, Any] = {}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if event_type is not None:
+            params["event_type"] = event_type
+        if from_ts is not None:
+            params["from"] = from_ts
+        if to_ts is not None:
+            params["to"] = to_ts
+        if limit is not None:
+            params["limit"] = limit
+        if cursor is not None:
+            params["cursor"] = cursor
+        result = await self._request("GET", "/v1/audit", params=params)
+        return AuditListResponse.from_dict(result)
+
+    async def stream_audit_events(
+        self,
+        agent_id: str | None = None,
+        event_type: str | None = None,
+    ) -> AsyncGenerator[DakeraEvent, None]:
+        """Stream live audit events via SSE (OBS-1).
+
+        Yields:
+            :class:`~dakera.models.DakeraEvent` — one per audit event.
+        """
+        from urllib.parse import urlencode
+        params: dict[str, str] = {}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if event_type is not None:
+            params["event_type"] = event_type
+        url = self._url("/v1/audit/stream")
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        async for event in self._stream_sse(url):
+            yield event
+
+    async def export_audit(
+        self,
+        format: str = "jsonl",
+        agent_id: str | None = None,
+        event_type: str | None = None,
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+    ) -> AuditExportResponse:
+        """Bulk-export audit log entries (OBS-1)."""
+        body: dict[str, Any] = {"format": format}
+        if agent_id is not None:
+            body["agent_id"] = agent_id
+        if event_type is not None:
+            body["event_type"] = event_type
+        if from_ts is not None:
+            body["from"] = from_ts
+        if to_ts is not None:
+            body["to"] = to_ts
+        result = await self._request("POST", "/v1/audit/export", data=body)
+        return AuditExportResponse.from_dict(result)
+
+    # =========================================================================
+    # EXT-1: External Extraction Providers
+    # =========================================================================
+
+    async def extract_text(
+        self,
+        text: str,
+        namespace: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> ExtractionResult:
+        """Extract entities from text using a pluggable provider (EXT-1)."""
+        body: dict[str, Any] = {"text": text}
+        if namespace is not None:
+            body["namespace"] = namespace
+        if provider is not None:
+            body["provider"] = provider
+        if model is not None:
+            body["model"] = model
+        result = await self._request("POST", "/v1/extract", data=body)
+        return ExtractionResult.from_dict(result)
+
+    async def list_extract_providers(self) -> list[ExtractionProviderInfo]:
+        """List available extraction providers and their models (EXT-1)."""
+        result = await self._request("GET", "/v1/extract/providers")
+        items = result if isinstance(result, list) else result.get("providers", [])
+        return [ExtractionProviderInfo.from_dict(p) for p in items]
+
+    async def configure_namespace_extractor(
+        self,
+        namespace: str,
+        provider: str,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Set the default extraction provider for a namespace (EXT-1)."""
+        body: dict[str, Any] = {"provider": provider}
+        if model is not None:
+            body["model"] = model
+        return await self._request("PATCH", f"/v1/namespaces/{namespace}/extractor", data=body)
 
     # =========================================================================
     # Context Manager Support
