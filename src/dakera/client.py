@@ -77,6 +77,19 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    # CE-6
+    ConsolidationConfig,
+    ConsolidationLogEntry,
+    # DX-1
+    MemoryImportResponse,
+    MemoryExportResponse,
+    # OBS-1
+    AuditEvent,
+    AuditListResponse,
+    AuditExportResponse,
+    # EXT-1
+    ExtractionResult,
+    ExtractionProviderInfo,
 )
 
 
@@ -1078,13 +1091,31 @@ class DakeraClient:
         memory_type: str | None = None,
         threshold: float | None = None,
         dry_run: bool = False,
+        config: "ConsolidationConfig | None" = None,
     ) -> dict[str, Any]:
-        """Consolidate memories for an agent."""
+        """Consolidate memories for an agent (CE-6).
+
+        Args:
+            agent_id: Agent whose memories to consolidate.
+            memory_type: Optional filter — only consolidate this memory type.
+            threshold: Similarity threshold for grouping (0–1).
+            dry_run: Preview changes without applying them.
+            config: Optional :class:`~dakera.ConsolidationConfig` to select the
+                clustering algorithm (``"dbscan"`` or ``"greedy"``) and tune its
+                parameters.  When omitted the server uses its default algorithm.
+
+        Returns:
+            Dict with ``consolidated_count``, ``removed_count``, ``new_memories``
+            and optionally a ``log`` list of :class:`~dakera.ConsolidationLogEntry`
+            steps.
+        """
         data: dict[str, Any] = {"dry_run": dry_run}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if threshold is not None:
             data["threshold"] = threshold
+        if config is not None:
+            data["config"] = config.to_dict()
         return self._request("POST", f"/v1/agents/{agent_id}/memories/consolidate", data=data)
 
     def memory_feedback(
@@ -2357,6 +2388,237 @@ class DakeraClient:
             "GET", f"/v1/namespaces/{namespace}/keys/{key_id}/usage"
         )
         return NamespaceKeyUsageResponse.from_dict(result)
+
+    # =========================================================================
+    # DX-1: Memory Import / Export
+    # =========================================================================
+
+    def import_memories(
+        self,
+        data: Any,
+        format: str = "jsonl",
+        agent_id: str | None = None,
+        namespace: str | None = None,
+    ) -> MemoryImportResponse:
+        """Import memories from an external format (DX-1).
+
+        Args:
+            data: Serialised memories — a list of dicts (Mem0/JSONL), a
+                Zep-compatible dict, or a CSV string depending on *format*.
+            format: One of ``"jsonl"``, ``"mem0"``, ``"zep"``, ``"csv"``.
+            agent_id: Assign all imported memories to this agent.
+            namespace: Target namespace (defaults to the client's namespace).
+
+        Returns:
+            :class:`MemoryImportResponse` with counts and any per-row errors.
+        """
+        body: dict[str, Any] = {"data": data, "format": format}
+        if agent_id is not None:
+            body["agent_id"] = agent_id
+        if namespace is not None:
+            body["namespace"] = namespace
+        result = self._request("POST", "/v1/import", data=body)
+        return MemoryImportResponse.from_dict(result)
+
+    def export_memories(
+        self,
+        format: str = "jsonl",
+        agent_id: str | None = None,
+        namespace: str | None = None,
+        limit: int | None = None,
+    ) -> MemoryExportResponse:
+        """Export memories in a portable format (DX-1).
+
+        Args:
+            format: One of ``"jsonl"``, ``"mem0"``, ``"zep"``, ``"csv"``.
+            agent_id: Export only memories for this agent.
+            namespace: Source namespace (defaults to client namespace).
+            limit: Maximum number of memories to export.
+
+        Returns:
+            :class:`MemoryExportResponse` with the serialised data and count.
+        """
+        params: dict[str, Any] = {"format": format}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if namespace is not None:
+            params["namespace"] = namespace
+        if limit is not None:
+            params["limit"] = limit
+        result = self._request("GET", "/v1/export", params=params)
+        return MemoryExportResponse.from_dict(result)
+
+    # =========================================================================
+    # OBS-1: Business-Event Audit Log
+    # =========================================================================
+
+    def list_audit_events(
+        self,
+        agent_id: str | None = None,
+        event_type: str | None = None,
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> AuditListResponse:
+        """List business-event audit log entries (OBS-1).
+
+        Args:
+            agent_id: Filter to events from this agent.
+            event_type: Filter to a specific event type string.
+            from_ts: Unix timestamp lower bound (inclusive).
+            to_ts: Unix timestamp upper bound (exclusive).
+            limit: Maximum number of events to return.
+            cursor: Pagination cursor from a previous response.
+
+        Returns:
+            :class:`AuditListResponse` with events and optional next cursor.
+        """
+        params: dict[str, Any] = {}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if event_type is not None:
+            params["event_type"] = event_type
+        if from_ts is not None:
+            params["from"] = from_ts
+        if to_ts is not None:
+            params["to"] = to_ts
+        if limit is not None:
+            params["limit"] = limit
+        if cursor is not None:
+            params["cursor"] = cursor
+        result = self._request("GET", "/v1/audit", params=params)
+        return AuditListResponse.from_dict(result)
+
+    def stream_audit_events(
+        self,
+        agent_id: str | None = None,
+        event_type: str | None = None,
+        timeout: float | None = None,
+    ) -> Generator[DakeraEvent, None, None]:
+        """Stream live audit events via SSE (OBS-1).
+
+        Opens a long-lived connection to ``GET /v1/audit/stream`` and yields
+        :class:`~dakera.models.DakeraEvent` objects as they arrive.
+
+        Args:
+            agent_id: Scope the stream to a specific agent.
+            event_type: Scope the stream to a specific event type.
+            timeout: Optional read timeout in seconds.
+
+        Yields:
+            :class:`~dakera.models.DakeraEvent` — one per audit event.
+        """
+        from urllib.parse import urlencode
+        params: dict[str, str] = {}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        if event_type is not None:
+            params["event_type"] = event_type
+        url = self._url("/v1/audit/stream")
+        if params:
+            url = f"{url}?{urlencode(params)}"
+        yield from self._stream_sse(url, timeout)
+
+    def export_audit(
+        self,
+        format: str = "jsonl",
+        agent_id: str | None = None,
+        event_type: str | None = None,
+        from_ts: int | None = None,
+        to_ts: int | None = None,
+    ) -> AuditExportResponse:
+        """Bulk-export audit log entries (OBS-1).
+
+        Args:
+            format: ``"jsonl"`` or ``"csv"``.
+            agent_id: Filter to a specific agent.
+            event_type: Filter to a specific event type.
+            from_ts: Unix timestamp lower bound.
+            to_ts: Unix timestamp upper bound.
+
+        Returns:
+            :class:`AuditExportResponse` with raw serialised data and count.
+        """
+        body: dict[str, Any] = {"format": format}
+        if agent_id is not None:
+            body["agent_id"] = agent_id
+        if event_type is not None:
+            body["event_type"] = event_type
+        if from_ts is not None:
+            body["from"] = from_ts
+        if to_ts is not None:
+            body["to"] = to_ts
+        result = self._request("POST", "/v1/audit/export", data=body)
+        return AuditExportResponse.from_dict(result)
+
+    # =========================================================================
+    # EXT-1: External Extraction Providers
+    # =========================================================================
+
+    def extract_text(
+        self,
+        text: str,
+        namespace: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> ExtractionResult:
+        """Extract entities from text using a pluggable provider (EXT-1).
+
+        The server selects the provider hierarchy: per-request override >
+        namespace default > GLiNER (bundled, zero-config).
+
+        Args:
+            text: Input text to extract from.
+            namespace: Namespace whose default extractor to inherit.
+            provider: Override provider — one of ``"gliner"``, ``"openai"``,
+                ``"anthropic"``, ``"openrouter"``, ``"ollama"``.
+            model: Override model within the chosen provider.
+
+        Returns:
+            :class:`ExtractionResult` with entities and provider metadata.
+        """
+        body: dict[str, Any] = {"text": text}
+        if namespace is not None:
+            body["namespace"] = namespace
+        if provider is not None:
+            body["provider"] = provider
+        if model is not None:
+            body["model"] = model
+        result = self._request("POST", "/v1/extract", data=body)
+        return ExtractionResult.from_dict(result)
+
+    def list_extract_providers(self) -> list[ExtractionProviderInfo]:
+        """List available extraction providers and their models (EXT-1).
+
+        Returns:
+            List of :class:`ExtractionProviderInfo` objects.
+        """
+        result = self._request("GET", "/v1/extract/providers")
+        items = result if isinstance(result, list) else result.get("providers", [])
+        return [ExtractionProviderInfo.from_dict(p) for p in items]
+
+    def configure_namespace_extractor(
+        self,
+        namespace: str,
+        provider: str,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Set the default extraction provider for a namespace (EXT-1).
+
+        Args:
+            namespace: The namespace to configure.
+            provider: Default provider — ``"gliner"``, ``"openai"``,
+                ``"anthropic"``, ``"openrouter"``, or ``"ollama"``.
+            model: Default model within the provider (optional).
+
+        Returns:
+            Dict confirming the updated extractor configuration.
+        """
+        body: dict[str, Any] = {"provider": provider}
+        if model is not None:
+            body["model"] = model
+        return self._request("PATCH", f"/v1/namespaces/{namespace}/extractor", data=body)
 
     # =========================================================================
     # Context Manager Support

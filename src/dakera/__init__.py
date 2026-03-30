@@ -99,9 +99,22 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    # CE-6
+    ConsolidationConfig,
+    ConsolidationLogEntry,
+    # DX-1
+    MemoryImportResponse,
+    MemoryExportResponse,
+    # OBS-1
+    AuditEvent,
+    AuditListResponse,
+    AuditExportResponse,
+    # EXT-1
+    ExtractionResult,
+    ExtractionProviderInfo,
 )
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -193,6 +206,19 @@ __all__ = [
     "CreateNamespaceKeyResponse",
     "ListNamespaceKeysResponse",
     "NamespaceKeyUsageResponse",
+    # DBSCAN Adaptive Consolidation (CE-6)
+    "ConsolidationConfig",
+    "ConsolidationLogEntry",
+    # Memory Import / Export (DX-1)
+    "MemoryImportResponse",
+    "MemoryExportResponse",
+    # Business-Event Audit Log (OBS-1)
+    "AuditEvent",
+    "AuditListResponse",
+    "AuditExportResponse",
+    # External Extraction Providers (EXT-1)
+    "ExtractionResult",
+    "ExtractionProviderInfo",
     # Exceptions
     "DakeraError",
     "ConnectionError",
