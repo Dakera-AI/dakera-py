@@ -74,6 +74,8 @@ from dakera.models import (
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
+    # ODE-2
+    ExtractEntitiesResponse,
     ExtractionProviderInfo,
     # EXT-1
     ExtractionResult,
@@ -101,9 +103,6 @@ from dakera.models import (
     RateLimitHeaders,
     ReadConsistency,
     RetryConfig,
-    # ODE-2
-    ExtractEntitiesResponse,
-    OdeEntity,
     # SEC-3
     RotateEncryptionKeyResponse,
     SearchResult,

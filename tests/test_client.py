@@ -2689,6 +2689,8 @@ class TestOdeEntityModelODE2:
         """ExtractEntitiesResponse.from_dict() handles empty entity list."""
         from dakera import ExtractEntitiesResponse
 
-        resp = ExtractEntitiesResponse.from_dict({"entities": [], "model": "m", "processing_time_ms": 5})
+        resp = ExtractEntitiesResponse.from_dict(
+            {"entities": [], "model": "m", "processing_time_ms": 5}
+        )
         assert resp.entities == []
         assert resp.model == "m"

@@ -64,6 +64,8 @@ from dakera.models import (
     EmbeddingModel,
     EntityExtractionResponse,
     ExtractedEntity,
+    # ODE-2
+    ExtractEntitiesResponse,
     ExtractionProviderInfo,
     # EXT-1
     ExtractionResult,
@@ -95,15 +97,13 @@ from dakera.models import (
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
+    OdeEntity,
     OpStatus,
     QueryResult,
     RateLimitHeaders,
     ReadConsistency,
     RecalledMemory,
     RetryConfig,
-    # ODE-2
-    ExtractEntitiesResponse,
-    OdeEntity,
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
