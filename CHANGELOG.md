@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-03-30
+
+### Added
+- **AES-256-GCM Encryption Key Rotation (SEC-3):**
+  - `rotate_encryption_key(new_key, namespace?)` — re-encrypt all memory content
+    blobs with a new AES-256-GCM key (`POST /v1/admin/encryption/rotate-key`).
+    Pass `namespace=None` to rotate all namespaces. Returns
+    `RotateEncryptionKeyResponse`. Requires Admin scope.
+  - Async variant: `async_rotate_encryption_key()` available on `AsyncDakeraClient`.
+  - New types: `RotateEncryptionKeyRequest`, `RotateEncryptionKeyResponse`
+    (fields: `rotated`, `skipped`, `namespaces`).
+
 ## [0.9.4] - 2026-03-30
 
 ### Added
