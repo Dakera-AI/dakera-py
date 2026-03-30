@@ -101,6 +101,9 @@ from dakera.models import (
     ReadConsistency,
     RecalledMemory,
     RetryConfig,
+    # ODE-2
+    ExtractEntitiesResponse,
+    OdeEntity,
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
@@ -225,6 +228,9 @@ __all__ = [
     # AES-256-GCM Encryption Key Rotation (SEC-3)
     "RotateEncryptionKeyRequest",
     "RotateEncryptionKeyResponse",
+    # GLiNER Entity Extraction via ODE sidecar (ODE-2)
+    "OdeEntity",
+    "ExtractEntitiesResponse",
     # Exceptions
     "DakeraError",
     "ConnectionError",

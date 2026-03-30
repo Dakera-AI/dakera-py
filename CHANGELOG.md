@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **GLiNER Entity Extraction via ODE sidecar (ODE-2):**
+  - `ode_extract_entities(content, agent_id, memory_id?, entity_types?)` — extract
+    named entities from text using the dakera-ode GLiNER sidecar
+    (`POST /ode/extract`). Returns `ExtractEntitiesResponse` with per-entity
+    character offsets, confidence scores, the model variant used, and processing
+    time in ms.
+  - New `ode_url` constructor parameter on `DakeraClient` and `AsyncDakeraClient`.
+  - Async variant: `ode_extract_entities()` on `AsyncDakeraClient`.
+  - New types: `OdeEntity` (fields: `text`, `label`, `start`, `end`, `score`),
+    `ExtractEntitiesResponse` (fields: `entities`, `model`, `processing_time_ms`).
+
 ## [0.9.5] - 2026-03-30
 
 ### Added
