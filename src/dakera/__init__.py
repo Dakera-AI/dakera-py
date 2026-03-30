@@ -39,6 +39,10 @@ from dakera.models import (
     AgentStats,
     AgentSummary,
     AnalyticsOverview,
+    # OBS-1
+    AuditEvent,
+    AuditExportResponse,
+    AuditListResponse,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchMemoryFilter,
@@ -47,6 +51,9 @@ from dakera.models import (
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
     ConsolidateResponse,
+    # CE-6
+    ConsolidationConfig,
+    ConsolidationLogEntry,
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
@@ -57,6 +64,9 @@ from dakera.models import (
     EmbeddingModel,
     EntityExtractionResponse,
     ExtractedEntity,
+    ExtractionProviderInfo,
+    # EXT-1
+    ExtractionResult,
     FeedbackHealthResponse,
     FeedbackHistoryEntry,
     FeedbackHistoryResponse,
@@ -77,7 +87,10 @@ from dakera.models import (
     Memory,
     MemoryEntitiesResponse,
     MemoryEvent,
+    MemoryExportResponse,
     MemoryGraph,
+    # DX-1
+    MemoryImportResponse,
     NamespaceInfo,
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
@@ -99,19 +112,6 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
-    # CE-6
-    ConsolidationConfig,
-    ConsolidationLogEntry,
-    # DX-1
-    MemoryImportResponse,
-    MemoryExportResponse,
-    # OBS-1
-    AuditEvent,
-    AuditListResponse,
-    AuditExportResponse,
-    # EXT-1
-    ExtractionResult,
-    ExtractionProviderInfo,
 )
 
 __version__ = "0.9.4"

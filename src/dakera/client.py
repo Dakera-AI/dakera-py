@@ -28,6 +28,9 @@ from dakera.exceptions import (
 from dakera.models import (
     AccessPatternHint,
     AgentFeedbackSummary,
+    # OBS-1
+    AuditExportResponse,
+    AuditListResponse,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchRecallRequest,
@@ -35,6 +38,8 @@ from dakera.models import (
     BatchTextQueryResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
+    # CE-6
+    ConsolidationConfig,
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
@@ -44,6 +49,9 @@ from dakera.models import (
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
+    ExtractionProviderInfo,
+    # EXT-1
+    ExtractionResult,
     FeedbackHealthResponse,
     FeedbackHistoryResponse,
     FeedbackResponse,
@@ -58,7 +66,10 @@ from dakera.models import (
     ListNamespaceKeysResponse,
     MemoryEntitiesResponse,
     MemoryEvent,
+    MemoryExportResponse,
     MemoryGraph,
+    # DX-1
+    MemoryImportResponse,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
@@ -77,19 +88,6 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
-    # CE-6
-    ConsolidationConfig,
-    ConsolidationLogEntry,
-    # DX-1
-    MemoryImportResponse,
-    MemoryExportResponse,
-    # OBS-1
-    AuditEvent,
-    AuditListResponse,
-    AuditExportResponse,
-    # EXT-1
-    ExtractionResult,
-    ExtractionProviderInfo,
 )
 
 
