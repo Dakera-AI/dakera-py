@@ -1938,3 +1938,45 @@ class ExtractionProviderInfo:
             available=data.get("available", True),
             models=data.get("models", []),
         )
+
+
+# =============================================================================
+# SEC-3: AES-256-GCM Encryption Key Rotation
+# =============================================================================
+
+
+@dataclass
+class RotateEncryptionKeyRequest:
+    """Request body for ``POST /v1/admin/encryption/rotate-key`` (SEC-3).
+
+    Args:
+        new_key: New passphrase or 64-char hex key to rotate to.
+        namespace: If set, rotate only memories in this namespace.
+            Omit to rotate all namespaces.
+    """
+
+    new_key: str
+    namespace: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"new_key": self.new_key}
+        if self.namespace is not None:
+            d["namespace"] = self.namespace
+        return d
+
+
+@dataclass
+class RotateEncryptionKeyResponse:
+    """Response from ``POST /v1/admin/encryption/rotate-key`` (SEC-3)."""
+
+    rotated: int
+    skipped: int
+    namespaces: list[str]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RotateEncryptionKeyResponse":
+        return cls(
+            rotated=data.get("rotated", 0),
+            skipped=data.get("skipped", 0),
+            namespaces=data.get("namespaces", []),
+        )

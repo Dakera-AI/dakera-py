@@ -101,6 +101,9 @@ from dakera.models import (
     ReadConsistency,
     RecalledMemory,
     RetryConfig,
+    # SEC-3
+    RotateEncryptionKeyRequest,
+    RotateEncryptionKeyResponse,
     SearchResult,
     Session,
     StalenessConfig,
@@ -114,7 +117,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.9.4"
+__version__ = "0.9.5"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -219,6 +222,9 @@ __all__ = [
     # External Extraction Providers (EXT-1)
     "ExtractionResult",
     "ExtractionProviderInfo",
+    # AES-256-GCM Encryption Key Rotation (SEC-3)
+    "RotateEncryptionKeyRequest",
+    "RotateEncryptionKeyResponse",
     # Exceptions
     "DakeraError",
     "ConnectionError",

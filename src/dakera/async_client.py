@@ -101,6 +101,8 @@ from dakera.models import (
     RateLimitHeaders,
     ReadConsistency,
     RetryConfig,
+    # SEC-3
+    RotateEncryptionKeyResponse,
     SearchResult,
     StalenessConfig,
     TextDocument,
@@ -1606,6 +1608,29 @@ class AsyncDakeraClient:
         if strategy is not None:
             data["strategy"] = strategy
         return await self._request("PUT", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
+
+    async def rotate_encryption_key(
+        self,
+        new_key: str,
+        namespace: str | None = None,
+    ) -> RotateEncryptionKeyResponse:
+        """Re-encrypt all memory content blobs with a new AES-256-GCM key (SEC-3).
+
+        Requires Admin scope.
+
+        Args:
+            new_key: New passphrase or 64-char hex key.
+            namespace: Rotate only this namespace. Omit to rotate all.
+
+        Returns:
+            :class:`RotateEncryptionKeyResponse` with counts of rotated,
+            skipped, and affected namespace names.
+        """
+        data: dict[str, Any] = {"new_key": new_key}
+        if namespace is not None:
+            data["namespace"] = namespace
+        result = await self._request("POST", "/v1/admin/encryption/rotate-key", data=data)
+        return RotateEncryptionKeyResponse.from_dict(result)
 
     # =========================================================================
     # API Key Operations
