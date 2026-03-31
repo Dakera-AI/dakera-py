@@ -990,6 +990,8 @@ class DakeraClient:
         min_importance: float | None = None,
         include_associated: bool = False,
         associated_memories_cap: int | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -1004,6 +1006,10 @@ class DakeraClient:
                 ``associated_memories`` (default: False).
             associated_memories_cap: COG-2 — max associated memories to
                 return (default: 10, max: 10).
+            since: CE-7 — only recall memories created at or after this
+                ISO-8601 timestamp (e.g. ``"2026-03-01T00:00:00Z"``).
+            until: CE-7 — only recall memories created at or before this
+                ISO-8601 timestamp (e.g. ``"2026-03-31T23:59:59Z"``).
 
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
@@ -1018,6 +1024,10 @@ class DakeraClient:
             data["include_associated"] = True
         if associated_memories_cap is not None:
             data["associated_memories_cap"] = associated_memories_cap
+        if since is not None:
+            data["since"] = since
+        if until is not None:
+            data["until"] = until
         result = self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
