@@ -652,7 +652,7 @@ class TestCog2AssociativeRecall:
             },
             status=200,
         )
-        from dakera import RecallResponse, RecalledMemory
+        from dakera import RecallResponse
 
         result = client.recall("agent-1", "test query", include_associated=True)
         assert isinstance(result, RecallResponse)
