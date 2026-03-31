@@ -102,13 +102,13 @@ from dakera.models import (
     MemoryImportResponse,
     # COG-1
     MemoryPolicy,
-    # COG-2
-    RecallResponse,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
     RateLimitHeaders,
     ReadConsistency,
+    # COG-2
+    RecallResponse,
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyResponse,
@@ -695,7 +695,7 @@ class AsyncDakeraClient:
         min_importance: float | None = None,
         include_associated: bool = False,
         associated_memories_cap: int | None = None,
-    ) -> "RecallResponse":
+    ) -> RecallResponse:
         """Recall memories for an agent.
 
         Args:
@@ -724,7 +724,9 @@ class AsyncDakeraClient:
         if associated_memories_cap is not None:
             data["associated_memories_cap"] = associated_memories_cap
         result = await self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
-        return RecallResponse.from_dict(result) if isinstance(result, dict) else RecallResponse(memories=result)
+        if isinstance(result, dict):
+            return RecallResponse.from_dict(result)
+        return RecallResponse(memories=result)
 
     async def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""
