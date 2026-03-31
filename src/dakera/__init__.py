@@ -80,6 +80,10 @@ from dakera.models import (
     GraphLinkResponse,
     GraphNode,
     GraphPath,
+    # KG-2
+    KgExportResponse,
+    KgPathResponse,
+    KgQueryResponse,
     HybridSearchResult,
     IndexStats,
     KnowledgeEdge,
@@ -120,7 +124,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -178,6 +182,10 @@ __all__ = [
     "GraphPath",
     "GraphLinkResponse",
     "GraphExport",
+    # KG-2: Graph Query & Export types
+    "KgQueryResponse",
+    "KgPathResponse",
+    "KgExportResponse",
     # Entity Extraction types (CE-4 / GLiNER)
     "NamespaceNerConfig",
     "ExtractedEntity",
