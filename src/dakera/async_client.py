@@ -695,6 +695,8 @@ class AsyncDakeraClient:
         min_importance: float | None = None,
         include_associated: bool = False,
         associated_memories_cap: int | None = None,
+        associated_memories_depth: int | None = None,
+        associated_memories_min_weight: float | None = None,
         since: str | None = None,
         until: str | None = None,
     ) -> RecallResponse:
@@ -706,11 +708,15 @@ class AsyncDakeraClient:
             top_k: Number of primary results to return (default: 5).
             memory_type: Filter by memory type.
             min_importance: Minimum importance threshold.
-            include_associated: COG-2 — traverse KG depth-1 from recalled
-                memories and include associatively linked memories in
+            include_associated: COG-2 — traverse KG from recalled memories
+                and include associatively linked memories in
                 ``associated_memories`` (default: False).
             associated_memories_cap: COG-2 — max associated memories to
                 return (default: 10, max: 10).
+            associated_memories_depth: KG-3 — traversal depth 1–3
+                (default: 1).  Requires ``include_associated=True``.
+            associated_memories_min_weight: KG-3 — minimum edge weight for
+                KG traversal (default: 0.0).
             since: CE-7 — only recall memories created at or after this
                 ISO-8601 timestamp (e.g. ``"2026-03-01T00:00:00Z"``).
             until: CE-7 — only recall memories created at or before this
@@ -719,6 +725,7 @@ class AsyncDakeraClient:
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
             ``associated_memories`` when ``include_associated`` is True.
+            Each associated memory includes a ``depth`` field (KG-3).
         """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
@@ -729,6 +736,10 @@ class AsyncDakeraClient:
             data["include_associated"] = True
         if associated_memories_cap is not None:
             data["associated_memories_cap"] = associated_memories_cap
+        if associated_memories_depth is not None:
+            data["associated_memories_depth"] = associated_memories_depth
+        if associated_memories_min_weight is not None:
+            data["associated_memories_min_weight"] = associated_memories_min_weight
         if since is not None:
             data["since"] = since
         if until is not None:
