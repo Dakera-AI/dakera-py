@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-03-31
+
+### Added
+- **KG-2: Graph Query & Export bindings:**
+  - `knowledge_query(agent_id, root_id?, edge_type?, min_weight?, max_depth?, limit?)` —
+    filter-based DSL query over the memory knowledge graph
+    (`GET /v1/knowledge/query`). Returns `KgQueryResponse` with matching edges
+    and deduplicated node count.
+  - `knowledge_path(agent_id, from_id, to_id)` — BFS shortest path between two
+    memory IDs (`GET /v1/knowledge/path`). Returns `KgPathResponse` with the
+    ordered hop list.
+  - `knowledge_export(agent_id, format?)` — export the full graph as JSON or
+    GraphML (`GET /v1/knowledge/export`). Returns `KgExportResponse` for
+    `format="json"`.
+  - All three methods available on both `DakeraClient` (sync) and
+    `AsyncDakeraClient` (async).
+  - New types: `KgQueryResponse`, `KgPathResponse`, `KgExportResponse`.
+
 ## [0.9.6] - 2026-03-30
 
 ### Added

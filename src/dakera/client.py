@@ -65,6 +65,10 @@ from dakera.models import (
     GraphPath,
     HybridSearchResult,
     IndexStats,
+    # KG-2
+    KgExportResponse,
+    KgPathResponse,
+    KgQueryResponse,
     ListNamespaceKeysResponse,
     MemoryEntitiesResponse,
     MemoryEvent,
@@ -1829,6 +1833,98 @@ class DakeraClient:
         if memory_type is not None:
             data["memory_type"] = memory_type
         return self._request("POST", "/v1/knowledge/deduplicate", data=data)
+
+    # =========================================================================
+    # KG-2: Graph Query & Export Operations
+    # =========================================================================
+
+    def knowledge_query(
+        self,
+        agent_id: str,
+        root_id: str | None = None,
+        edge_type: str | None = None,
+        min_weight: float | None = None,
+        max_depth: int = 3,
+        limit: int = 100,
+    ) -> KgQueryResponse:
+        """Query the memory knowledge graph using a filter DSL (KG-2).
+
+        Calls ``GET /v1/knowledge/query``.
+
+        Args:
+            agent_id: Agent whose graph to query.
+            root_id: Optional root memory ID — if set, performs BFS traversal
+                from this node first (up to *max_depth* hops).
+            edge_type: Filter edges by type (comma-separated, e.g.
+                ``"related_to,shares_entity"``).
+            min_weight: Minimum edge weight (0.0–1.0).
+            max_depth: BFS depth when *root_id* is set (1–5, default 3).
+            limit: Maximum number of edges to return (default 100, max 1000).
+        """
+        params: dict[str, Any] = {
+            "agent_id": agent_id,
+            "max_depth": max_depth,
+            "limit": limit,
+        }
+        if root_id is not None:
+            params["root_id"] = root_id
+        if edge_type is not None:
+            params["edge_type"] = edge_type
+        if min_weight is not None:
+            params["min_weight"] = min_weight
+        result = self._request("GET", "/v1/knowledge/query", params=params)
+        return KgQueryResponse.from_dict(result)
+
+    def knowledge_path(
+        self,
+        agent_id: str,
+        from_id: str,
+        to_id: str,
+    ) -> KgPathResponse:
+        """Find the BFS shortest path between two memory IDs (KG-2).
+
+        Calls ``GET /v1/knowledge/path``.
+
+        Args:
+            agent_id: Agent whose graph to traverse.
+            from_id: Source memory ID.
+            to_id: Target memory ID.
+
+        Raises:
+            :exc:`NotFoundError`: If no path exists between the two memories.
+        """
+        params: dict[str, Any] = {
+            "agent_id": agent_id,
+            "from": from_id,
+            "to": to_id,
+        }
+        result = self._request("GET", "/v1/knowledge/path", params=params)
+        return KgPathResponse.from_dict(result)
+
+    def knowledge_export(
+        self,
+        agent_id: str,
+        format: str = "json",
+    ) -> KgExportResponse:
+        """Export the memory knowledge graph as JSON or GraphML (KG-2).
+
+        Calls ``GET /v1/knowledge/export``.
+
+        Args:
+            agent_id: Agent whose graph to export.
+            format: Export format — ``"json"`` (default) or ``"graphml"``.
+
+        Returns:
+            :class:`KgExportResponse` for ``format="json"``.
+
+        Note:
+            For ``format="graphml"`` the server returns ``application/xml``.
+            This method will raise a parse error in that case — use the raw
+            HTTP client directly if you need the GraphML XML string.
+        """
+        params: dict[str, Any] = {"agent_id": agent_id, "format": format}
+        result = self._request("GET", "/v1/knowledge/export", params=params)
+        return KgExportResponse.from_dict(result)
 
     # =========================================================================
     # Analytics Operations

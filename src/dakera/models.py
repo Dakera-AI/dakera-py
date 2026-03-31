@@ -1461,6 +1461,100 @@ class GraphExport:
 
 
 # ============================================================================
+# KG-2: Graph Query & Export Types
+# ============================================================================
+
+
+@dataclass
+class KgQueryResponse:
+    """Response from ``GET /v1/knowledge/query`` (KG-2).
+
+    Returned by :meth:`DakeraClient.knowledge_query` and
+    :meth:`AsyncDakeraClient.knowledge_query`.
+    """
+
+    agent_id: str
+    """Agent whose graph was queried."""
+    node_count: int
+    """Number of unique memory node IDs referenced by the returned edges."""
+    edge_count: int
+    """Number of edges returned."""
+    edges: list[GraphEdge]
+    """Matching edges, up to *limit*."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KgQueryResponse":
+        return cls(
+            agent_id=data["agent_id"],
+            node_count=data.get("node_count", 0),
+            edge_count=data.get("edge_count", 0),
+            edges=[GraphEdge.from_dict(e) for e in data.get("edges", [])],
+        )
+
+
+@dataclass
+class KgPathResponse:
+    """Response from ``GET /v1/knowledge/path`` (KG-2).
+
+    Returned by :meth:`DakeraClient.knowledge_path` and
+    :meth:`AsyncDakeraClient.knowledge_path`.
+    """
+
+    agent_id: str
+    """Agent whose graph was traversed."""
+    from_id: str
+    """Source memory ID."""
+    to_id: str
+    """Target memory ID."""
+    hop_count: int
+    """Number of edges in the shortest path (0 if source == target)."""
+    path: list[str]
+    """Ordered list of memory IDs from source to target (inclusive)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KgPathResponse":
+        return cls(
+            agent_id=data["agent_id"],
+            from_id=data["from_id"],
+            to_id=data["to_id"],
+            hop_count=data.get("hop_count", 0),
+            path=data.get("path", []),
+        )
+
+
+@dataclass
+class KgExportResponse:
+    """Response from ``GET /v1/knowledge/export`` with ``format=json`` (KG-2).
+
+    Returned by :meth:`DakeraClient.knowledge_export` and
+    :meth:`AsyncDakeraClient.knowledge_export` when *format* is ``"json"``.
+    For GraphML, the server returns ``application/xml`` — call the endpoint
+    directly if you need the raw XML bytes.
+    """
+
+    agent_id: str
+    """Agent whose graph was exported."""
+    format: str
+    """Export format used (``"json"`` when this dataclass is returned)."""
+    node_count: int
+    """Total number of unique memory node IDs in the export."""
+    edge_count: int
+    """Total number of edges in the export."""
+    edges: list[GraphEdge]
+    """All graph edges for the agent."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KgExportResponse":
+        return cls(
+            agent_id=data["agent_id"],
+            format=data.get("format", "json"),
+            node_count=data.get("node_count", 0),
+            edge_count=data.get("edge_count", 0),
+            edges=[GraphEdge.from_dict(e) for e in data.get("edges", [])],
+        )
+
+
+# ============================================================================
 # Entity Extraction Types (CE-4 / GLiNER)
 # ============================================================================
 
