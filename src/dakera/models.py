@@ -663,6 +663,8 @@ class RecalledMemory:
     score: float
     metadata: dict[str, Any] | None = None
     created_at: str | None = None
+    depth: int | None = None
+    """KG-3: hop depth at which this memory was found (only set on associated memories)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
@@ -674,16 +676,18 @@ class RecalledMemory:
             score=data.get("score", 0.0),
             metadata=data.get("metadata"),
             created_at=data.get("created_at"),
+            depth=data.get("depth"),
         )
 
 
 @dataclass
 class RecallResponse:
-    """Response from the recall endpoint (COG-2).
+    """Response from the recall endpoint (COG-2 / KG-3).
 
     Contains primary recalled memories plus optional associatively linked
-    memories surfaced via KG depth-1 traversal when ``include_associated``
-    is requested.
+    memories surfaced via configurable-depth KG traversal when
+    ``include_associated`` is requested.  Each associated memory carries a
+    ``depth`` field indicating the hop at which it was found (KG-3).
     """
 
     memories: list["RecalledMemory"]
