@@ -678,6 +678,30 @@ class RecalledMemory:
 
 
 @dataclass
+class RecallResponse:
+    """Response from the recall endpoint (COG-2).
+
+    Contains primary recalled memories plus optional associatively linked
+    memories surfaced via KG depth-1 traversal when ``include_associated``
+    is requested.
+    """
+
+    memories: list["RecalledMemory"]
+    associated_memories: list["RecalledMemory"] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
+        memories = [RecalledMemory.from_dict(m) for m in data.get("memories", [])]
+        raw_assoc = data.get("associated_memories")
+        associated_memories = (
+            [RecalledMemory.from_dict(m) for m in raw_assoc]
+            if raw_assoc is not None
+            else None
+        )
+        return cls(memories=memories, associated_memories=associated_memories)
+
+
+@dataclass
 class ConsolidateResponse:
     """Response from memory consolidation."""
 

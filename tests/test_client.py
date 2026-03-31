@@ -1,5 +1,6 @@
 """Tests for Dakera client."""
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -617,6 +618,93 @@ class TestRetryConfig:
         # Retry-After=0, not the 10s base_delay — should be fast
         assert elapsed < 2.0
         assert len(mock_responses.calls) == 2
+
+
+class TestCog2AssociativeRecall:
+    """Tests for COG-2 associative recall (include_associated)."""
+
+    def test_recall_include_associated_sends_flag(self, client, mock_responses):
+        """recall(include_associated=True) sends include_associated in request body."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/agents/agent-1/memories/recall",
+            json={
+                "memories": [
+                    {
+                        "id": "mem_1",
+                        "content": "primary memory",
+                        "memory_type": "episodic",
+                        "importance": 0.8,
+                        "score": 0.95,
+                    }
+                ],
+                "associated_memories": [
+                    {
+                        "id": "mem_2",
+                        "content": "associated memory",
+                        "memory_type": "semantic",
+                        "importance": 0.6,
+                        "score": 0.75,
+                    }
+                ],
+            },
+            status=200,
+        )
+        from dakera import RecallResponse
+
+        result = client.recall("agent-1", "test query", include_associated=True)
+        assert isinstance(result, RecallResponse)
+        assert len(result.memories) == 1
+        assert result.associated_memories is not None
+        assert len(result.associated_memories) == 1
+        assert result.associated_memories[0].id == "mem_2"
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body["include_associated"] is True
+
+    def test_recall_without_include_associated_omits_flag(self, client, mock_responses):
+        """recall() without include_associated does not send the flag and returns RecallResponse."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/agents/agent-1/memories/recall",
+            json={
+                "memories": [
+                    {
+                        "id": "mem_1",
+                        "content": "primary memory",
+                        "memory_type": "episodic",
+                        "importance": 0.8,
+                        "score": 0.95,
+                    }
+                ]
+            },
+            status=200,
+        )
+        from dakera import RecallResponse
+
+        result = client.recall("agent-1", "test query")
+        assert isinstance(result, RecallResponse)
+        assert len(result.memories) == 1
+        assert result.associated_memories is None
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert "include_associated" not in req_body
+
+    def test_recall_associated_memories_cap(self, client, mock_responses):
+        """recall() with associated_memories_cap sends cap in request body."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/agents/agent-1/memories/recall",
+            json={"memories": [], "associated_memories": []},
+            status=200,
+        )
+        client.recall("agent-1", "test", include_associated=True, associated_memories_cap=3)
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body["associated_memories_cap"] == 3
 
 
 class TestBatchMemoryOperations:

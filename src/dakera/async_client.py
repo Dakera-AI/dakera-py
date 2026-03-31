@@ -107,6 +107,8 @@ from dakera.models import (
     NamespaceNerConfig,
     RateLimitHeaders,
     ReadConsistency,
+    # COG-2
+    RecallResponse,
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyResponse,
@@ -691,15 +693,40 @@ class AsyncDakeraClient:
         top_k: int = 5,
         memory_type: str | None = None,
         min_importance: float | None = None,
-    ) -> list[dict[str, Any]]:
-        """Recall memories for an agent."""
+        include_associated: bool = False,
+        associated_memories_cap: int | None = None,
+    ) -> RecallResponse:
+        """Recall memories for an agent.
+
+        Args:
+            agent_id: The agent whose memories to recall.
+            query: Semantic query text.
+            top_k: Number of primary results to return (default: 5).
+            memory_type: Filter by memory type.
+            min_importance: Minimum importance threshold.
+            include_associated: COG-2 — traverse KG depth-1 from recalled
+                memories and include associatively linked memories in
+                ``associated_memories`` (default: False).
+            associated_memories_cap: COG-2 — max associated memories to
+                return (default: 10, max: 10).
+
+        Returns:
+            :class:`RecallResponse` with ``memories`` and optionally
+            ``associated_memories`` when ``include_associated`` is True.
+        """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
             data["min_importance"] = min_importance
+        if include_associated:
+            data["include_associated"] = True
+        if associated_memories_cap is not None:
+            data["associated_memories_cap"] = associated_memories_cap
         result = await self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
-        return result.get("memories", result) if isinstance(result, dict) else result
+        if isinstance(result, dict):
+            return RecallResponse.from_dict(result)
+        return RecallResponse(memories=result)
 
     async def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""

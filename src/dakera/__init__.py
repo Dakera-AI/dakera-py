@@ -109,6 +109,8 @@ from dakera.models import (
     RateLimitHeaders,
     ReadConsistency,
     RecalledMemory,
+    # COG-2
+    RecallResponse,
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyRequest,
@@ -156,6 +158,7 @@ __all__ = [
     "StoreMemoryRequest",
     "Memory",
     "RecalledMemory",
+    "RecallResponse",
     "ConsolidateResponse",
     # Batch memory operations (CE-2)
     "BatchMemoryFilter",

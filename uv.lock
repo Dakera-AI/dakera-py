@@ -150,7 +150,7 @@ wheels = [
 
 [[package]]
 name = "dakera"
-version = "0.9.6"
+version = "0.9.8"
 source = { editable = "." }
 dependencies = [
     { name = "requests" },
