@@ -2178,13 +2178,18 @@ class ExtractEntitiesResponse:
 
 @dataclass
 class MemoryPolicy:
-    """Per-namespace memory lifecycle policy (COG-1).
+    """Per-namespace memory lifecycle policy (COG-1 / COG-3).
 
-    Controls type-specific TTLs, decay curves, and spaced repetition behaviour.
+    Controls type-specific TTLs, decay curves, spaced repetition behaviour, and
+    proactive background consolidation (deduplication).
     All fields have sensible defaults; only override what you need.
 
     Returned and accepted by :meth:`DakeraClient.get_memory_policy` /
     :meth:`DakeraClient.set_memory_policy` (and their async equivalents).
+
+    .. note::
+        ``consolidated_count`` is read-only — the server manages this field.
+        Any value you set locally is sent to the API but silently ignored.
     """
 
     # Differential TTLs -------------------------------------------------------
@@ -2213,6 +2218,19 @@ class MemoryPolicy:
     spaced_repetition_base_interval_seconds: int = 86_400
     """Base interval in seconds for spaced repetition TTL extension (default: 1 d)."""
 
+    # Proactive consolidation (COG-3) -----------------------------------------
+    consolidation_enabled: bool = False
+    """Enable background DBSCAN deduplication for this namespace (default: ``False``)."""
+    consolidation_threshold: float = 0.92
+    """DBSCAN epsilon — cosine-similarity threshold to treat memories as duplicates
+    (default: ``0.92``; higher = only merge very close neighbours)."""
+    consolidation_interval_hours: int = 24
+    """How often (in hours) the background consolidation job runs (default: ``24``)."""
+    consolidated_count: int = 0
+    """Read-only. Lifetime count of memories merged by the consolidation engine.
+    This field is server-managed; any value sent to :meth:`set_memory_policy` is
+    silently ignored."""
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-serialisable dict, omitting ``None`` TTL fields."""
         d: dict[str, Any] = {
@@ -2222,6 +2240,9 @@ class MemoryPolicy:
             "procedural_decay": self.procedural_decay,
             "spaced_repetition_factor": self.spaced_repetition_factor,
             "spaced_repetition_base_interval_seconds": self.spaced_repetition_base_interval_seconds,
+            "consolidation_enabled": self.consolidation_enabled,
+            "consolidation_threshold": self.consolidation_threshold,
+            "consolidation_interval_hours": self.consolidation_interval_hours,
         }
         if self.working_ttl_seconds is not None:
             d["working_ttl_seconds"] = self.working_ttl_seconds
@@ -2248,4 +2269,8 @@ class MemoryPolicy:
             spaced_repetition_base_interval_seconds=int(
                 data.get("spaced_repetition_base_interval_seconds", 86_400)
             ),
+            consolidation_enabled=bool(data.get("consolidation_enabled", False)),
+            consolidation_threshold=float(data.get("consolidation_threshold", 0.92)),
+            consolidation_interval_hours=int(data.get("consolidation_interval_hours", 24)),
+            consolidated_count=int(data.get("consolidated_count", 0)),
         )
