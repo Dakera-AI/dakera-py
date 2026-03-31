@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **COG-3: Proactive Memory Consolidation bindings:**
+  - `MemoryPolicy` gains four new fields:
+    - `consolidation_enabled: bool` (default `False`) — opt-in background DBSCAN deduplication.
+    - `consolidation_threshold: float` (default `0.92`) — cosine-similarity epsilon; higher = only merge very close neighbours.
+    - `consolidation_interval_hours: int` (default `24`) — how often the background job runs.
+    - `consolidated_count: int` (default `0`, **read-only**) — lifetime count of memories merged by the server.
+  - `MemoryPolicy.to_dict()` serialises the three writable COG-3 fields; `consolidated_count` is excluded from PUT payloads.
+  - `MemoryPolicy.from_dict()` deserialises all four fields from GET responses.
+
+## [0.9.9] - 2026-03-31
+
+### Added
 - **CE-7: Time-Window Recall bindings:**
   - `recall()` (sync and async) now accepts `since: str | None = None` and
     `until: str | None = None` ISO-8601 timestamp parameters.
