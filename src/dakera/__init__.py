@@ -97,6 +97,8 @@ from dakera.models import (
     MemoryGraph,
     # DX-1
     MemoryImportResponse,
+    # COG-1
+    MemoryPolicy,
     NamespaceInfo,
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
@@ -239,6 +241,8 @@ __all__ = [
     # GLiNER Entity Extraction via ODE sidecar (ODE-2)
     "OdeEntity",
     "ExtractEntitiesResponse",
+    # COG-1: Cognitive Memory Lifecycle
+    "MemoryPolicy",
     # Exceptions
     "DakeraError",
     "ConnectionError",

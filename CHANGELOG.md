@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-03-31
+
+### Added
+- **COG-1: Cognitive Memory Lifecycle bindings:**
+  - `get_memory_policy(namespace)` — retrieve the memory lifecycle policy for a
+    namespace (`GET /v1/namespaces/{namespace}/memory_policy`). Returns
+    `MemoryPolicy` with the current settings (or COG-1 defaults if not set).
+  - `set_memory_policy(namespace, policy)` — set the memory lifecycle policy
+    (`PUT /v1/namespaces/{namespace}/memory_policy`). Policy persists across
+    restarts and is applied immediately to the decay engine.
+  - Both methods available on `DakeraClient` (sync) and `AsyncDakeraClient` (async).
+  - New type: `MemoryPolicy` — controls per-type TTLs
+    (`working_ttl_seconds`, `episodic_ttl_seconds`, `semantic_ttl_seconds`,
+    `procedural_ttl_seconds`), per-type decay strategies (`working_decay`,
+    `episodic_decay`, `semantic_decay`, `procedural_decay` — one of
+    `"exponential"`, `"linear"`, `"step"`, `"power_law"`, `"logarithmic"`,
+    `"flat"`), and spaced repetition (`spaced_repetition_factor`,
+    `spaced_repetition_base_interval_seconds`).
+
 ## [0.9.7] - 2026-03-31
 
 ### Added

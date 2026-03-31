@@ -598,6 +598,7 @@ class BatchTextQueryResponse:
 @dataclass
 class StoreMemoryRequest:
     """Request to store a memory."""
+
     content: str
     memory_type: str = "episodic"
     importance: float | None = None
@@ -627,6 +628,7 @@ class StoreMemoryRequest:
 @dataclass
 class Memory:
     """A stored memory."""
+
     id: str
     content: str
     memory_type: str
@@ -653,6 +655,7 @@ class Memory:
 @dataclass
 class RecalledMemory:
     """A recalled memory with similarity score."""
+
     id: str
     content: str
     memory_type: str
@@ -677,6 +680,7 @@ class RecalledMemory:
 @dataclass
 class ConsolidateResponse:
     """Response from memory consolidation."""
+
     consolidated_count: int
     removed_count: int
     new_memories: list[str]
@@ -698,6 +702,7 @@ class ConsolidateResponse:
 @dataclass
 class Session:
     """A session."""
+
     session_id: str
     agent_id: str
     started_at: str | None = None
@@ -723,6 +728,7 @@ class Session:
 @dataclass
 class AgentSummary:
     """Summary info for an agent."""
+
     agent_id: str
     memory_count: int
     session_count: int
@@ -741,6 +747,7 @@ class AgentSummary:
 @dataclass
 class AgentStats:
     """Detailed stats for an agent."""
+
     agent_id: str
     total_memories: int
     memories_by_type: dict[str, int]
@@ -772,6 +779,7 @@ class AgentStats:
 @dataclass
 class KnowledgeNode:
     """A node in the knowledge graph."""
+
     id: str
     content: str
     memory_type: str | None = None
@@ -792,6 +800,7 @@ class KnowledgeNode:
 @dataclass
 class KnowledgeEdge:
     """An edge in the knowledge graph."""
+
     source: str
     target: str
     similarity: float
@@ -810,6 +819,7 @@ class KnowledgeEdge:
 @dataclass
 class KnowledgeGraphResponse:
     """Response from knowledge graph operations."""
+
     nodes: list["KnowledgeNode"]
     edges: list["KnowledgeEdge"]
     clusters: list[list[str]] | None = None
@@ -826,6 +836,7 @@ class KnowledgeGraphResponse:
 @dataclass
 class SummarizeResponse:
     """Response from summarization."""
+
     summary: str
     source_count: int
     new_memory_id: str | None = None
@@ -842,6 +853,7 @@ class SummarizeResponse:
 @dataclass
 class DeduplicateResponse:
     """Response from deduplication."""
+
     duplicates_found: int
     removed_count: int
     groups: list[list[str]]
@@ -863,6 +875,7 @@ class DeduplicateResponse:
 @dataclass
 class AnalyticsOverview:
     """Analytics overview response."""
+
     total_queries: int
     avg_latency_ms: float
     p95_latency_ms: float
@@ -1562,6 +1575,7 @@ class KgExportResponse:
 @dataclass
 class NamespaceNerConfig:
     """Entity extraction configuration for a namespace."""
+
     extract_entities: bool = False
     entity_types: list[str] | None = None
 
@@ -1571,9 +1585,11 @@ class NamespaceNerConfig:
             d["entity_types"] = self.entity_types
         return d
 
+
 @dataclass
 class ExtractedEntity:
     """A single extracted entity."""
+
     entity_type: str
     value: str
     score: float
@@ -1586,9 +1602,11 @@ class ExtractedEntity:
             score=float(data.get("score", 0.0)),
         )
 
+
 @dataclass
 class EntityExtractionResponse:
     """Response from POST /v1/memories/extract."""
+
     entities: list[ExtractedEntity]
 
     @classmethod
@@ -1597,9 +1615,11 @@ class EntityExtractionResponse:
             entities=[ExtractedEntity.from_dict(e) for e in data.get("entities", [])],
         )
 
+
 @dataclass
 class MemoryEntitiesResponse:
     """Response from GET /v1/memory/entities/:id."""
+
     memory_id: str
     entities: list[ExtractedEntity]
 
@@ -2124,4 +2144,84 @@ class ExtractEntitiesResponse:
             entities=[OdeEntity.from_dict(e) for e in data.get("entities", [])],
             model=data.get("model", ""),
             processing_time_ms=int(data.get("processing_time_ms", 0)),
+        )
+
+
+# ==============================================================================
+# COG-1: Cognitive Memory Lifecycle — per-namespace memory policy
+# ==============================================================================
+
+
+@dataclass
+class MemoryPolicy:
+    """Per-namespace memory lifecycle policy (COG-1).
+
+    Controls type-specific TTLs, decay curves, and spaced repetition behaviour.
+    All fields have sensible defaults; only override what you need.
+
+    Returned and accepted by :meth:`DakeraClient.get_memory_policy` /
+    :meth:`DakeraClient.set_memory_policy` (and their async equivalents).
+    """
+
+    # Differential TTLs -------------------------------------------------------
+    working_ttl_seconds: int | None = 14_400
+    """Default TTL for ``working`` memories in seconds (default: 4 h)."""
+    episodic_ttl_seconds: int | None = 2_592_000
+    """Default TTL for ``episodic`` memories in seconds (default: 30 d)."""
+    semantic_ttl_seconds: int | None = 31_536_000
+    """Default TTL for ``semantic`` memories in seconds (default: 365 d)."""
+    procedural_ttl_seconds: int | None = 63_072_000
+    """Default TTL for ``procedural`` memories in seconds (default: 730 d)."""
+
+    # Decay curves ------------------------------------------------------------
+    working_decay: str = "exponential"
+    """Decay strategy for ``working`` memories (default: ``"exponential"``)."""
+    episodic_decay: str = "power_law"
+    """Decay strategy for ``episodic`` memories (default: ``"power_law"``)."""
+    semantic_decay: str = "logarithmic"
+    """Decay strategy for ``semantic`` memories (default: ``"logarithmic"``)."""
+    procedural_decay: str = "flat"
+    """Decay strategy for ``procedural`` memories (default: ``"flat"`` — no decay)."""
+
+    # Spaced repetition -------------------------------------------------------
+    spaced_repetition_factor: float = 1.0
+    """TTL extension multiplier per recall hit (default: 1.0; set to 0.0 to disable)."""
+    spaced_repetition_base_interval_seconds: int = 86_400
+    """Base interval in seconds for spaced repetition TTL extension (default: 1 d)."""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to a JSON-serialisable dict, omitting ``None`` TTL fields."""
+        d: dict[str, Any] = {
+            "working_decay": self.working_decay,
+            "episodic_decay": self.episodic_decay,
+            "semantic_decay": self.semantic_decay,
+            "procedural_decay": self.procedural_decay,
+            "spaced_repetition_factor": self.spaced_repetition_factor,
+            "spaced_repetition_base_interval_seconds": self.spaced_repetition_base_interval_seconds,
+        }
+        if self.working_ttl_seconds is not None:
+            d["working_ttl_seconds"] = self.working_ttl_seconds
+        if self.episodic_ttl_seconds is not None:
+            d["episodic_ttl_seconds"] = self.episodic_ttl_seconds
+        if self.semantic_ttl_seconds is not None:
+            d["semantic_ttl_seconds"] = self.semantic_ttl_seconds
+        if self.procedural_ttl_seconds is not None:
+            d["procedural_ttl_seconds"] = self.procedural_ttl_seconds
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryPolicy":
+        return cls(
+            working_ttl_seconds=data.get("working_ttl_seconds"),
+            episodic_ttl_seconds=data.get("episodic_ttl_seconds"),
+            semantic_ttl_seconds=data.get("semantic_ttl_seconds"),
+            procedural_ttl_seconds=data.get("procedural_ttl_seconds"),
+            working_decay=data.get("working_decay", "exponential"),
+            episodic_decay=data.get("episodic_decay", "power_law"),
+            semantic_decay=data.get("semantic_decay", "logarithmic"),
+            procedural_decay=data.get("procedural_decay", "flat"),
+            spaced_repetition_factor=float(data.get("spaced_repetition_factor", 1.0)),
+            spaced_repetition_base_interval_seconds=int(
+                data.get("spaced_repetition_base_interval_seconds", 86_400)
+            ),
         )
