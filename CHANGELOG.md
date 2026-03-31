@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.9.8] - 2026-03-31
 
 ### Added
+- **COG-2: Associative Recall bindings:**
+  - `recall()` now accepts `include_associated: bool = False` and
+    `associated_memories_cap: int | None = None` parameters.
+  - When `include_associated=True`, the server performs a KG depth-1
+    traversal from the primary recalled memories and returns
+    associatively linked memories in `associated_memories`.
+  - Return type changed from `list[dict]` to `RecallResponse` — a
+    dataclass with `memories: list[RecalledMemory]` and
+    `associated_memories: list[RecalledMemory] | None`.
+  - Available on both `DakeraClient` (sync) and `AsyncDakeraClient` (async).
+  - New export: `RecallResponse`.
 - **COG-1: Cognitive Memory Lifecycle bindings:**
   - `get_memory_policy(namespace)` — retrieve the memory lifecycle policy for a
     namespace (`GET /v1/namespaces/{namespace}/memory_policy`). Returns
