@@ -2840,7 +2840,7 @@ class DakeraClient:
         result = self._request(
             "PUT",
             f"/v1/namespaces/{namespace}/memory_policy",
-            json=policy.to_dict(),
+            data=policy.to_dict(),
         )
         return MemoryPolicy.from_dict(result)
 
