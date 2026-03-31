@@ -76,6 +76,8 @@ from dakera.models import (
     MemoryGraph,
     # DX-1
     MemoryImportResponse,
+    # COG-1
+    MemoryPolicy,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
@@ -183,9 +185,7 @@ class DakeraClient:
     def _handle_response(self, response: requests.Response) -> Any:
         """Handle API response and raise appropriate exceptions."""
         # OPS-1: capture rate-limit headers before consuming the body
-        self._last_rate_limit_headers = RateLimitHeaders.from_headers(
-            dict(response.headers)
-        )
+        self._last_rate_limit_headers = RateLimitHeaders.from_headers(dict(response.headers))
 
         try:
             body = response.json() if response.content else None
@@ -206,8 +206,7 @@ class DakeraClient:
         if response.status_code == 400:
             raise ValidationError(
                 message=(
-                    body.get("error", "Validation error")
-                    if isinstance(body, dict) else str(body)
+                    body.get("error", "Validation error") if isinstance(body, dict) else str(body)
                 ),
                 status_code=response.status_code,
                 response_body=body,
@@ -217,7 +216,8 @@ class DakeraClient:
             raise AuthenticationError(
                 message=(
                     body.get("error", "Authentication failed")
-                    if isinstance(body, dict) else "Authentication failed"
+                    if isinstance(body, dict)
+                    else "Authentication failed"
                 ),
                 status_code=response.status_code,
                 response_body=body,
@@ -225,10 +225,7 @@ class DakeraClient:
             )
         elif response.status_code == 403:
             raise AuthorizationError(
-                message=(
-                    body.get("error", "Forbidden")
-                    if isinstance(body, dict) else "Forbidden"
-                ),
+                message=(body.get("error", "Forbidden") if isinstance(body, dict) else "Forbidden"),
                 status_code=response.status_code,
                 response_body=body,
                 code=error_code,
@@ -236,8 +233,7 @@ class DakeraClient:
         elif response.status_code == 404:
             raise NotFoundError(
                 message=(
-                    body.get("error", "Resource not found")
-                    if isinstance(body, dict) else str(body)
+                    body.get("error", "Resource not found") if isinstance(body, dict) else str(body)
                 ),
                 status_code=response.status_code,
                 response_body=body,
@@ -269,7 +265,7 @@ class DakeraClient:
     @staticmethod
     def _compute_backoff(rc: RetryConfig, attempt: int) -> float:
         """Compute exponential backoff delay for the given attempt index."""
-        delay = min(rc.max_delay, rc.base_delay * (2 ** attempt))
+        delay = min(rc.max_delay, rc.base_delay * (2**attempt))
         if rc.jitter:
             delay *= random.uniform(0.5, 1.5)
         return delay
@@ -307,7 +303,8 @@ class DakeraClient:
                     raise
                 # Respect Retry-After header when present
                 wait = (
-                    float(e.retry_after) if e.retry_after is not None
+                    float(e.retry_after)
+                    if e.retry_after is not None
                     else self._compute_backoff(rc, attempt)
                 )
                 time.sleep(wait)
@@ -1064,9 +1061,7 @@ class DakeraClient:
             >>> resp = client.batch_forget(BatchForgetRequest("agent-1", filter=filt))
             >>> print(f"Deleted {resp.deleted_count} memories")
         """
-        result = self._request(
-            "DELETE", "/v1/memories/forget/batch", data=request.to_dict()
-        )
+        result = self._request("DELETE", "/v1/memories/forget/batch", data=request.to_dict())
         return BatchForgetResponse.from_dict(result)
 
     def search_memories(
@@ -2506,9 +2501,7 @@ class DakeraClient:
         """
         return self._request("DELETE", f"/v1/namespaces/{namespace}/keys/{key_id}")
 
-    def get_namespace_key_usage(
-        self, namespace: str, key_id: str
-    ) -> NamespaceKeyUsageResponse:
+    def get_namespace_key_usage(self, namespace: str, key_id: str) -> NamespaceKeyUsageResponse:
         """Get usage statistics for a namespace-scoped API key (SEC-1).
 
         Args:
@@ -2518,9 +2511,7 @@ class DakeraClient:
         Returns:
             :class:`NamespaceKeyUsageResponse` with request counts and latency.
         """
-        result = self._request(
-            "GET", f"/v1/namespaces/{namespace}/keys/{key_id}/usage"
-        )
+        result = self._request("GET", f"/v1/namespaces/{namespace}/keys/{key_id}/usage")
         return NamespaceKeyUsageResponse.from_dict(result)
 
     # =========================================================================
@@ -2644,6 +2635,7 @@ class DakeraClient:
             :class:`~dakera.models.DakeraEvent` — one per audit event.
         """
         from urllib.parse import urlencode
+
         params: dict[str, str] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
@@ -2805,6 +2797,52 @@ class DakeraClient:
         )
         data = self._handle_response(response)
         return ExtractEntitiesResponse.from_dict(data)
+
+    # =========================================================================
+    # COG-1: Per-namespace Memory Lifecycle Policy
+    # =========================================================================
+
+    def get_memory_policy(self, namespace: str) -> MemoryPolicy:
+        """Return the memory lifecycle policy for a namespace (COG-1).
+
+        Calls ``GET /v1/namespaces/{namespace}/memory_policy``.
+
+        When no explicit policy has been configured the server returns the
+        COG-1 defaults (working=4 h, episodic=30 d, semantic=365 d,
+        procedural=730 d; exponential/power_law/logarithmic/flat decay;
+        spaced-repetition factor 1.0).
+
+        Args:
+            namespace: Namespace to inspect.
+
+        Returns:
+            :class:`MemoryPolicy` describing the current lifecycle settings.
+        """
+        result = self._request("GET", f"/v1/namespaces/{namespace}/memory_policy")
+        return MemoryPolicy.from_dict(result)
+
+    def set_memory_policy(self, namespace: str, policy: MemoryPolicy) -> MemoryPolicy:
+        """Set the memory lifecycle policy for a namespace (COG-1).
+
+        Calls ``PUT /v1/namespaces/{namespace}/memory_policy``.
+
+        The policy is persisted in namespace config and applied immediately to
+        the decay engine background task.  Only set the fields you want to
+        override — all fields have safe defaults.
+
+        Args:
+            namespace: Namespace to configure.
+            policy: :class:`MemoryPolicy` with the desired settings.
+
+        Returns:
+            The updated :class:`MemoryPolicy` as confirmed by the server.
+        """
+        result = self._request(
+            "PUT",
+            f"/v1/namespaces/{namespace}/memory_policy",
+            data=policy.to_dict(),
+        )
+        return MemoryPolicy.from_dict(result)
 
     # =========================================================================
     # Context Manager Support
