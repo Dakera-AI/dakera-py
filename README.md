@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/pypi/pyversions/dakera)](https://pypi.org/project/dakera/)
 
-Official Python client for [Dakera](https://dakera.ai) — an AI agent memory platform.
+Official Python SDK for [Dakera](https://dakera.ai) — the AI agent memory platform. Persistent, session-aware, cross-agent memory for your AI agents.
 
 ## Installation
 
