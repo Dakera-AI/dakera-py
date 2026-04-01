@@ -2235,6 +2235,14 @@ class MemoryPolicy:
     This field is server-managed; any value sent to :meth:`set_memory_policy` is
     silently ignored."""
 
+    # Per-namespace rate limiting (SEC-5) -------------------------------------
+    rate_limit_enabled: bool = False
+    """Enable per-namespace store/recall rate limiting (default: ``False``)."""
+    rate_limit_stores_per_minute: int | None = None
+    """Max store operations per minute for this namespace. ``None`` = unlimited (default)."""
+    rate_limit_recalls_per_minute: int | None = None
+    """Max recall operations per minute for this namespace. ``None`` = unlimited (default)."""
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-serialisable dict, omitting ``None`` TTL fields."""
         d: dict[str, Any] = {
@@ -2247,6 +2255,7 @@ class MemoryPolicy:
             "consolidation_enabled": self.consolidation_enabled,
             "consolidation_threshold": self.consolidation_threshold,
             "consolidation_interval_hours": self.consolidation_interval_hours,
+            "rate_limit_enabled": self.rate_limit_enabled,
         }
         if self.working_ttl_seconds is not None:
             d["working_ttl_seconds"] = self.working_ttl_seconds
@@ -2256,6 +2265,10 @@ class MemoryPolicy:
             d["semantic_ttl_seconds"] = self.semantic_ttl_seconds
         if self.procedural_ttl_seconds is not None:
             d["procedural_ttl_seconds"] = self.procedural_ttl_seconds
+        if self.rate_limit_stores_per_minute is not None:
+            d["rate_limit_stores_per_minute"] = self.rate_limit_stores_per_minute
+        if self.rate_limit_recalls_per_minute is not None:
+            d["rate_limit_recalls_per_minute"] = self.rate_limit_recalls_per_minute
         return d
 
     @classmethod
@@ -2277,4 +2290,7 @@ class MemoryPolicy:
             consolidation_threshold=float(data.get("consolidation_threshold", 0.92)),
             consolidation_interval_hours=int(data.get("consolidation_interval_hours", 24)),
             consolidated_count=int(data.get("consolidated_count", 0)),
+            rate_limit_enabled=bool(data.get("rate_limit_enabled", False)),
+            rate_limit_stores_per_minute=data.get("rate_limit_stores_per_minute"),
+            rate_limit_recalls_per_minute=data.get("rate_limit_recalls_per_minute"),
         )
