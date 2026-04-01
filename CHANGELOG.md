@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `consolidated_count: int` (default `0`, **read-only**) — lifetime count of memories merged by the server.
   - `MemoryPolicy.to_dict()` serialises the three writable COG-3 fields; `consolidated_count` is excluded from PUT payloads.
   - `MemoryPolicy.from_dict()` deserialises all four fields from GET responses.
+- **SEC-5: Per-namespace rate limiting bindings:**
+  - `MemoryPolicy` gains three new fields:
+    - `rate_limit_enabled: bool` (default `False`) — opt-in per-namespace store/recall rate limiting.
+    - `rate_limit_stores_per_minute: int | None` (default `None` = unlimited) — max store operations per minute.
+    - `rate_limit_recalls_per_minute: int | None` (default `None` = unlimited) — max recall operations per minute.
+  - `MemoryPolicy.to_dict()` serialises `rate_limit_enabled` unconditionally; the two optional int fields are omitted when `None`.
+  - `MemoryPolicy.from_dict()` deserialises all three fields from GET responses.
+  - When a limit is exceeded the server returns HTTP 429; the existing `RateLimitError` is raised with `retry_after=60`.
 
 ## [0.9.9] - 2026-03-31
 
