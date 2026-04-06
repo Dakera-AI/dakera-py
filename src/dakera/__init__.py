@@ -89,6 +89,8 @@ from dakera.models import (
     KnowledgeEdge,
     KnowledgeGraphResponse,
     KnowledgeNode,
+    # OBS-2
+    KpiSnapshot,
     ListNamespaceKeysResponse,
     Memory,
     MemoryEntitiesResponse,
@@ -112,8 +114,6 @@ from dakera.models import (
     # COG-2
     RecallResponse,
     RetryConfig,
-    # OBS-2
-    KpiSnapshot,
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
@@ -130,7 +130,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.9.9"
+__version__ = "0.9.12"
 __all__ = [
     # Clients
     "DakeraClient",
