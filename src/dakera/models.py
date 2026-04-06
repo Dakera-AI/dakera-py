@@ -2320,7 +2320,7 @@ class KpiSnapshot:
     api_error_rate_5xx_pct: float
     """5xx error rate as a percentage of total API requests over the last minute."""
     active_agents_count: int
-    """Number of distinct agent identifiers that stored or recalled a memory in the last 24 hours."""
+    """Distinct agent identifiers that stored or recalled a memory in the last 24 hours."""
     session_count_week: int
     """Total sessions created in the rolling 7-day window."""
     cross_agent_network_node_count: int
