@@ -110,6 +110,8 @@ from dakera.models import (
     # COG-2
     RecallResponse,
     RetryConfig,
+    # OBS-2
+    KpiSnapshot,
     # SEC-3
     RotateEncryptionKeyResponse,
     SearchResult,
@@ -1747,6 +1749,19 @@ class AsyncDakeraClient:
         if strategy is not None:
             data["strategy"] = strategy
         return await self._request("PUT", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
+
+    async def get_kpis(self) -> KpiSnapshot:
+        """Return a point-in-time product KPI snapshot (OBS-2).
+
+        Calls ``GET /v1/kpis``. Returns 8 operational metrics covering
+        latency, error rate, and retention. Sub-millisecond — served from
+        in-memory counters. Requires Admin scope.
+
+        Returns:
+            :class:`~dakera.models.KpiSnapshot` with all 8 KPI fields.
+        """
+        result = await self._request("GET", "/v1/kpis")
+        return KpiSnapshot.from_dict(result)
 
     async def rotate_encryption_key(
         self,

@@ -112,6 +112,8 @@ from dakera.models import (
     # COG-2
     RecallResponse,
     RetryConfig,
+    # OBS-2
+    KpiSnapshot,
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
@@ -246,6 +248,8 @@ __all__ = [
     "ExtractEntitiesResponse",
     # COG-1: Cognitive Memory Lifecycle
     "MemoryPolicy",
+    # OBS-2: Product KPI Snapshot
+    "KpiSnapshot",
     # Exceptions
     "DakeraError",
     "ConnectionError",
