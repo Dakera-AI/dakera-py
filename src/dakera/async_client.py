@@ -1169,11 +1169,12 @@ class AsyncDakeraClient:
         agent_id: str,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Start a new session."""
+        """Start a new session. Returns the session dict (unwrapped from the server response)."""
         data: dict[str, Any] = {"agent_id": agent_id}
         if metadata is not None:
             data["metadata"] = metadata
-        return await self._request("POST", "/v1/sessions/start", data=data)
+        result = await self._request("POST", "/v1/sessions/start", data=data)
+        return result["session"]
 
     async def end_session(self, session_id: str) -> dict[str, Any]:
         """End a session."""
