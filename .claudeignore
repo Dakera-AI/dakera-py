@@ -1,0 +1,11 @@
+node_modules/
+dist/
+target/
+.git/
+*.lock
+coverage/
+__pycache__/
+.DS_Store
+*.min.js
+*.min.css
+build/
