@@ -2294,3 +2294,50 @@ class MemoryPolicy:
             rate_limit_stores_per_minute=data.get("rate_limit_stores_per_minute"),
             rate_limit_recalls_per_minute=data.get("rate_limit_recalls_per_minute"),
         )
+
+
+# ============================================================================
+# Product KPIs (OBS-2)
+# ============================================================================
+
+
+@dataclass
+class KpiSnapshot:
+    """Point-in-time product KPI snapshot returned by ``GET /v1/kpis`` (OBS-2).
+
+    All latency values are in milliseconds; rate/percentage values are in the
+    range ``0.0``–``100.0``. Integer counts are unsigned.
+
+    Requires Admin scope.
+    """
+
+    recall_latency_p50_ms: float
+    """Median recall latency across all namespaces over the last minute."""
+    recall_latency_p99_ms: float
+    """99th-percentile recall latency across all namespaces over the last minute."""
+    store_latency_p50_ms: float
+    """Median store latency across all namespaces over the last minute."""
+    api_error_rate_5xx_pct: float
+    """5xx error rate as a percentage of total API requests over the last minute."""
+    active_agents_count: int
+    """Distinct agent identifiers that stored or recalled a memory in the last 24 hours."""
+    session_count_week: int
+    """Total sessions created in the rolling 7-day window."""
+    cross_agent_network_node_count: int
+    """Current number of nodes in the cross-agent knowledge graph."""
+    memory_retention_7d_pct: float
+    """Percentage of memories created 7 days ago that are still active (not decayed or deleted)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KpiSnapshot":
+        """Construct from API response dict."""
+        return cls(
+            recall_latency_p50_ms=float(data["recall_latency_p50_ms"]),
+            recall_latency_p99_ms=float(data["recall_latency_p99_ms"]),
+            store_latency_p50_ms=float(data["store_latency_p50_ms"]),
+            api_error_rate_5xx_pct=float(data["api_error_rate_5xx_pct"]),
+            active_agents_count=int(data["active_agents_count"]),
+            session_count_week=int(data["session_count_week"]),
+            cross_agent_network_node_count=int(data["cross_agent_network_node_count"]),
+            memory_retention_7d_pct=float(data["memory_retention_7d_pct"]),
+        )

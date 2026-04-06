@@ -89,6 +89,8 @@ from dakera.models import (
     KnowledgeEdge,
     KnowledgeGraphResponse,
     KnowledgeNode,
+    # OBS-2
+    KpiSnapshot,
     ListNamespaceKeysResponse,
     Memory,
     MemoryEntitiesResponse,
@@ -128,7 +130,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.9.9"
+__version__ = "0.9.12"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -246,6 +248,8 @@ __all__ = [
     "ExtractEntitiesResponse",
     # COG-1: Cognitive Memory Lifecycle
     "MemoryPolicy",
+    # OBS-2: Product KPI Snapshot
+    "KpiSnapshot",
     # Exceptions
     "DakeraError",
     "ConnectionError",

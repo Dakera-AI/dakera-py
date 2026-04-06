@@ -69,6 +69,8 @@ from dakera.models import (
     KgExportResponse,
     KgPathResponse,
     KgQueryResponse,
+    # OBS-2
+    KpiSnapshot,
     ListNamespaceKeysResponse,
     MemoryEntitiesResponse,
     MemoryEvent,
@@ -2207,6 +2209,19 @@ class DakeraClient:
         per-cycle statistics from the most recent run. Requires Admin scope.
         """
         return self._request("GET", "/v1/admin/decay/stats")
+
+    def get_kpis(self) -> "KpiSnapshot":
+        """Return a point-in-time product KPI snapshot (OBS-2).
+
+        Calls ``GET /v1/kpis``. Returns 8 operational metrics covering
+        latency, error rate, and retention. Sub-millisecond — served from
+        in-memory counters. Requires Admin scope.
+
+        Returns:
+            :class:`~dakera.models.KpiSnapshot` with all 8 KPI fields.
+        """
+        result = self._request("GET", "/v1/kpis")
+        return KpiSnapshot.from_dict(result)
 
     def rotate_encryption_key(
         self,
