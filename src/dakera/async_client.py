@@ -93,6 +93,8 @@ from dakera.models import (
     KgExportResponse,
     KgPathResponse,
     KgQueryResponse,
+    # OBS-2
+    KpiSnapshot,
     ListNamespaceKeysResponse,
     MemoryEntitiesResponse,
     MemoryEvent,
@@ -110,8 +112,6 @@ from dakera.models import (
     # COG-2
     RecallResponse,
     RetryConfig,
-    # OBS-2
-    KpiSnapshot,
     # SEC-3
     RotateEncryptionKeyResponse,
     SearchResult,
