@@ -98,6 +98,7 @@ from dakera.models import (
     TextUpsertResponse,
     Vector,
     VectorInput,
+    WakeUpResponse,
     WarmCacheRequest,
     WarmCacheResponse,
     WarmingPriority,
@@ -1512,6 +1513,32 @@ class DakeraClient:
         if limit is not None:
             params["limit"] = limit
         return self._request("GET", f"/v1/agents/{agent_id}/sessions", params=params)
+
+    def wake_up(
+        self,
+        agent_id: str,
+        top_n: int = 20,
+        min_importance: float = 0.0,
+    ) -> WakeUpResponse:
+        """Return top-N wake-up context memories for an agent (DAK-1690).
+
+        Calls ``GET /v1/agents/{agent_id}/wake-up``. Returns memories ranked by
+        ``importance × exp(-ln2 × age / 14d)`` — no embedding inference, served
+        from the metadata index for sub-millisecond latency.
+
+        Args:
+            agent_id: Agent identifier.
+            top_n: Maximum number of memories to return (default 20, max 100).
+            min_importance: Only return memories with importance ≥ this value
+                (default 0.0).
+
+        Returns:
+            :class:`~dakera.models.WakeUpResponse` with ranked memories and
+            ``total_available`` count.
+        """
+        params: dict[str, Any] = {"top_n": top_n, "min_importance": min_importance}
+        result = self._request("GET", f"/v1/agents/{agent_id}/wake-up", params=params)
+        return WakeUpResponse.from_dict(result)
 
     # =========================================================================
     # Cache Warming Operations

@@ -799,6 +799,33 @@ class AgentStats:
         )
 
 
+@dataclass
+class WakeUpResponse:
+    """Response from ``GET /v1/agents/{agent_id}/wake-up`` (DAK-1690).
+
+    Returns top-N memories ranked by ``importance × exp(-ln2 × age / 14d)``
+    for fast agent start-up context loading. No embedding inference — served
+    from metadata index for sub-millisecond latency.
+
+    Requires Read scope on the agent namespace.
+    """
+
+    agent_id: str
+    """The agent whose memories are returned."""
+    memories: list["Memory"]
+    """Top-N memories ranked by recency-weighted importance."""
+    total_available: int
+    """Total memories available before top_n cap was applied."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WakeUpResponse":
+        return cls(
+            agent_id=data["agent_id"],
+            memories=[Memory.from_dict(m) for m in data.get("memories", [])],
+            total_available=data.get("total_available", 0),
+        )
+
+
 # ===========================================================================
 # Knowledge Graph Types
 # ===========================================================================

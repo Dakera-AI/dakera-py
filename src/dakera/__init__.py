@@ -124,13 +124,14 @@ from dakera.models import (
     SummarizeResponse,
     Vector,
     VectorMutationOp,
+    WakeUpResponse,
     WarmCacheRequest,
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
 )
 
-__version__ = "0.9.12"
+__version__ = "0.9.14"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -175,6 +176,7 @@ __all__ = [
     # Agent types
     "AgentSummary",
     "AgentStats",
+    "WakeUpResponse",
     # Knowledge Graph types (internal graph — knowledge.rs)
     "KnowledgeNode",
     "KnowledgeEdge",
