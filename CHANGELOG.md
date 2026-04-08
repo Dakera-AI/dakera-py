@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.15] - 2026-04-08
+
+### Notes
+- Version bump to match server v0.9.15. No SDK API changes.
+- Server changes (transparent to SDK callers):
+  - **DAK-1691:** Session-end auto-consolidation — `end_session` now clusters near-duplicate session memories via DBSCAN and soft-expires them (30-day TTL). High-importance memories (>0.8) are protected from decay. No request/response signature change.
+  - **DAK-1689:** HNSW post-filter ANN fix — filtered vector queries are now O(N·ANN) instead of O(N·linear). No SDK change.
+
+## [0.9.14] - 2026-04-07
+
+### Added
+- **DAK-1690: Agent wake-up context endpoint:**
+  - `DakeraClient.wake_up(agent_id, top_n=20, min_importance=0.0)` and `AsyncDakeraClient.wake_up(...)` — `GET /v1/agents/{agent_id}/wake-up` — returns a `WakeUpResponse` with top-N memories ranked by importance × recency decay. Sub-millisecond; no embedding inference. Requires Read scope.
+  - `WakeUpResponse` dataclass exported from `dakera.models` and top-level `dakera` package: `agent_id`, `memories: list[Memory]`, `total_available: int`.
+
+## [0.9.13] - 2026-04-07
+
+### Fixed
+- **Session response unwrapping (DAK-1548):** `start_session()` now correctly unwraps the `{"session": {...}}` server response, resolving a `KeyError` on `result["id"]` when using the returned session object directly. Affects both sync (`DakeraClient`) and async (`AsyncDakeraClient`) variants.
+
 ## [0.9.12] - 2026-04-06
 
 ### Added
