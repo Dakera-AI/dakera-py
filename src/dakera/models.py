@@ -34,6 +34,23 @@ class DistanceMetric(str, Enum):
     DOT_PRODUCT = "dot_product"
 
 
+class RoutingMode(str, Enum):
+    """Routing mode for recall and search (CE-10).
+
+    Controls which retrieval index to use when recalling or searching memories.
+    ``auto`` (default) lets the server pick the best strategy based on the query.
+    """
+
+    AUTO = "auto"
+    """Server picks the best strategy (default)."""
+    VECTOR = "vector"
+    """Force ANN vector search (HNSW)."""
+    BM25 = "bm25"
+    """Force BM25 full-text search."""
+    HYBRID = "hybrid"
+    """Fuse ANN and BM25 scores (RRF)."""
+
+
 # ============================================================================
 # Retry & Timeout Configuration
 # ============================================================================
@@ -919,6 +936,36 @@ class DeduplicateResponse:
             duplicates_found=data.get("duplicates_found", 0),
             removed_count=data.get("removed_count", 0),
             groups=data.get("groups", []),
+        )
+
+
+@dataclass
+class CompressResponse:
+    """Response from ``POST /v1/agents/{id}/compress`` (CE-12).
+
+    Contains compression statistics for the agent's memory namespace after
+    the server runs the compression pass.
+    """
+
+    agent_id: str
+    """The agent whose namespace was compressed."""
+    memories_before: int
+    """Number of memories before compression."""
+    memories_after: int
+    """Number of memories after compression."""
+    removed_count: int
+    """Number of memories removed during compression."""
+    duration_ms: float = 0.0
+    """Wall-clock duration of the compression pass in milliseconds."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CompressResponse":
+        return cls(
+            agent_id=data.get("agent_id", ""),
+            memories_before=data.get("memories_before", 0),
+            memories_after=data.get("memories_after", 0),
+            removed_count=data.get("removed_count", 0),
+            duration_ms=float(data.get("duration_ms", 0.0)),
         )
 
 
@@ -2270,6 +2317,22 @@ class MemoryPolicy:
     rate_limit_recalls_per_minute: int | None = None
     """Max recall operations per minute for this namespace. ``None`` = unlimited (default)."""
 
+    # Store-time deduplication (CE-10) ----------------------------------------
+    dedup_on_store: bool = False
+    """Deduplicate against existing memories at store time (CE-10, default: ``False``).
+
+    When ``True`` the server computes a similarity check before persisting a
+    new memory and drops it if a near-duplicate already exists (threshold
+    controlled by ``dedup_threshold``).
+    """
+    dedup_threshold: float = 0.92
+    """Similarity threshold for store-time deduplication (default: ``0.92``).
+
+    Memories with cosine similarity ≥ this value are considered duplicates
+    and the incoming memory is dropped.  Only active when ``dedup_on_store``
+    is ``True``.
+    """
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-serialisable dict, omitting ``None`` TTL fields."""
         d: dict[str, Any] = {
@@ -2283,6 +2346,8 @@ class MemoryPolicy:
             "consolidation_threshold": self.consolidation_threshold,
             "consolidation_interval_hours": self.consolidation_interval_hours,
             "rate_limit_enabled": self.rate_limit_enabled,
+            "dedup_on_store": self.dedup_on_store,
+            "dedup_threshold": self.dedup_threshold,
         }
         if self.working_ttl_seconds is not None:
             d["working_ttl_seconds"] = self.working_ttl_seconds
@@ -2320,6 +2385,8 @@ class MemoryPolicy:
             rate_limit_enabled=bool(data.get("rate_limit_enabled", False)),
             rate_limit_stores_per_minute=data.get("rate_limit_stores_per_minute"),
             rate_limit_recalls_per_minute=data.get("rate_limit_recalls_per_minute"),
+            dedup_on_store=bool(data.get("dedup_on_store", False)),
+            dedup_threshold=float(data.get("dedup_threshold", 0.92)),
         )
 
 

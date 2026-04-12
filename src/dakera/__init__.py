@@ -48,6 +48,8 @@ from dakera.models import (
     BatchMemoryFilter,
     BatchRecallRequest,
     BatchRecallResponse,
+    # CE-12
+    CompressResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
     ConsolidateResponse,
@@ -117,6 +119,8 @@ from dakera.models import (
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
+    # CE-10
+    RoutingMode,
     SearchResult,
     Session,
     StalenessConfig,
@@ -131,7 +135,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.9.15"
+__version__ = "0.10.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -250,6 +254,10 @@ __all__ = [
     "ExtractEntitiesResponse",
     # COG-1: Cognitive Memory Lifecycle
     "MemoryPolicy",
+    # CE-10: Routing mode
+    "RoutingMode",
+    # CE-12: Agent compression
+    "CompressResponse",
     # OBS-2: Product KPI Snapshot
     "KpiSnapshot",
     # Exceptions
