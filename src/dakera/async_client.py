@@ -60,6 +60,8 @@ from dakera.models import (
     BatchRecallRequest,
     BatchRecallResponse,
     BatchTextQueryResponse,
+    # CE-12
+    CompressResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
     # CE-6
@@ -114,6 +116,8 @@ from dakera.models import (
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyResponse,
+    # CE-10
+    RoutingMode,
     SearchResult,
     StalenessConfig,
     TextDocument,
@@ -702,6 +706,7 @@ class AsyncDakeraClient:
         associated_memories_min_weight: float | None = None,
         since: str | None = None,
         until: str | None = None,
+        routing: RoutingMode | str | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -747,6 +752,8 @@ class AsyncDakeraClient:
             data["since"] = since
         if until is not None:
             data["until"] = until
+        if routing is not None:
+            data["routing"] = routing.value if hasattr(routing, "value") else routing
         result = await self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
@@ -812,6 +819,7 @@ class AsyncDakeraClient:
         top_k: int = 10,
         memory_type: str | None = None,
         min_importance: float | None = None,
+        routing: RoutingMode | str | None = None,
     ) -> list[dict[str, Any]]:
         """Search memories for an agent."""
         data: dict[str, Any] = {"query": query, "top_k": top_k}
@@ -819,8 +827,15 @@ class AsyncDakeraClient:
             data["memory_type"] = memory_type
         if min_importance is not None:
             data["min_importance"] = min_importance
+        if routing is not None:
+            data["routing"] = routing.value if hasattr(routing, "value") else routing
         result = await self._request("POST", f"/v1/agents/{agent_id}/memories/search", data=data)
         return result.get("memories", result) if isinstance(result, dict) else result
+
+    async def compress_agent(self, agent_id: str) -> CompressResponse:
+        """Compress the memory namespace for an agent (CE-12)."""
+        result = await self._request("POST", f"/v1/agents/{agent_id}/compress")
+        return CompressResponse.from_dict(result)
 
     async def update_importance(
         self,

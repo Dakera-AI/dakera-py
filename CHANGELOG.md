@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-12
+
+### Added
+- **CE-10:** `RoutingMode` enum (`auto` | `vector` | `bm25` | `hybrid`) — controls which retrieval index to use for recall and search.
+- **CE-10:** `routing` parameter on `DakeraClient.recall()` and `DakeraClient.search_memories()` (and async equivalents). Defaults to `None` (server picks `auto`).
+- **CE-12:** `compress_agent(agent_id)` method on `DakeraClient` and `AsyncDakeraClient` — calls `POST /v1/agents/{id}/compress` and returns a `CompressResponse` with before/after memory counts and timing.
+- **CE-12:** `CompressResponse` dataclass with fields `agent_id`, `memories_before`, `memories_after`, `removed_count`, `duration_ms`.
+- **CE-10:** `MemoryPolicy.dedup_on_store` (bool, default `False`) — enable similarity deduplication at store time.
+- **CE-10:** `MemoryPolicy.dedup_threshold` (float, default `0.92`) — cosine-similarity threshold for store-time deduplication.
+
 ## [0.9.15] - 2026-04-08
 
 ### Notes
