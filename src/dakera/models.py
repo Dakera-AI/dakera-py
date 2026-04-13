@@ -456,11 +456,13 @@ class EmbeddingModel(str, Enum):
     """
     Supported embedding models for text-based operations.
 
+    - BGE_LARGE: BGE-large - Best quality, default (1024 dimensions)
     - MINILM: MiniLM-L6 - Fast, good quality (384 dimensions)
     - BGE_SMALL: BGE-small - Balanced performance (384 dimensions)
     - E5_SMALL: E5-small - High quality (384 dimensions)
     """
 
+    BGE_LARGE = "bge-large"
     MINILM = "minilm"
     BGE_SMALL = "bge-small"
     E5_SMALL = "e5-small"
