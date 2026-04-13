@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-04-13
+
+### Added
+- **CE-13:** `rerank` parameter on `DakeraClient.recall()` and `DakeraClient.search_memories()` (and async equivalents). Enables cross-encoder reranking via `Xenova/bge-reranker-base`. `None` uses server default (`True` for recall, `False` for search). Pass `False` to disable on latency-sensitive paths.
+- **CE-13:** `EmbeddingModel.BGE_LARGE` (`"bge-large"`, 1024 dimensions) — new server-default embedding model.
+
 ## [0.10.0] - 2026-04-12
 
 ### Added
