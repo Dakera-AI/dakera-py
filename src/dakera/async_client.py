@@ -86,6 +86,8 @@ from dakera.models import (
     FeedbackSignal,
     FilterDict,
     FullTextSearchResult,
+    # CE-14
+    FusionStrategy,
     GraphExport,
     GraphLinkResponse,
     GraphPath,
@@ -708,6 +710,8 @@ class AsyncDakeraClient:
         until: str | None = None,
         routing: RoutingMode | str | None = None,
         rerank: bool | None = None,
+        fusion: FusionStrategy | str | None = None,
+        neighborhood: bool | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -733,6 +737,14 @@ class AsyncDakeraClient:
             rerank: CE-13 — run cross-encoder reranking on ANN candidates
                 (default: None = server default of ``True``). Pass
                 ``False`` to disable for latency-sensitive paths.
+            fusion: CE-14 — fusion strategy when routing=hybrid.
+                ``FusionStrategy.RRF`` (default) uses Reciprocal Rank
+                Fusion; ``FusionStrategy.MINMAX`` uses legacy min-max
+                normalization.
+            neighborhood: v0.11.0 — fetch session-adjacent memories within
+                ±5 min of each top result as context enrichment (default:
+                None = server default of ``True``). Pass ``False`` to
+                disable for latency-sensitive paths.
 
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
@@ -760,6 +772,10 @@ class AsyncDakeraClient:
             data["routing"] = routing.value if hasattr(routing, "value") else routing
         if rerank is not None:
             data["rerank"] = rerank
+        if fusion is not None:
+            data["fusion"] = fusion.value if hasattr(fusion, "value") else fusion
+        if neighborhood is not None:
+            data["neighborhood"] = neighborhood
         result = await self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)

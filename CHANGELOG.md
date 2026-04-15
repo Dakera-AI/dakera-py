@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-15
+
+### Added
+- **CE-14:** `FusionStrategy` enum (`FusionStrategy.RRF` / `FusionStrategy.MINMAX`) — controls how vector and BM25 scores are combined in hybrid recall.
+- **CE-14:** `fusion` parameter on `DakeraClient.recall()` and `AsyncDakeraClient.recall()`. `None` uses server default (`FusionStrategy.RRF`). Use `FusionStrategy.MINMAX` for legacy weighted min-max normalization.
+- **v0.11.0:** `neighborhood` parameter on `DakeraClient.recall()` and `AsyncDakeraClient.recall()`. Session-adjacent memory enrichment (±5 min). `None` uses server default (`True`). Pass `False` to disable for latency-sensitive paths.
+
 ## [0.10.3] - 2026-04-15
 
 ### Added
