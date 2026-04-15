@@ -86,6 +86,8 @@ from dakera.models import (
     FeedbackSignal,
     FilterDict,
     FullTextSearchResult,
+    # CE-14
+    FusionStrategy,
     GraphExport,
     GraphLinkResponse,
     GraphPath,
@@ -118,8 +120,6 @@ from dakera.models import (
     RotateEncryptionKeyResponse,
     # CE-10
     RoutingMode,
-    # CE-14
-    FusionStrategy,
     SearchResult,
     StalenessConfig,
     TextDocument,
@@ -710,7 +710,7 @@ class AsyncDakeraClient:
         until: str | None = None,
         routing: RoutingMode | str | None = None,
         rerank: bool | None = None,
-        fusion: "FusionStrategy | str | None" = None,
+        fusion: FusionStrategy | str | None = None,
         neighborhood: bool | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.

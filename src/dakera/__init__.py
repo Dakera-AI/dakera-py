@@ -77,6 +77,8 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FullTextSearchResult,
+    # CE-14
+    FusionStrategy,
     GraphEdge,
     GraphExport,
     GraphLinkResponse,
@@ -121,8 +123,6 @@ from dakera.models import (
     RotateEncryptionKeyResponse,
     # CE-10
     RoutingMode,
-    # CE-14
-    FusionStrategy,
     SearchResult,
     Session,
     StalenessConfig,
