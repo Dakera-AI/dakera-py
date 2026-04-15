@@ -121,6 +121,8 @@ from dakera.models import (
     RotateEncryptionKeyResponse,
     # CE-10
     RoutingMode,
+    # CE-14
+    FusionStrategy,
     SearchResult,
     Session,
     StalenessConfig,
@@ -256,6 +258,8 @@ __all__ = [
     "MemoryPolicy",
     # CE-10: Routing mode
     "RoutingMode",
+    # CE-14: Fusion strategy
+    "FusionStrategy",
     # CE-12: Agent compression
     "CompressResponse",
     # OBS-2: Product KPI Snapshot

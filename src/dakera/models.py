@@ -51,6 +51,21 @@ class RoutingMode(str, Enum):
     """Fuse ANN and BM25 scores (RRF)."""
 
 
+class FusionStrategy(str, Enum):
+    """Fusion strategy for hybrid recall (CE-14).
+
+    Controls how vector and BM25 scores are combined when ``routing=hybrid``.
+    ``rrf`` (default) uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009)
+    which is rank-based and scale-invariant. ``minmax`` uses legacy weighted
+    min-max normalization.
+    """
+
+    RRF = "rrf"
+    """Reciprocal Rank Fusion — default, best for recall tasks."""
+    MINMAX = "minmax"
+    """Weighted min-max normalization — legacy behavior."""
+
+
 # ============================================================================
 # Retry & Timeout Configuration
 # ============================================================================
