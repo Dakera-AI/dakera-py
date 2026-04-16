@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] - 2026-04-16
+
+### Changed
+- **v0.11.2:** Server default fusion strategy changed from `FusionStrategy.RRF` to
+  `FusionStrategy.MINMAX` (CEO architecture decision, DAK-1948). A/B benchmark conclusive:
+  MinMax +6.3pp overall Recall@10, +13.5pp temporal (Cat 3). Callers that rely on the server
+  default will now use MinMax; pass `FusionStrategy.RRF` explicitly to keep RRF behaviour.
+  Updated docstrings to reflect the new server default.
+
 ## [0.11.1] - 2026-04-16
 
 ### Fixed
