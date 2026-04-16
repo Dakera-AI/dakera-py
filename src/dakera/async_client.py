@@ -738,9 +738,9 @@ class AsyncDakeraClient:
                 (default: None = server default of ``True``). Pass
                 ``False`` to disable for latency-sensitive paths.
             fusion: CE-14 — fusion strategy when routing=hybrid.
-                ``FusionStrategy.RRF`` (default) uses Reciprocal Rank
-                Fusion; ``FusionStrategy.MINMAX`` uses legacy min-max
-                normalization.
+                ``FusionStrategy.MINMAX`` (server default since v0.11.2) uses
+                min-max score normalization; ``FusionStrategy.RRF`` uses
+                Reciprocal Rank Fusion (Cormack et al., SIGIR 2009).
             neighborhood: v0.11.0 — fetch session-adjacent memories within
                 ±5 min of each top result as context enrichment (default:
                 None = server default of ``True``). Pass ``False`` to
