@@ -1007,6 +1007,7 @@ class DakeraClient:
         rerank: bool | None = None,
         fusion: "FusionStrategy | str | None" = None,
         vector_weight: float | None = None,
+        iterations: int | None = None,
         neighborhood: bool | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
@@ -1042,6 +1043,11 @@ class DakeraClient:
                 from ``QueryClassifier``; omit for adaptive defaults
                 (recommended for most callers). Only effective when
                 ``routing=RoutingMode.HYBRID``.
+            iterations: CE-23 — pseudo-relevance feedback (PRF) passes for
+                BM25 routing (1–3, default: 1). Pass ``2`` or ``3`` for
+                multi-hop or temporal queries where a second BM25 pass over
+                extracted entities improves recall. Only effective when
+                ``routing=RoutingMode.BM25``.
             neighborhood: v0.11.0 — fetch session-adjacent memories within
                 ±5 min of each top result as context enrichment (default:
                 None = server default of ``True``). Pass ``False`` to
@@ -1077,6 +1083,8 @@ class DakeraClient:
             data["fusion"] = fusion.value if hasattr(fusion, "value") else fusion
         if vector_weight is not None:
             data["vector_weight"] = vector_weight
+        if iterations is not None:
+            data["iterations"] = iterations
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
         result = self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
