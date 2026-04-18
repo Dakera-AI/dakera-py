@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.4] - 2026-04-18
+
+### Added
+- **CE-23 — PRF iterative BM25 `iterations` param**: `recall()` and `async_client.recall()`
+  now accept an optional `iterations: int | None` parameter (1–3, default: 1). Pass `2` or `3`
+  for multi-hop or temporal queries to enable server-side pseudo-relevance feedback (PRF):
+  a second BM25 pass over entities extracted from the first pass improves recall on
+  evidence-chain queries. Only effective when `routing=RoutingMode.BM25`; omitting the
+  parameter preserves single-pass behaviour — zero breaking changes.
+  (server: [#175](https://github.com/Dakera-AI/dakera/pull/175))
+
 ## [0.11.3] - 2026-04-18
 
 ### Added
