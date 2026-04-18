@@ -1006,6 +1006,7 @@ class DakeraClient:
         routing: "RoutingMode | str | None" = None,
         rerank: bool | None = None,
         fusion: "FusionStrategy | str | None" = None,
+        vector_weight: float | None = None,
         neighborhood: bool | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
@@ -1036,6 +1037,11 @@ class DakeraClient:
                 ``FusionStrategy.MINMAX`` (server default since v0.11.2) uses
                 min-max score normalization; ``FusionStrategy.RRF`` uses
                 Reciprocal Rank Fusion (Cormack et al., SIGIR 2009).
+            vector_weight: CE-17 — explicit vector/BM25 weight for Hybrid
+                routing (0.0–1.0). When set, overrides the adaptive heuristic
+                from ``QueryClassifier``; omit for adaptive defaults
+                (recommended for most callers). Only effective when
+                ``routing=RoutingMode.HYBRID``.
             neighborhood: v0.11.0 — fetch session-adjacent memories within
                 ±5 min of each top result as context enrichment (default:
                 None = server default of ``True``). Pass ``False`` to
@@ -1069,6 +1075,8 @@ class DakeraClient:
             data["rerank"] = rerank
         if fusion is not None:
             data["fusion"] = fusion.value if hasattr(fusion, "value") else fusion
+        if vector_weight is not None:
+            data["vector_weight"] = vector_weight
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
         result = self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.3] - 2026-04-18
+
+### Added
+- **CE-17 — Explicit `vector_weight` for Hybrid recall**: `recall()` and `async_client.recall()`
+  now accept an optional `vector_weight: float | None` parameter (0.0–1.0). When set, overrides
+  the server's adaptive vector/BM25 heuristic for `routing=RoutingMode.HYBRID` calls, giving
+  callers per-query control over retrieval balance. Omitting the parameter preserves existing
+  adaptive behaviour — zero breaking changes.
+  (server: [#173](https://github.com/Dakera-AI/dakera/pull/173))
+
 ## [0.11.2] - 2026-04-16
 
 ### Changed
