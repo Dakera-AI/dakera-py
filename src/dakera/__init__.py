@@ -137,7 +137,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.10.2"
+__version__ = "0.11.30"
 __all__ = [
     # Clients
     "DakeraClient",
