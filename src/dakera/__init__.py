@@ -71,11 +71,14 @@ from dakera.models import (
     ExtractionProviderInfo,
     # EXT-1
     ExtractionResult,
+    # CE-79: filter builder
+    F,
     FeedbackHealthResponse,
     FeedbackHistoryEntry,
     FeedbackHistoryResponse,
     FeedbackResponse,
     FeedbackSignal,
+    FilterDict,
     FullTextSearchResult,
     # CE-14
     FusionStrategy,
@@ -137,7 +140,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-__version__ = "0.11.30"
+__version__ = "0.11.46"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -274,4 +277,7 @@ __all__ = [
     "AuthenticationError",
     "AuthorizationError",
     "ErrorCode",
+    # CE-79: filter builder helpers
+    "F",
+    "FilterDict",
 ]

@@ -1033,6 +1033,123 @@ DocumentInput = Union[Document, dict[str, Any]]
 TextDocumentInput = Union[TextDocument, dict[str, Any]]
 
 
+class F:
+    """Typed filter builder helpers — produce filter dicts matching the server DSL.
+
+    Usage::
+
+        # Equality / comparison
+        {"importance": F.gte(0.8)}
+        {"tags": F.array_contains("entity:PERSON:alice")}
+
+        # Logical combinators
+        F.and_({"importance": F.gte(0.8)}, {"tags": F.array_contains("entity:PERSON:alice")})
+    """
+
+    # ------------------------------------------------------------------
+    # Comparison operators
+    # ------------------------------------------------------------------
+    @staticmethod
+    def eq(value: Any) -> FilterDict:
+        return {"$eq": value}
+
+    @staticmethod
+    def ne(value: Any) -> FilterDict:
+        return {"$ne": value}
+
+    @staticmethod
+    def gt(value: Any) -> FilterDict:
+        return {"$gt": value}
+
+    @staticmethod
+    def gte(value: Any) -> FilterDict:
+        return {"$gte": value}
+
+    @staticmethod
+    def lt(value: Any) -> FilterDict:
+        return {"$lt": value}
+
+    @staticmethod
+    def lte(value: Any) -> FilterDict:
+        return {"$lte": value}
+
+    @staticmethod
+    def in_(values: list[Any]) -> FilterDict:
+        return {"$in": values}
+
+    @staticmethod
+    def nin(values: list[Any]) -> FilterDict:
+        return {"$nin": values}
+
+    @staticmethod
+    def exists(present: bool = True) -> FilterDict:
+        return {"$exists": present}
+
+    # ------------------------------------------------------------------
+    # String operators
+    # ------------------------------------------------------------------
+    @staticmethod
+    def contains(substr: str) -> FilterDict:
+        """Case-sensitive substring match."""
+        return {"$contains": substr}
+
+    @staticmethod
+    def icontains(substr: str) -> FilterDict:
+        """Case-insensitive substring match."""
+        return {"$icontains": substr}
+
+    @staticmethod
+    def starts_with(prefix: str) -> FilterDict:
+        return {"$startsWith": prefix}
+
+    @staticmethod
+    def ends_with(suffix: str) -> FilterDict:
+        return {"$endsWith": suffix}
+
+    @staticmethod
+    def glob(pattern: str) -> FilterDict:
+        """Glob pattern match (supports * and ? wildcards)."""
+        return {"$glob": pattern}
+
+    @staticmethod
+    def regex(pattern: str) -> FilterDict:
+        return {"$regex": pattern}
+
+    # ------------------------------------------------------------------
+    # Array operators (CE-79)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def array_contains(value: Any) -> FilterDict:
+        """Matches when an array metadata field contains *value*.
+
+        Example — find memories tagged for a specific person::
+
+            filter = {"tags": F.array_contains("entity:PERSON:alice")}
+        """
+        return {"$arrayContains": value}
+
+    @staticmethod
+    def array_contains_all(values: list[Any]) -> FilterDict:
+        """Matches when an array field contains *all* of *values*."""
+        return {"$arrayContainsAll": values}
+
+    @staticmethod
+    def array_contains_any(values: list[Any]) -> FilterDict:
+        """Matches when an array field contains *any* of *values*."""
+        return {"$arrayContainsAny": values}
+
+    # ------------------------------------------------------------------
+    # Logical combinators
+    # ------------------------------------------------------------------
+    @staticmethod
+    def and_(*conditions: FilterDict) -> FilterDict:
+        return {"$and": list(conditions)}
+
+    @staticmethod
+    def or_(*conditions: FilterDict) -> FilterDict:
+        return {"$or": list(conditions)}
+
+
 # ===========================================================================
 # SSE Streaming Event Types (CE-1)
 # ===========================================================================
