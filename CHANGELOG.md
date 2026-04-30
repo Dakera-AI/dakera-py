@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.46] - 2026-04-30
+
+### Added
+- **`F` filter builder class** (`from dakera import F`): typed helper methods that produce
+  the server's filter DSL as plain dicts — IDE-autocompletable and discoverable:
+  - Comparison: `F.eq`, `F.ne`, `F.gt`, `F.gte`, `F.lt`, `F.lte`, `F.in_`, `F.nin`, `F.exists`
+  - String: `F.contains`, `F.icontains`, `F.starts_with`, `F.ends_with`, `F.glob`, `F.regex`
+  - Array (CE-79): `F.array_contains(v)`, `F.array_contains_all([...])`, `F.array_contains_any([...])`
+    — match memories whose metadata array field includes the given value(s); enables
+    entity-scoped vector search (e.g. `{"tags": F.array_contains("entity:PERSON:alice")}`).
+  - Logical: `F.and_(*conditions)`, `F.or_(*conditions)`
+
+### Notes
+- Version bump to match server v0.11.46. Server improvements v0.11.37–v0.11.46:
+  - **CE-79 — ArrayContains filter operators**: New `$arrayContains`, `$arrayContainsAll`,
+    `$arrayContainsAny` for HNSW pre-filtering on array metadata fields.
+  - **CE-73 — Auto-PRF for hybrid inference queries**: Cat3 +4.2pp.
+  - **CE-71 — ML query classifier**: Temporal inference detection on by default.
+  - **CE-68/69/70 — Temporal boost + recency bias + S3 retry backoff**.
+  - **CE-58 — Configurable RRF k-parameter** (`DAKERA_RRF_K` env var).
+
 ## [0.11.36] - 2026-04-26
 
 ### Notes
