@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.51] - 2026-05-06
+
+### Added
+- **`admin_fulltext_reindex(namespace=None)`** (sync + async): backfill the BM25 fulltext
+  index for memories stored before CE-12 auto-indexing (CE-54). Optional `namespace` arg;
+  omit to reindex all agent namespaces. Returns `FulltextReindexResponse` with per-namespace
+  breakdown (`newly_indexed`, `already_indexed`, `parse_failures`).
+- **`FulltextReindexResponse`** and **`FulltextReindexNamespaceResult`** dataclasses exported
+  from `dakera`.
+
+### Notes
+- Version bump to match server v0.11.51. Server improvements v0.11.47–v0.11.51:
+  - **v0.11.51** — Fix flaky SEC-5 rate-limit tests (configurable window).
+  - **v0.11.50** — DAK-3430 S3 retry cap (OpenDAL retry 10→3, MinIO limit 1500→6000).
+  - **v0.11.49** — Dependency bumps (governor, opendal, redis, criterion).
+  - **v0.11.48** — Security: openssl 0.10.78→0.10.79.
+  - **v0.11.47** — ArrayContains HNSW pre-filter (SDK already exposed in v0.11.46).
+
 ## [0.11.46] - 2026-04-30
 
 ### Added

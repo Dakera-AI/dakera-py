@@ -79,6 +79,9 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    # CE-54: fulltext reindex
+    FulltextReindexNamespaceResult,
+    FulltextReindexResponse,
     FullTextSearchResult,
     # CE-14
     FusionStrategy,
@@ -216,6 +219,9 @@ __all__ = [
     "FeedbackHistoryResponse",
     "AgentFeedbackSummary",
     "FeedbackHealthResponse",
+    # CE-54: fulltext reindex
+    "FulltextReindexNamespaceResult",
+    "FulltextReindexResponse",
     # Analytics types
     "AnalyticsOverview",
     # Inference / embedding types (v0.6.0)
