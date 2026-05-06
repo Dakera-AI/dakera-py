@@ -85,6 +85,8 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    # CE-54
+    FulltextReindexResponse,
     FullTextSearchResult,
     # CE-14
     FusionStrategy,
@@ -2461,6 +2463,35 @@ class AsyncDakeraClient:
             data=policy.to_dict(),
         )
         return MemoryPolicy.from_dict(result)
+
+    # =========================================================================
+    # CE-54: Fulltext Reindex (Admin)
+    # =========================================================================
+
+    async def admin_fulltext_reindex(
+        self, namespace: str | None = None
+    ) -> FulltextReindexResponse:
+        """Backfill the BM25 fulltext index for memories that were stored before
+        CE-12 auto-indexing was added (CE-54).
+
+        Calls ``POST /admin/fulltext/reindex``. Requires Admin scope.
+
+        Scans all memories in *namespace* (or every agent namespace when
+        *namespace* is omitted) and adds any that are missing from the BM25
+        index. Safe to call multiple times — already-indexed memories are
+        counted in ``total_skipped`` and not re-processed.
+
+        Args:
+            namespace: Target namespace. Omit to reindex all agent namespaces.
+
+        Returns:
+            :class:`FulltextReindexResponse` with per-namespace breakdown.
+        """
+        data: dict[str, Any] = {}
+        if namespace is not None:
+            data["namespace"] = namespace
+        result = await self._request("POST", "/admin/fulltext/reindex", data=data)
+        return FulltextReindexResponse.from_dict(result)
 
     # =========================================================================
     # Context Manager Support

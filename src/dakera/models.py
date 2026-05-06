@@ -2291,6 +2291,65 @@ class ExtractionProviderInfo:
 
 
 # =============================================================================
+# CE-54: Fulltext Reindex (Admin)
+# =============================================================================
+
+
+@dataclass
+class FulltextReindexNamespaceResult:
+    """Per-namespace result from ``POST /admin/fulltext/reindex`` (CE-54)."""
+
+    namespace: str
+    """Namespace that was scanned."""
+    vectors_scanned: int
+    """Total vectors examined."""
+    newly_indexed: int
+    """Memories newly added to the BM25 index."""
+    already_indexed: int
+    """Memories that were already in the BM25 index."""
+    parse_failures: int
+    """Memories that could not be parsed (malformed records)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FulltextReindexNamespaceResult":
+        return cls(
+            namespace=data["namespace"],
+            vectors_scanned=data.get("vectors_scanned", 0),
+            newly_indexed=data.get("newly_indexed", 0),
+            already_indexed=data.get("already_indexed", 0),
+            parse_failures=data.get("parse_failures", 0),
+        )
+
+
+@dataclass
+class FulltextReindexResponse:
+    """Response from ``POST /admin/fulltext/reindex`` (CE-54).
+
+    Returned by :meth:`~dakera.DakeraClient.admin_fulltext_reindex`.
+    """
+
+    namespaces_processed: int
+    """Number of namespaces scanned."""
+    total_indexed: int
+    """Total memories newly added to BM25 across all namespaces."""
+    total_skipped: int
+    """Total memories already in the BM25 index (skipped)."""
+    details: list[FulltextReindexNamespaceResult]
+    """Per-namespace breakdown."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FulltextReindexResponse":
+        return cls(
+            namespaces_processed=data.get("namespaces_processed", 0),
+            total_indexed=data.get("total_indexed", 0),
+            total_skipped=data.get("total_skipped", 0),
+            details=[
+                FulltextReindexNamespaceResult.from_dict(d) for d in data.get("details", [])
+            ],
+        )
+
+
+# =============================================================================
 # SEC-3: AES-256-GCM Encryption Key Rotation
 # =============================================================================
 
