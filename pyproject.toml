@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Typing :: Typed",
 ]
-keywords = ["vector", "database", "embedding", "similarity", "search", "ai", "ml", "memory", "dakera"]
+keywords = ["agent-memory", "vector-search", "knowledge-graph", "mcp", "ai-agents", "self-hosted", "memory-engine", "vector-database", "session-management", "embeddings", "dakera", "ai", "ml"]
 dependencies = [
     "requests>=2.33.0",
     "urllib3>=2.6.3",
