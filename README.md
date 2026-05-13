@@ -1,5 +1,7 @@
 # ⚡ dakera-py
 
+[![CI](https://github.com/Dakera-AI/dakera-py/actions/workflows/ci.yml/badge.svg)](https://github.com/Dakera-AI/dakera-py/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/dakera?logo=python&logoColor=white)](https://pypi.org/project/dakera/) [![Downloads](https://img.shields.io/pypi/dm/dakera)](https://pypi.org/project/dakera/) [![License: MIT](https://img.shields.io/github/license/Dakera-AI/dakera-py)](LICENSE)
+
 Python SDK for Dakera AI — store, recall, and search agent memories against a Dakera instance.
 
 Part of [Dakera AI](https://dakera.ai) — the memory engine for AI agents.
