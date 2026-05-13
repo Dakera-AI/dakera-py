@@ -46,9 +46,16 @@ mypy src/
 
 ## Reporting Issues
 
-- Use the GitHub issue templates for bug reports and feature requests
-- Include reproduction steps for bugs
-- Provide environment details (OS, runtime version, etc.)
+Use the [Bug Report](https://github.com/Dakera-AI/dakera-py/issues/new?template=bug_report.md) template to report bugs. Please include:
+- Python version, operating system, and dakera package version
+- Steps to reproduce the issue
+- Expected vs actual behavior, with full error traceback
+
+Have a feature idea? Use the [Feature Request](https://github.com/Dakera-AI/dakera-py/issues/new?template=feature_request.md) template.
+
+## Security Vulnerabilities
+
+**Do not open public issues for security vulnerabilities.** See [SECURITY.md](.github/SECURITY.md) for responsible disclosure instructions — email security@dakera.ai.
 
 ## License
 
