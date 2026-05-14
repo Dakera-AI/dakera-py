@@ -27,6 +27,15 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+credentials.json
+
 # OS
 .DS_Store
 Thumbs.db
