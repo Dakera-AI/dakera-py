@@ -1,11 +1,7 @@
-[![Docs](https://img.shields.io/badge/docs-dakera.ai-D4A843)](https://dakera.ai/docs)
 # dakera-py
-
-
 
 [![CI](https://github.com/Dakera-AI/dakera-py/actions/workflows/ci.yml/badge.svg)](https://github.com/Dakera-AI/dakera-py/actions/workflows/ci.yml) [![PyPI](https://img.shields.io/pypi/v/dakera?logo=python&logoColor=white)](https://pypi.org/project/dakera/) [![Downloads](https://img.shields.io/pypi/dm/dakera)](https://pypi.org/project/dakera/) [![License: MIT](https://img.shields.io/github/license/Dakera-AI/dakera-py)](LICENSE)
 [![dakera.ai](https://img.shields.io/badge/dakera.ai-website-22c55e?style=flat-square)](https://dakera.ai) [![Docs](https://img.shields.io/badge/docs-dakera.ai%2Fdocs-3b82f6?style=flat-square)](https://dakera.ai/docs)
-[![Docs](https://img.shields.io/badge/docs-dakera.ai-D4A843)](https://dakera.ai/docs)
 
 Python SDK for Dakera AI — store, recall, and search agent memories against a Dakera instance.
 
