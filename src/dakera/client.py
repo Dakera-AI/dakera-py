@@ -856,7 +856,7 @@ class DakeraClient:
         """
         data: dict[str, Any] = {"name": namespace}
         if dimensions:
-            data["dimensions"] = dimensions
+            data["dimension"] = dimensions
         if index_type:
             data["index_type"] = index_type
         if metadata:
@@ -990,7 +990,8 @@ class DakeraClient:
             data["ttl_seconds"] = ttl_seconds
         if expires_at is not None:
             data["expires_at"] = expires_at
-        return self._request("POST", f"/v1/agents/{agent_id}/memories", data=data)
+        data["agent_id"] = agent_id
+        return self._request("POST", "/v1/memory/store", data=data)
 
     def recall(
         self,
@@ -1089,14 +1090,15 @@ class DakeraClient:
             data["iterations"] = iterations
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
-        result = self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
+        data["agent_id"] = agent_id
+        result = self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
     def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""
-        return self._request("GET", f"/v1/agents/{agent_id}/memories/{memory_id}")
+        return self._request("GET", f"/v1/memory/get/{memory_id}")
 
     def update_memory(
         self,
@@ -1114,11 +1116,12 @@ class DakeraClient:
             data["metadata"] = metadata
         if memory_type is not None:
             data["memory_type"] = memory_type
-        return self._request("PUT", f"/v1/agents/{agent_id}/memories/{memory_id}", data=data)
+        return self._request("PUT", f"/v1/memory/update/{memory_id}", data=data)
 
     def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Delete a memory."""
-        return self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
+        data = {"agent_id": agent_id, "memory_ids": [memory_id]}
+        return self._request("POST", "/v1/memory/forget", data=data)
 
     def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
         """Bulk-recall memories using filter predicates (CE-2).
@@ -1182,7 +1185,8 @@ class DakeraClient:
             data["routing"] = routing.value if hasattr(routing, "value") else routing
         if rerank is not None:
             data["rerank"] = rerank
-        result = self._request("POST", f"/v1/agents/{agent_id}/memories/search", data=data)
+        data["agent_id"] = agent_id
+        result = self._request("POST", "/v1/memory/search", data=data)
         return result.get("memories", result) if isinstance(result, dict) else result
 
     def compress_agent(self, agent_id: str) -> "CompressResponse":
@@ -1207,8 +1211,8 @@ class DakeraClient:
         importance: float,
     ) -> dict[str, Any]:
         """Update importance of memories."""
-        data = {"memory_ids": memory_ids, "importance": importance}
-        return self._request("PUT", f"/v1/agents/{agent_id}/memories/importance", data=data)
+        data = {"agent_id": agent_id, "memory_ids": memory_ids, "importance": importance}
+        return self._request("POST", "/v1/memory/importance", data=data)
 
     def consolidate(
         self,
@@ -1241,7 +1245,8 @@ class DakeraClient:
             data["threshold"] = threshold
         if config is not None:
             data["config"] = config.to_dict()
-        return self._request("POST", f"/v1/agents/{agent_id}/memories/consolidate", data=data)
+        data["agent_id"] = agent_id
+        return self._request("POST", "/v1/memory/consolidate", data=data)
 
     def memory_feedback(
         self,

@@ -17,7 +17,6 @@ from dakera import DakeraClient
 from dakera.exceptions import DakeraError
 from dakera.models import BatchRecallRequest, TextDocument
 
-
 DAKERA_URL = os.environ.get("DAKERA_TEST_URL", "http://localhost:3000")
 TEST_NAMESPACE = f"integ-{uuid.uuid4().hex[:8]}"
 TEST_AGENT = f"integ-agent-{uuid.uuid4().hex[:8]}"
