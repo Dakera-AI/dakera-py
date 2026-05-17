@@ -91,6 +91,11 @@ def main():
     print(f"  - Vector count: {info.vector_count}")
     print(f"  - Dimensions: {info.dimensions}")
 
+    # Delete specific vectors by ID
+    print("\nDeleting vectors...")
+    delete_resp = client.delete("example-namespace", ids=["vec1", "vec2"])
+    print(f"Deleted {delete_resp['deleted_count']} vectors")
+
     # Cleanup - delete namespace
     print("\nCleaning up...")
     client.delete_namespace("example-namespace")
