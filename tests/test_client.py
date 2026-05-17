@@ -1966,7 +1966,7 @@ class TestEntityExtractionSyncClient:
         assert result.entities[1].value == "Paris"
         import json as _json
         body = _json.loads(mock_responses.calls[0].request.body)
-        assert body["text"] == "Alice lives in Paris."
+        assert body["content"] == "Alice lives in Paris."
         assert "entity_types" not in body
 
     def test_extract_entities_with_entity_types(self, client, mock_responses):
