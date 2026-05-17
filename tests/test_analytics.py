@@ -470,8 +470,10 @@ class TestMemoryKnowledgeGraph:
                 "root_id": "mem-1",
                 "depth": 2,
                 "nodes": [
-                    {"memory_id": "mem-1", "content_preview": "first", "importance": 0.9, "depth": 0},
-                    {"memory_id": "mem-2", "content_preview": "second", "importance": 0.7, "depth": 1},
+                    {"memory_id": "mem-1", "content_preview": "first",
+                     "importance": 0.9, "depth": 0},
+                    {"memory_id": "mem-2", "content_preview": "second",
+                     "importance": 0.7, "depth": 1},
                 ],
                 "edges": [
                     {
