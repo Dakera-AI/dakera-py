@@ -250,7 +250,7 @@ class TestFullTextOperations:
             vector=[0.1, 0.2, 0.3],
             query="hello",
             top_k=10,
-            alpha=0.5,
+            vector_weight=0.5,
         )
 
         assert len(results) == 1
