@@ -36,7 +36,7 @@ def client():
 
 @pytest.fixture(scope="module")
 def namespace(client):
-    client.create_namespace(TEST_NAMESPACE, dimensions=384)
+    client.create_namespace(TEST_NAMESPACE, dimensions=1024)
     yield TEST_NAMESPACE
     with contextlib.suppress(Exception):
         client.delete_namespace(TEST_NAMESPACE)
@@ -61,7 +61,7 @@ class TestHealth:
 class TestNamespaces:
     def test_create_namespace(self, client):
         ns = f"integ-create-{uuid.uuid4().hex[:8]}"
-        result = client.create_namespace(ns, dimensions=384)
+        result = client.create_namespace(ns, dimensions=1024)
         assert result.name == ns
         client.delete_namespace(ns)
 
@@ -73,15 +73,15 @@ class TestNamespaces:
     def test_get_namespace(self, client, namespace):
         ns = client.get_namespace(namespace)
         assert ns.name == namespace
-        assert ns.dimensions == 384
+        assert ns.dimensions == 1024
 
     def test_configure_namespace(self, client, namespace):
-        result = client.configure_namespace(namespace, dimension=384)
+        result = client.configure_namespace(namespace, dimension=1024)
         assert result is not None
 
     def test_delete_namespace(self, client):
         ns = f"integ-del-{uuid.uuid4().hex[:8]}"
-        client.create_namespace(ns, dimensions=384)
+        client.create_namespace(ns, dimensions=1024)
         client.delete_namespace(ns)
         namespaces = client.list_namespaces()
         names = [n.name for n in namespaces]
@@ -232,7 +232,6 @@ class TestKnowledgeGraph:
 
     def test_extract_entities(self, client, namespace):
         result = client.extract_entities(
-            namespace=namespace,
             text="OpenAI released GPT-4 in San Francisco",
         )
         assert result is not None

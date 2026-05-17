@@ -1248,9 +1248,12 @@ class AsyncDakeraClient:
         result = await self._request("POST", "/v1/sessions/start", data=data)
         return result["session"]
 
-    async def end_session(self, session_id: str) -> dict[str, Any]:
+    async def end_session(self, session_id: str, summary: str | None = None) -> dict[str, Any]:
         """End a session."""
-        return await self._request("POST", f"/v1/sessions/{session_id}/end")
+        data: dict[str, Any] = {}
+        if summary is not None:
+            data["summary"] = summary
+        return await self._request("POST", f"/v1/sessions/{session_id}/end", data=data)
 
     async def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session details."""

@@ -792,9 +792,9 @@ class DakeraClient:
             >>> results = client.hybrid_search("my-namespace", query="hello world")
         """
         data: dict[str, Any] = {
-            "query": query,
+            "text": query,
             "top_k": top_k,
-            "alpha": alpha,
+            "vector_weight": alpha,
         }
         if vector is not None:
             data["vector"] = vector
@@ -1113,7 +1113,7 @@ class DakeraClient:
 
     def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""
-        return self._request("GET", f"/v1/memory/get/{memory_id}")
+        return self._request("GET", f"/v1/memory/get/{memory_id}", params={"agent_id": agent_id})
 
     def update_memory(
         self,
@@ -1224,10 +1224,13 @@ class DakeraClient:
         agent_id: str,
         memory_ids: list[str],
         importance: float,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """Update importance of memories."""
-        data = {"agent_id": agent_id, "memory_ids": memory_ids, "importance": importance}
-        return self._request("POST", "/v1/memory/importance", data=data)
+        results = []
+        for mid in memory_ids:
+            data = {"agent_id": agent_id, "memory_id": mid, "importance": importance}
+            results.append(self._request("POST", "/v1/memory/importance", data=data))
+        return results[0] if len(results) == 1 else results
 
     def consolidate(
         self,
@@ -1531,9 +1534,12 @@ class DakeraClient:
         result = self._request("POST", "/v1/sessions/start", data=data)
         return result["session"]
 
-    def end_session(self, session_id: str) -> dict[str, Any]:
+    def end_session(self, session_id: str, summary: str | None = None) -> dict[str, Any]:
         """End a session."""
-        return self._request("POST", f"/v1/sessions/{session_id}/end")
+        data: dict[str, Any] = {}
+        if summary is not None:
+            data["summary"] = summary
+        return self._request("POST", f"/v1/sessions/{session_id}/end", data=data)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session details."""
@@ -1560,7 +1566,10 @@ class DakeraClient:
 
     def session_memories(self, session_id: str) -> list[dict[str, Any]]:
         """Get memories for a session."""
-        return self._request("GET", f"/v1/sessions/{session_id}/memories")
+        result = self._request("GET", f"/v1/sessions/{session_id}/memories")
+        if isinstance(result, dict):
+            return result.get("memories", [])
+        return result
 
     # =========================================================================
     # Agent Operations

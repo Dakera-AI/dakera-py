@@ -355,7 +355,7 @@ class NamespaceInfo:
         return cls(
             name=data.get("name") or data.get("namespace", ""),
             vector_count=data.get("vector_count", 0),
-            dimensions=data.get("dimensions"),
+            dimensions=data.get("dimension") or data.get("dimensions"),
             index_type=data.get("index_type"),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
