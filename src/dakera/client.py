@@ -472,6 +472,71 @@ class DakeraClient:
             data=data,
         )
 
+    def bulk_update_vectors(
+        self,
+        namespace: str,
+        filter: FilterDict,
+        update: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Bulk update vector metadata matching a filter.
+
+        Args:
+            namespace: Target namespace
+            filter: Filter to select vectors
+            update: Metadata fields to set on matched vectors
+
+        Returns:
+            Dict with ``updated``, ``failed``, and ``errors`` fields
+        """
+        return self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/vectors/bulk-update",
+            data={"filter": filter, "update": update},
+        )
+
+    def bulk_delete_vectors(
+        self,
+        namespace: str,
+        filter: FilterDict,
+    ) -> dict[str, Any]:
+        """Bulk delete vectors matching a filter.
+
+        Args:
+            namespace: Target namespace
+            filter: Filter to select vectors for deletion
+
+        Returns:
+            Dict with ``deleted``, ``failed``, and ``errors`` fields
+        """
+        return self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/vectors/bulk-delete",
+            data={"filter": filter},
+        )
+
+    def count_vectors(
+        self,
+        namespace: str,
+        filter: FilterDict | None = None,
+    ) -> dict[str, Any]:
+        """Count vectors in a namespace, optionally filtered.
+
+        Args:
+            namespace: Target namespace
+            filter: Optional filter to narrow the count
+
+        Returns:
+            Dict with ``count`` and ``namespace`` fields
+        """
+        data: dict[str, Any] = {}
+        if filter is not None:
+            data["filter"] = filter
+        return self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/vectors/count",
+            data=data,
+        )
+
     def fetch(
         self,
         namespace: str,
@@ -919,6 +984,14 @@ class DakeraClient:
         """
         return self._request("GET", "/health")
 
+    def health_ready(self) -> dict[str, Any]:
+        """K8s readiness probe — checks storage and dependencies."""
+        return self._request("GET", "/health/ready")
+
+    def health_live(self) -> dict[str, Any]:
+        """K8s liveness probe — checks process is alive."""
+        return self._request("GET", "/health/live")
+
     def get_index_stats(self, namespace: str) -> IndexStats:
         """
         Get index statistics for a namespace.
@@ -1266,6 +1339,54 @@ class DakeraClient:
         data["agent_id"] = agent_id
         return self._request("POST", "/v1/memory/consolidate", data=data)
 
+    def consolidate_agent(self, agent_id: str) -> dict[str, Any]:
+        """Consolidate memories directly for an agent (DBSCAN clustering).
+
+        Unlike :meth:`consolidate` which uses the generic memory endpoint, this
+        calls the agent-scoped consolidation endpoint that runs the full
+        DBSCAN-based clustering pipeline for the agent.
+
+        Returns:
+            Dict with ``agent_id``, ``memories_scanned``, ``clusters_found``,
+            ``memories_deprecated``, ``anchor_ids``, ``deprecated_ids``.
+        """
+        return self._request("POST", f"/v1/agents/{agent_id}/consolidate")
+
+    def get_consolidation_log(self, agent_id: str) -> list[dict[str, Any]]:
+        """Get the consolidation execution log for an agent.
+
+        Returns:
+            List of log entries with ``timestamp``, ``clusters_found``,
+            ``memories_deprecated``, ``anchor_ids``, ``deprecated_ids``.
+        """
+        return self._request("GET", f"/v1/agents/{agent_id}/consolidation/log")
+
+    def patch_consolidation_config(
+        self,
+        agent_id: str,
+        enabled: bool | None = None,
+        epsilon: float | None = None,
+        min_samples: int | None = None,
+        soft_deprecation_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Update the consolidation configuration for an agent.
+
+        Returns:
+            Updated consolidation config dict.
+        """
+        data: dict[str, Any] = {}
+        if enabled is not None:
+            data["enabled"] = enabled
+        if epsilon is not None:
+            data["epsilon"] = epsilon
+        if min_samples is not None:
+            data["min_samples"] = min_samples
+        if soft_deprecation_days is not None:
+            data["soft_deprecation_days"] = soft_deprecation_days
+        return self._request(
+            "PATCH", f"/v1/agents/{agent_id}/consolidation/config", data=data
+        )
+
     def memory_feedback(
         self,
         agent_id: str,
@@ -1440,6 +1561,22 @@ class DakeraClient:
     # =========================================================================
     # Entity Extraction Operations (CE-4)
     # =========================================================================
+
+    def get_namespace_entity_config(self, namespace: str) -> dict[str, Any]:
+        """Get entity extraction configuration for a namespace.
+
+        Returns:
+            Dict with ``namespace``, ``extract_entities``, ``entity_types``.
+        """
+        return self._request("GET", f"/v1/namespaces/{namespace}/config")
+
+    def get_namespace_extractor(self, namespace: str) -> dict[str, Any]:
+        """Get the extractor provider configuration for a namespace.
+
+        Returns:
+            Dict with ``provider``, ``model``, ``base_url``.
+        """
+        return self._request("GET", f"/v1/namespaces/{namespace}/extractor")
 
     def configure_namespace_ner(
         self,
