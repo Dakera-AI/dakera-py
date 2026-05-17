@@ -9,11 +9,16 @@ This example demonstrates:
 - Adjusting vector_weight parameter for search balance
 """
 
+import os
+
 from dakera import DakeraClient, Document
 
 
 def main():
-    client = DakeraClient("http://localhost:3300")
+    client = DakeraClient(
+        os.environ.get("DAKERA_API_URL", "http://localhost:3300"),
+        api_key=os.environ.get("DAKERA_API_KEY", "dk-mykey"),
+    )
 
     namespace = "hybrid-example"
 

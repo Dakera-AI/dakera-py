@@ -10,12 +10,17 @@ This example demonstrates:
 - Deleting vectors
 """
 
+import os
+
 from dakera import DakeraClient, Vector
 
 
 def main():
     # Connect to Dakera server
-    client = DakeraClient("http://localhost:3000")
+    client = DakeraClient(
+        os.environ.get("DAKERA_API_URL", "http://localhost:3300"),
+        api_key=os.environ.get("DAKERA_API_KEY", "dk-mykey"),
+    )
 
     # Check server health
     health = client.health()
@@ -80,9 +85,12 @@ def main():
 
     # Fetch vectors by ID
     print("\nFetching vectors by ID...")
-    vectors = client.fetch("example-namespace", ids=["vec1", "vec2"])
-    for v in vectors:
-        print(f"  - {v.id}: values={v.values[:3]}...")
+    try:
+        vectors = client.fetch("example-namespace", ids=["vec1", "vec2"])
+        for v in vectors:
+            print(f"  - {v.id}: values={v.values[:3]}...")
+    except Exception as e:
+        print(f"  Fetch not supported on this server version: {e}")
 
     # Get namespace stats
     print("\nNamespace stats:")
@@ -93,7 +101,10 @@ def main():
 
     # Delete specific vectors
     print("\nDeleting vec4...")
-    client.delete("example-namespace", ids=["vec4"])
+    try:
+        client.delete("example-namespace", ids=["vec4"])
+    except Exception as e:
+        print(f"  Delete not supported on this server version: {e}")
 
     # Cleanup - delete namespace
     print("\nCleaning up...")
