@@ -10,6 +10,7 @@ This example demonstrates:
 """
 
 import os
+import sys
 
 from dakera import DakeraClient, Document
 
@@ -180,4 +181,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"FATAL: {e}", file=sys.stderr)
+        sys.exit(1)

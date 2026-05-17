@@ -1,9 +1,10 @@
 """Integration tests against a real Dakera server (Docker service in CI).
 
 Requires DAKERA_TEST_URL env var pointing to a running Dakera instance.
-Auth is disabled on the test server (DAKERA_AUTH_ENABLED=false).
+Auth is enabled — set DAKERA_API_KEY to a valid key (default: test-key).
 
-Run locally: DAKERA_TEST_URL=http://localhost:3000 pytest tests/test_integration.py -v
+Run locally:
+  DAKERA_TEST_URL=http://localhost:3000 DAKERA_API_KEY=test-key pytest tests/test_integration.py -v
 """
 
 import contextlib
@@ -14,7 +15,7 @@ import uuid
 import pytest
 
 from dakera import DakeraClient
-from dakera.exceptions import DakeraError
+from dakera.exceptions import AuthenticationError, DakeraError
 from dakera.models import BatchRecallRequest, TextDocument
 
 DAKERA_URL = os.environ.get("DAKERA_TEST_URL", "http://localhost:3000")
@@ -29,7 +30,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def client():
-    c = DakeraClient(base_url=DAKERA_URL, api_key="test-key")
+    c = DakeraClient(base_url=DAKERA_URL, api_key=os.environ.get("DAKERA_API_KEY", "test-key"))
     yield c
     c.close()
 
@@ -268,3 +269,20 @@ class TestErrorHandling:
     def test_nonexistent_memory(self, client):
         with pytest.raises(DakeraError):
             client.get_memory(TEST_AGENT, "nonexistent-memory-id")
+
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+
+class TestAuthentication:
+    def test_rejects_invalid_api_key(self):
+        bad_client = DakeraClient(base_url=DAKERA_URL, api_key="invalid-key-xxx")
+        with pytest.raises(AuthenticationError):
+            bad_client.list_namespaces()
+        bad_client.close()
+
+    def test_accepts_valid_api_key(self, client):
+        namespaces = client.list_namespaces()
+        assert isinstance(namespaces, list)
