@@ -118,7 +118,7 @@ class TestVectorOperations:
         """Test deleting vectors by IDs."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/delete",
+            "http://localhost:3000/v1/namespaces/test-ns/vectors/delete",
             json={"deleted_count": 2},
             status=200,
         )
@@ -131,7 +131,7 @@ class TestVectorOperations:
         """Test deleting vectors by filter."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/delete",
+            "http://localhost:3000/v1/namespaces/test-ns/vectors/delete",
             json={"deleted_count": 5},
             status=200,
         )

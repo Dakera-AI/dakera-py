@@ -468,7 +468,7 @@ class DakeraClient:
 
         return self._request(
             "POST",
-            f"/v1/namespaces/{namespace}/delete",
+            f"/v1/namespaces/{namespace}/vectors/delete",
             data=data,
         )
 
