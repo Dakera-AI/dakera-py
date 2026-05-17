@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.55] - 2026-05-17
+## [0.11.56] - 2026-05-17
 
 ### Changed
 
@@ -24,9 +24,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Docker integration tests in CI** — the test suite now runs full end-to-end integration
-  tests against a live Dakera server container on every PR and push, catching regressions that
-  unit/mock tests miss.
+- **40+ new client methods** for full engine parity (sync + async):
+  - **Health probes**: `health_ready()`, `health_live()`
+  - **Vector bulk ops**: `bulk_update_vectors()`, `bulk_delete_vectors()`, `count_vectors()`
+  - **Agent consolidation**: `consolidate_agent()`, `get_consolidation_log()`, `patch_consolidation_config()`
+  - **Namespace config**: `get_namespace_entity_config()`, `get_namespace_extractor()`
+  - **Admin cluster**: `admin_cluster_replication()`, `admin_list_shards()`, `admin_rebalance_shards()`
+  - **Admin maintenance**: `admin_maintenance_status()`, `admin_enable_maintenance()`, `admin_disable_maintenance()`
+  - **Admin quotas**: `admin_list_quotas()`, `admin_get_default_quota()`, `admin_set_default_quota()`, `admin_get_quota()`, `admin_set_quota()`, `admin_delete_quota()`, `admin_check_quota()`
+  - **Admin slow queries**: `admin_list_slow_queries()`, `admin_slow_query_summary()`, `admin_clear_slow_queries()`, `admin_update_slow_query_config()`
+  - **Admin backups**: `admin_list_backups()`, `admin_create_backup()`, `admin_get_backup()`, `admin_delete_backup()`, `admin_get_backup_schedule()`, `admin_update_backup_schedule()`, `admin_restore_backup()`, `admin_get_restore_status()`
+  - **Ops**: `ops_diagnostics()`, `ops_list_jobs()`, `ops_get_job()`, `ops_compact()`, `ops_shutdown()`
+  - **Fulltext**: `fulltext_stats()`, `fulltext_delete()`
+  - **TTL**: `ttl_stats()`
+  - **Query routing**: `route_query()`
+  - **Import jobs**: `import_job_status()`
+  - **Backup I/O**: `download_backup()`, `upload_backup()`
+  - **Storage tiers**: `storage_tier_overview()`
+  - **Background activity**: `background_activity()`
+  - **Memory type stats**: `memory_type_stats()`
+  - **Namespace migration**: `migrate_namespace_dimensions()`
+- **16 new dataclass types** in `models.py` for structured responses
+- **188 unit tests** covering all SDK methods
+- **6 new examples**: admin operations, analytics, fulltext search, knowledge graph, ops diagnostics, vector operations
+- **Docker integration tests in CI** — full end-to-end integration tests against a live
+  Dakera server container on every PR and push.
 
 ## [0.11.54] - 2026-05-13
 
