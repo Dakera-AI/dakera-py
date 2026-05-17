@@ -2619,7 +2619,11 @@ class AsyncDakeraClient:
         """GET /admin/cluster/shards — list shards."""
         return await self._request("GET", "/admin/cluster/shards")
 
-    async def admin_rebalance_shards(self, shard_ids: list[str] | None = None, dry_run: bool = False) -> dict[str, Any]:
+    async def admin_rebalance_shards(
+        self,
+        shard_ids: list[str] | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
         """POST /admin/cluster/shards/rebalance — rebalance shards."""
         data: dict[str, Any] = {"dry_run": dry_run}
         if shard_ids is not None:
@@ -2630,7 +2634,13 @@ class AsyncDakeraClient:
         """GET /admin/cluster/maintenance — maintenance mode status."""
         return await self._request("GET", "/admin/cluster/maintenance")
 
-    async def admin_enable_maintenance(self, reason: str, node_ids: list[str] | None = None, reject_requests: bool = False, duration_minutes: int | None = None) -> dict[str, Any]:
+    async def admin_enable_maintenance(
+        self,
+        reason: str,
+        node_ids: list[str] | None = None,
+        reject_requests: bool = False,
+        duration_minutes: int | None = None,
+    ) -> dict[str, Any]:
         """POST /admin/cluster/maintenance/enable — enable maintenance mode."""
         data: dict[str, Any] = {"reason": reason, "reject_requests": reject_requests}
         if node_ids is not None:
@@ -2674,7 +2684,13 @@ class AsyncDakeraClient:
         """DELETE /admin/quotas/{namespace} — remove namespace quota."""
         return await self._request("DELETE", f"/admin/quotas/{namespace}")
 
-    async def admin_check_quota(self, namespace: str, vector_ids: list[str], dimensions: int | None = None, metadata_bytes: int | None = None) -> dict[str, Any]:
+    async def admin_check_quota(
+        self,
+        namespace: str,
+        vector_ids: list[str],
+        dimensions: int | None = None,
+        metadata_bytes: int | None = None,
+    ) -> dict[str, Any]:
         """POST /admin/quotas/{namespace}/check — check if operation would exceed quota."""
         data: dict[str, Any] = {"vector_ids": vector_ids}
         if dimensions is not None:
@@ -2687,7 +2703,12 @@ class AsyncDakeraClient:
     # Admin — Slow Queries
     # =========================================================================
 
-    async def admin_list_slow_queries(self, namespace: str | None = None, query_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+    async def admin_list_slow_queries(
+        self,
+        namespace: str | None = None,
+        query_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         """GET /admin/slow-queries — list recent slow queries."""
         params: dict[str, Any] = {}
         if namespace is not None:
@@ -2721,7 +2742,14 @@ class AsyncDakeraClient:
         """GET /admin/backups — list all backups."""
         return await self._request("GET", "/admin/backups")
 
-    async def admin_create_backup(self, name: str, backup_type: str | None = None, namespaces: list[str] | None = None, encrypt: bool | None = None, compression: str | None = None) -> dict[str, Any]:
+    async def admin_create_backup(
+        self,
+        name: str,
+        backup_type: str | None = None,
+        namespaces: list[str] | None = None,
+        encrypt: bool | None = None,
+        compression: str | None = None,
+    ) -> dict[str, Any]:
         """POST /admin/backups — create a new backup."""
         data: dict[str, Any] = {"name": name}
         if backup_type is not None:
@@ -2750,7 +2778,13 @@ class AsyncDakeraClient:
         """POST /admin/backups/schedule — update backup schedule."""
         return await self._request("POST", "/admin/backups/schedule", data=kwargs)
 
-    async def admin_restore_backup(self, backup_id: str, target_namespaces: list[str] | None = None, overwrite: bool | None = None, point_in_time: int | None = None) -> dict[str, Any]:
+    async def admin_restore_backup(
+        self,
+        backup_id: str,
+        target_namespaces: list[str] | None = None,
+        overwrite: bool | None = None,
+        point_in_time: int | None = None,
+    ) -> dict[str, Any]:
         """POST /admin/backups/restore — restore from backup."""
         data: dict[str, Any] = {"backup_id": backup_id}
         if target_namespaces is not None:
@@ -2781,7 +2815,11 @@ class AsyncDakeraClient:
         """GET /ops/jobs/{id} — get job status."""
         return await self._request("GET", f"/ops/jobs/{job_id}")
 
-    async def ops_compact(self, namespace: str | None = None, force: bool = False) -> dict[str, Any]:
+    async def ops_compact(
+        self,
+        namespace: str | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
         """POST /ops/compact — trigger compaction."""
         data: dict[str, Any] = {"force": force}
         if namespace is not None:
