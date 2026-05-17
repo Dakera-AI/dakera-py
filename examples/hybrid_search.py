@@ -102,8 +102,8 @@ def main():
     for r in hybrid_results:
         print(
             f"  {r.id}: combined={r.score:.4f}, "
-            f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
-            f"text={r.text_score:.4f if r.text_score else 'N/A'}"
+            f"vector={f'{r.vector_score:.4f}' if r.vector_score is not None else 'N/A'}, "
+            f"text={f'{r.text_score:.4f}' if r.text_score is not None else 'N/A'}"
         )
 
     print("\n--- Hybrid Search (vector_weight=0.5 - balanced) ---")
@@ -117,8 +117,8 @@ def main():
     for r in hybrid_results:
         print(
             f"  {r.id}: combined={r.score:.4f}, "
-            f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
-            f"text={r.text_score:.4f if r.text_score else 'N/A'}"
+            f"vector={f'{r.vector_score:.4f}' if r.vector_score is not None else 'N/A'}, "
+            f"text={f'{r.text_score:.4f}' if r.text_score is not None else 'N/A'}"
         )
 
     print("\n--- Hybrid Search (vector_weight=0.7 - more vector) ---")
@@ -132,8 +132,8 @@ def main():
     for r in hybrid_results:
         print(
             f"  {r.id}: combined={r.score:.4f}, "
-            f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
-            f"text={r.text_score:.4f if r.text_score else 'N/A'}"
+            f"vector={f'{r.vector_score:.4f}' if r.vector_score is not None else 'N/A'}, "
+            f"text={f'{r.text_score:.4f}' if r.text_score is not None else 'N/A'}"
         )
 
     # Hybrid search with metadata filter
