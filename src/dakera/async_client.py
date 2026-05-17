@@ -85,6 +85,7 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    FullTextIndexStats,
     # CE-54
     FulltextReindexResponse,
     FullTextSearchResult,
@@ -94,6 +95,7 @@ from dakera.models import (
     GraphLinkResponse,
     GraphPath,
     HybridSearchResult,
+    ImportJobStatus,
     IndexStats,
     # KG-2
     KgExportResponse,
@@ -110,6 +112,8 @@ from dakera.models import (
     MemoryImportResponse,
     # COG-1
     MemoryPolicy,
+    MemoryTypeStatsResponse,
+    MigrateDimensionsResponse,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
@@ -120,14 +124,17 @@ from dakera.models import (
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyResponse,
+    RouteResponse,
     # CE-10
     RoutingMode,
     SearchResult,
     StalenessConfig,
+    StorageTierOverview,
     TextDocument,
     TextDocumentInput,
     TextQueryResponse,
     TextUpsertResponse,
+    TtlStatsResponse,
     Vector,
     VectorInput,
     WakeUpResponse,
@@ -2784,6 +2791,96 @@ class AsyncDakeraClient:
     async def ops_shutdown(self) -> dict[str, Any]:
         """POST /ops/shutdown — request graceful shutdown."""
         return await self._request("POST", "/ops/shutdown")
+
+    # =========================================================================
+    # Phase 3 — Engine Parity
+    # =========================================================================
+
+    async def fulltext_stats(self, namespace: str) -> FullTextIndexStats:
+        """GET /v1/namespaces/{namespace}/fulltext/stats — full-text index statistics."""
+        data = await self._request("GET", f"/v1/namespaces/{namespace}/fulltext/stats")
+        return FullTextIndexStats.from_dict(data)
+
+    async def fulltext_delete(self, namespace: str, ids: list[str]) -> dict[str, Any]:
+        """Delete documents from the full-text index.
+
+        Calls ``POST /v1/namespaces/{namespace}/fulltext/delete``.
+        """
+        return await self._request(
+            "POST", f"/v1/namespaces/{namespace}/fulltext/delete", data={"ids": ids}
+        )
+
+    async def ttl_stats(self) -> TtlStatsResponse:
+        """GET /admin/ttl/stats — TTL expiration statistics across namespaces."""
+        data = await self._request("GET", "/admin/ttl/stats")
+        return TtlStatsResponse.from_dict(data)
+
+    async def route_query(
+        self,
+        query: str,
+        top_k: int = 3,
+        min_similarity: float = 0.3,
+        model: str | None = None,
+    ) -> RouteResponse:
+        """POST /v1/route — semantic query routing."""
+        data: dict[str, Any] = {
+            "query": query,
+            "top_k": top_k,
+            "min_similarity": min_similarity,
+        }
+        if model is not None:
+            data["model"] = model
+        resp = await self._request("POST", "/v1/route", data=data)
+        return RouteResponse.from_dict(resp)
+
+    async def import_job_status(self, job_id: str) -> ImportJobStatus:
+        """GET /v1/import/{job_id}/status — check import job progress."""
+        data = await self._request("GET", f"/v1/import/{job_id}/status")
+        return ImportJobStatus.from_dict(data)
+
+    async def download_backup(self, backup_id: str) -> bytes:
+        """GET /admin/backups/{id}/download — download a backup as gzip bytes."""
+        url = self._url(f"/admin/backups/{backup_id}/download")
+        response = await self._client.get(url)
+        response.raise_for_status()
+        return response.content
+
+    async def upload_backup(self, data: bytes) -> dict[str, Any]:
+        """POST /admin/backups/upload — upload a gzip backup."""
+        url = self._url("/admin/backups/upload")
+        response = await self._client.post(
+            url,
+            content=data,
+            headers={"Content-Type": "application/gzip"},
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def storage_tier_overview(self) -> StorageTierOverview:
+        """GET /admin/storage/tiers — storage tier architecture overview."""
+        data = await self._request("GET", "/admin/storage/tiers")
+        return StorageTierOverview.from_dict(data)
+
+    async def background_activity(self) -> dict[str, Any]:
+        """GET /admin/background-activity — current background tasks and jobs."""
+        return await self._request("GET", "/admin/background-activity")
+
+    async def memory_type_stats(self) -> MemoryTypeStatsResponse:
+        """GET /admin/memory-type-stats — memory type distribution statistics."""
+        data = await self._request("GET", "/admin/memory-type-stats")
+        return MemoryTypeStatsResponse.from_dict(data)
+
+    async def migrate_namespace_dimensions(
+        self,
+        target_dimension: int = 1024,
+        namespaces: list[str] | None = None,
+    ) -> MigrateDimensionsResponse:
+        """POST /admin/namespaces/migrate-dimensions — migrate namespace vector dimensions."""
+        data: dict[str, Any] = {"target_dimension": target_dimension}
+        if namespaces is not None:
+            data["namespaces"] = namespaces
+        resp = await self._request("POST", "/admin/namespaces/migrate-dimensions", data=data)
+        return MigrateDimensionsResponse.from_dict(resp)
 
     # =========================================================================
     # Context Manager Support
