@@ -6,6 +6,7 @@ Auth is disabled on the test server (DAKERA_AUTH_ENABLED=false).
 Run locally: DAKERA_TEST_URL=http://localhost:3000 pytest tests/test_integration.py -v
 """
 
+import contextlib
 import os
 import time
 import uuid
@@ -38,10 +39,8 @@ def client():
 def namespace(client):
     client.create_namespace(TEST_NAMESPACE, dimensions=384)
     yield TEST_NAMESPACE
-    try:
+    with contextlib.suppress(Exception):
         client.delete_namespace(TEST_NAMESPACE)
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
