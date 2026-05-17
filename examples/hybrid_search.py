@@ -53,15 +53,20 @@ def main():
         },
     ]
 
-    # Index documents for full-text search
+    # Index documents for full-text search (may not be supported on all server versions)
     print("Indexing documents for full-text search...")
-    client.index_documents(
-        namespace,
-        documents=[
-            Document(id=doc["id"], content=doc["content"], metadata=doc["metadata"])
-            for doc in documents
-        ],
-    )
+    fulltext_available = True
+    try:
+        client.index_documents(
+            namespace,
+            documents=[
+                Document(id=doc["id"], content=doc["content"], metadata=doc["metadata"])
+                for doc in documents
+            ],
+        )
+    except Exception as e:
+        print(f"  Full-text indexing not supported on this server version: {e}")
+        fulltext_available = False
 
     # Upsert vectors (embeddings)
     print("Upserting vector embeddings...")
@@ -83,70 +88,88 @@ def main():
     for r in vector_results.results:
         print(f"  {r.id}: score={r.score:.4f}")
 
-    # Pure full-text search
-    print("\n--- Pure Full-Text Search ---")
-    text_results = client.fulltext_search(namespace, query=query_text, top_k=3)
-    for r in text_results:
-        print(f"  {r.id}: score={r.score:.4f}")
+    if fulltext_available:
+        # Pure full-text search
+        print("\n--- Pure Full-Text Search ---")
+        try:
+            text_results = client.fulltext_search(namespace, query=query_text, top_k=3)
+            for r in text_results:
+                print(f"  {r.id}: score={r.score:.4f}")
+        except Exception as e:
+            print(f"  Full-text search failed: {e}")
 
-    # Hybrid search with different vector_weight values
-    print("\n--- Hybrid Search (vector_weight=0.3 - more text) ---")
-    hybrid_results = client.hybrid_search(
-        namespace,
-        vector=query_embedding,
-        query=query_text,
-        top_k=3,
-        vector_weight=0.3,  # 30% vector, 70% text
-    )
-    for r in hybrid_results:
-        print(
-            f"  {r.id}: combined={r.score:.4f}, "
-            f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
-            f"text={r.text_score:.4f if r.text_score else 'N/A'}"
-        )
+        # Hybrid search with different vector_weight values
+        print("\n--- Hybrid Search (vector_weight=0.3 - more text) ---")
+        try:
+            hybrid_results = client.hybrid_search(
+                namespace,
+                vector=query_embedding,
+                query=query_text,
+                top_k=3,
+                vector_weight=0.3,
+            )
+            for r in hybrid_results:
+                print(
+                    f"  {r.id}: combined={r.score:.4f}, "
+                    f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
+                    f"text={r.text_score:.4f if r.text_score else 'N/A'}"
+                )
+        except Exception as e:
+            print(f"  Hybrid search failed: {e}")
 
-    print("\n--- Hybrid Search (vector_weight=0.5 - balanced) ---")
-    hybrid_results = client.hybrid_search(
-        namespace,
-        vector=query_embedding,
-        query=query_text,
-        top_k=3,
-        vector_weight=0.5,  # 50% vector, 50% text
-    )
-    for r in hybrid_results:
-        print(
-            f"  {r.id}: combined={r.score:.4f}, "
-            f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
-            f"text={r.text_score:.4f if r.text_score else 'N/A'}"
-        )
+        print("\n--- Hybrid Search (vector_weight=0.5 - balanced) ---")
+        try:
+            hybrid_results = client.hybrid_search(
+                namespace,
+                vector=query_embedding,
+                query=query_text,
+                top_k=3,
+                vector_weight=0.5,
+            )
+            for r in hybrid_results:
+                print(
+                    f"  {r.id}: combined={r.score:.4f}, "
+                    f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
+                    f"text={r.text_score:.4f if r.text_score else 'N/A'}"
+                )
+        except Exception as e:
+            print(f"  Hybrid search failed: {e}")
 
-    print("\n--- Hybrid Search (vector_weight=0.7 - more vector) ---")
-    hybrid_results = client.hybrid_search(
-        namespace,
-        vector=query_embedding,
-        query=query_text,
-        top_k=3,
-        vector_weight=0.7,  # 70% vector, 30% text
-    )
-    for r in hybrid_results:
-        print(
-            f"  {r.id}: combined={r.score:.4f}, "
-            f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
-            f"text={r.text_score:.4f if r.text_score else 'N/A'}"
-        )
+        print("\n--- Hybrid Search (vector_weight=0.7 - more vector) ---")
+        try:
+            hybrid_results = client.hybrid_search(
+                namespace,
+                vector=query_embedding,
+                query=query_text,
+                top_k=3,
+                vector_weight=0.7,
+            )
+            for r in hybrid_results:
+                print(
+                    f"  {r.id}: combined={r.score:.4f}, "
+                    f"vector={r.vector_score:.4f if r.vector_score else 'N/A'}, "
+                    f"text={r.text_score:.4f if r.text_score else 'N/A'}"
+                )
+        except Exception as e:
+            print(f"  Hybrid search failed: {e}")
 
-    # Hybrid search with metadata filter
-    print("\n--- Hybrid Search with Filter (year=2024) ---")
-    filtered_results = client.hybrid_search(
-        namespace,
-        vector=query_embedding,
-        query=query_text,
-        top_k=3,
-        vector_weight=0.5,
-        filter={"year": {"$eq": 2024}},
-    )
-    for r in filtered_results:
-        print(f"  {r.id}: score={r.score:.4f}")
+        # Hybrid search with metadata filter
+        print("\n--- Hybrid Search with Filter (year=2024) ---")
+        try:
+            filtered_results = client.hybrid_search(
+                namespace,
+                vector=query_embedding,
+                query=query_text,
+                top_k=3,
+                vector_weight=0.5,
+                filter={"year": {"$eq": 2024}},
+            )
+            for r in filtered_results:
+                print(f"  {r.id}: score={r.score:.4f}")
+        except Exception as e:
+            print(f"  Filtered hybrid search failed: {e}")
+    else:
+        print("\nSkipping full-text and hybrid search (not supported on this server)")
 
     # Cleanup
     print("\nCleaning up...")
