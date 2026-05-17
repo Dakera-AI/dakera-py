@@ -22,6 +22,9 @@ def main():
 
     namespace = "hybrid-example"
 
+    # Create namespace with the right dimensions for our sample vectors
+    client.create_namespace(namespace, dimensions=5)
+
     # Sample documents with embeddings (in real usage, generate embeddings with a model)
     documents = [
         {
