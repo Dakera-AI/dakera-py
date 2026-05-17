@@ -85,9 +85,12 @@ def main():
 
     # Fetch vectors by ID
     print("\nFetching vectors by ID...")
-    vectors = client.fetch("example-namespace", ids=["vec1", "vec2"])
-    for v in vectors:
-        print(f"  - {v.id}: values={v.values[:3]}...")
+    try:
+        vectors = client.fetch("example-namespace", ids=["vec1", "vec2"])
+        for v in vectors:
+            print(f"  - {v.id}: values={v.values[:3]}...")
+    except Exception as e:
+        print(f"  Fetch not supported on this server version: {e}")
 
     # Get namespace stats
     print("\nNamespace stats:")
