@@ -12,7 +12,7 @@ This example demonstrates:
 import os
 import sys
 
-from dakera import DakeraClient, Document
+from dakera import DakeraClient
 
 
 def main():
@@ -30,25 +30,25 @@ def main():
     documents = [
         {
             "id": "doc1",
-            "content": "Machine learning is transforming how we build software applications",
+            "text": "Machine learning is transforming how we build software applications",
             "embedding": [0.1, 0.2, 0.3, 0.4, 0.5],  # Simulated embedding
             "metadata": {"category": "technology", "year": 2024},
         },
         {
             "id": "doc2",
-            "content": "Vector databases enable efficient similarity search at scale",
+            "text": "Vector databases enable efficient similarity search at scale",
             "embedding": [0.2, 0.3, 0.4, 0.5, 0.6],
             "metadata": {"category": "technology", "year": 2024},
         },
         {
             "id": "doc3",
-            "content": "Natural language processing powers modern search engines",
+            "text": "Natural language processing powers modern search engines",
             "embedding": [0.15, 0.25, 0.35, 0.45, 0.55],
             "metadata": {"category": "technology", "year": 2023},
         },
         {
             "id": "doc4",
-            "content": "Deep learning models require significant computational resources",
+            "text": "Deep learning models require significant computational resources",
             "embedding": [0.3, 0.4, 0.5, 0.6, 0.7],
             "metadata": {"category": "technology", "year": 2023},
         },
@@ -59,7 +59,7 @@ def main():
     client.index_documents(
         namespace,
         documents=[
-            Document(id=doc["id"], content=doc["content"], metadata=doc["metadata"])
+            {"id": doc["id"], "text": doc["text"], "metadata": doc["metadata"]}
             for doc in documents
         ],
     )

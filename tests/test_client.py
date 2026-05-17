@@ -201,8 +201,8 @@ class TestFullTextOperations:
         result = client.index_documents(
             "test-ns",
             documents=[
-                {"id": "doc1", "content": "Hello world"},
-                Document(id="doc2", content="Goodbye world"),
+                {"id": "doc1", "text": "Hello world"},
+                Document(id="doc2", text="Goodbye world"),
             ],
         )
 
@@ -466,11 +466,11 @@ class TestModels:
 
     def test_document_to_dict(self):
         """Test Document.to_dict()."""
-        doc = Document(id="doc1", content="Hello", metadata={"type": "greeting"})
+        doc = Document(id="doc1", text="Hello", metadata={"type": "greeting"})
         d = doc.to_dict()
 
         assert d["id"] == "doc1"
-        assert d["content"] == "Hello"
+        assert d["text"] == "Hello"
         assert d["metadata"] == {"type": "greeting"}
 
 
