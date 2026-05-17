@@ -50,7 +50,7 @@ def namespace(client):
 class TestHealth:
     def test_health_returns_ok(self, client):
         result = client.health()
-        assert result["status"] == "ok"
+        assert result["status"] == "healthy"
 
 
 # ---------------------------------------------------------------------------
