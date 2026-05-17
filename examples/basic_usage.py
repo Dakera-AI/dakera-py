@@ -10,12 +10,14 @@ This example demonstrates:
 - Deleting vectors
 """
 
+import os
+
 from dakera import DakeraClient, Vector
 
 
 def main():
     # Connect to Dakera server
-    client = DakeraClient("http://localhost:3000")
+    client = DakeraClient(os.environ.get("DAKERA_API_URL", "http://localhost:3300"))
 
     # Check server health
     health = client.health()
