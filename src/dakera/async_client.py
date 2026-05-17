@@ -560,11 +560,16 @@ class AsyncDakeraClient:
         vector: list[float],
         query: str,
         top_k: int = 10,
-        alpha: float = 0.5,
+        vector_weight: float = 0.5,
         filter: FilterDict | None = None,
     ) -> list[HybridSearchResult]:
         """Perform hybrid search combining vector and full-text."""
-        data: dict[str, Any] = {"vector": vector, "query": query, "top_k": top_k, "alpha": alpha}
+        data: dict[str, Any] = {
+            "vector": vector,
+            "text": query,
+            "top_k": top_k,
+            "vector_weight": vector_weight,
+        }
         if filter:
             data["filter"] = filter
         response = await self._request(

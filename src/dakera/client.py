@@ -759,7 +759,7 @@ class DakeraClient:
         query: str,
         vector: list[float] | None = None,
         top_k: int = 10,
-        alpha: float = 0.5,
+        vector_weight: float = 0.5,
         filter: FilterDict | None = None,
     ) -> list[HybridSearchResult]:
         """
@@ -767,14 +767,14 @@ class DakeraClient:
 
         When ``vector`` is omitted the server falls back to BM25-only full-text
         search. When provided, results are blended with vector similarity
-        according to ``alpha``.
+        according to ``vector_weight``.
 
         Args:
             namespace: Target namespace
             query: Text query string
             vector: Optional query vector. Omit for BM25-only search.
             top_k: Number of results to return (default: 10)
-            alpha: Balance between vector (0) and text (1) search (default: 0.5)
+            vector_weight: Balance between vector (0) and text (1) search (default: 0.5)
             filter: Optional metadata filter
 
         Returns:
@@ -786,7 +786,7 @@ class DakeraClient:
             ...     "my-namespace",
             ...     query="hello world",
             ...     vector=[0.1, 0.2, 0.3],
-            ...     alpha=0.7,
+            ...     vector_weight=0.7,
             ... )
             >>> # BM25-only (no vector)
             >>> results = client.hybrid_search("my-namespace", query="hello world")
@@ -794,7 +794,7 @@ class DakeraClient:
         data: dict[str, Any] = {
             "text": query,
             "top_k": top_k,
-            "vector_weight": alpha,
+            "vector_weight": vector_weight,
         }
         if vector is not None:
             data["vector"] = vector

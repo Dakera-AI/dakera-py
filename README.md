@@ -99,7 +99,7 @@ client.upsert("my-namespace", vectors=[
 ])
 
 # Hybrid search (vector + BM25)
-results = client.hybrid_search("my-namespace", query="completed task", top_k=5)
+results = client.hybrid_search("my-namespace", query="completed task", top_k=5, vector_weight=0.7)
 for r in results:
     print(r.id, r.score)
 ```

@@ -6,14 +6,14 @@ This example demonstrates:
 - Indexing documents for full-text search
 - Upserting vectors with the same IDs
 - Performing hybrid search (vector + text)
-- Adjusting alpha parameter for search balance
+- Adjusting vector_weight parameter for search balance
 """
 
 from dakera import DakeraClient, Document
 
 
 def main():
-    client = DakeraClient("http://localhost:3000")
+    client = DakeraClient("http://localhost:3300")
 
     namespace = "hybrid-example"
 
@@ -81,14 +81,14 @@ def main():
     for r in text_results:
         print(f"  {r.id}: score={r.score:.4f}")
 
-    # Hybrid search with different alpha values
-    print("\n--- Hybrid Search (alpha=0.3 - more vector) ---")
+    # Hybrid search with different vector_weight values
+    print("\n--- Hybrid Search (vector_weight=0.3 - more text) ---")
     hybrid_results = client.hybrid_search(
         namespace,
         vector=query_embedding,
         query=query_text,
         top_k=3,
-        alpha=0.3,  # 30% text, 70% vector
+        vector_weight=0.3,  # 30% vector, 70% text
     )
     for r in hybrid_results:
         print(
@@ -97,13 +97,13 @@ def main():
             f"text={r.text_score:.4f if r.text_score else 'N/A'}"
         )
 
-    print("\n--- Hybrid Search (alpha=0.5 - balanced) ---")
+    print("\n--- Hybrid Search (vector_weight=0.5 - balanced) ---")
     hybrid_results = client.hybrid_search(
         namespace,
         vector=query_embedding,
         query=query_text,
         top_k=3,
-        alpha=0.5,  # 50% text, 50% vector
+        vector_weight=0.5,  # 50% vector, 50% text
     )
     for r in hybrid_results:
         print(
@@ -112,13 +112,13 @@ def main():
             f"text={r.text_score:.4f if r.text_score else 'N/A'}"
         )
 
-    print("\n--- Hybrid Search (alpha=0.7 - more text) ---")
+    print("\n--- Hybrid Search (vector_weight=0.7 - more vector) ---")
     hybrid_results = client.hybrid_search(
         namespace,
         vector=query_embedding,
         query=query_text,
         top_k=3,
-        alpha=0.7,  # 70% text, 30% vector
+        vector_weight=0.7,  # 70% vector, 30% text
     )
     for r in hybrid_results:
         print(
@@ -134,7 +134,7 @@ def main():
         vector=query_embedding,
         query=query_text,
         top_k=3,
-        alpha=0.5,
+        vector_weight=0.5,
         filter={"year": {"$eq": 2024}},
     )
     for r in filtered_results:
