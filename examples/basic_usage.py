@@ -84,15 +84,6 @@ def main():
     for result in filtered_results.results:
         print(f"  - {result.id}: score={result.score:.4f}")
 
-    # Fetch vectors by ID
-    print("\nFetching vectors by ID...")
-    try:
-        vectors = client.fetch("example-namespace", ids=["vec1", "vec2"])
-        for v in vectors:
-            print(f"  - {v.id}: values={v.values[:3]}...")
-    except Exception as e:
-        print(f"  Fetch not supported on this server version: {e}")
-
     # Get namespace stats
     print("\nNamespace stats:")
     info = client.get_namespace("example-namespace")
@@ -102,10 +93,7 @@ def main():
 
     # Delete specific vectors
     print("\nDeleting vec4...")
-    try:
-        client.delete("example-namespace", ids=["vec4"])
-    except Exception as e:
-        print(f"  Delete not supported on this server version: {e}")
+    client.delete("example-namespace", ids=["vec4"])
 
     # Cleanup - delete namespace
     print("\nCleaning up...")
