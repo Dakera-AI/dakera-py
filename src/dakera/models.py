@@ -353,7 +353,7 @@ class NamespaceInfo:
     def from_dict(cls, data: dict[str, Any]) -> "NamespaceInfo":
         """Create NamespaceInfo from API response dictionary."""
         return cls(
-            name=data["name"],
+            name=data.get("name") or data.get("namespace", ""),
             vector_count=data.get("vector_count", 0),
             dimensions=data.get("dimensions"),
             index_type=data.get("index_type"),
@@ -728,11 +728,22 @@ class RecallResponse:
     associated_memories: list["RecalledMemory"] | None = None
 
     @classmethod
+    def _normalize_memory(cls, m: dict[str, Any]) -> dict[str, Any]:
+        """Flatten nested {memory: {...}, score: ...} into a single dict."""
+        if "memory" in m and isinstance(m["memory"], dict):
+            flat = {**m["memory"], "score": m.get("score", 0.0)}
+            return flat
+        return m
+
+    @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
-        memories = [RecalledMemory.from_dict(m) for m in data.get("memories", [])]
+        memories = [
+            RecalledMemory.from_dict(cls._normalize_memory(m))
+            for m in data.get("memories", [])
+        ]
         raw_assoc = data.get("associated_memories")
         associated_memories = (
-            [RecalledMemory.from_dict(m) for m in raw_assoc]
+            [RecalledMemory.from_dict(cls._normalize_memory(m)) for m in raw_assoc]
             if raw_assoc is not None
             else None
         )
@@ -1491,6 +1502,12 @@ class BatchRecallRequest:
     """Filter predicates to apply.  An empty filter returns all memories up to ``limit``."""
     limit: int = 100
     """Maximum number of results to return (default: 100)."""
+    min_importance: float | None = None
+    """Convenience shortcut — sets ``filter.min_importance`` if no explicit filter is given."""
+
+    def __post_init__(self) -> None:
+        if self.min_importance is not None and self.filter is None:
+            self.filter = BatchMemoryFilter(min_importance=self.min_importance)
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -76,7 +76,7 @@ class TestNamespaces:
         assert ns.dimensions == 384
 
     def test_configure_namespace(self, client, namespace):
-        result = client.configure_namespace(namespace, ef_construction=128, m=16)
+        result = client.configure_namespace(namespace, dimension=384)
         assert result is not None
 
     def test_delete_namespace(self, client):
@@ -112,7 +112,7 @@ class TestMemory:
         )
         time.sleep(0.5)
         results = client.recall(TEST_AGENT, "programming language")
-        assert len(results) > 0
+        assert len(results.memories) > 0
 
     def test_batch_recall(self, client):
         result = client.batch_recall(

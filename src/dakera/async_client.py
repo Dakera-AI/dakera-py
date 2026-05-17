@@ -666,6 +666,7 @@ class AsyncDakeraClient:
         importance: float | None = None,
         metadata: dict[str, Any] | None = None,
         session_id: str | None = None,
+        tags: list[str] | None = None,
         ttl_seconds: int | None = None,
         expires_at: int | None = None,
     ) -> dict[str, Any]:
@@ -679,6 +680,7 @@ class AsyncDakeraClient:
             importance: Importance score 0.0–1.0.
             metadata: Arbitrary metadata dictionary.
             session_id: Optional session ID to associate with.
+            tags: Optional list of tags to associate with the memory.
             ttl_seconds: Optional TTL in seconds. The memory is hard-deleted
                 after this many seconds from creation.
             expires_at: Optional explicit expiry as a Unix timestamp (seconds).
@@ -691,12 +693,18 @@ class AsyncDakeraClient:
             data["metadata"] = metadata
         if session_id is not None:
             data["session_id"] = session_id
+        if tags is not None:
+            data["tags"] = tags
         if ttl_seconds is not None:
             data["ttl_seconds"] = ttl_seconds
         if expires_at is not None:
             data["expires_at"] = expires_at
         data["agent_id"] = agent_id
-        return await self._request("POST", "/v1/memory/store", data=data)
+        response = await self._request("POST", "/v1/memory/store", data=data)
+        # Server wraps the memory in {"memory": {...}, "embedding_time_ms": ...}
+        if isinstance(response, dict) and "memory" in response:
+            return response["memory"]
+        return response
 
     async def recall(
         self,
