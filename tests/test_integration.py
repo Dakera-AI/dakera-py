@@ -3,7 +3,8 @@
 Requires DAKERA_TEST_URL env var pointing to a running Dakera instance.
 Auth is enabled — set DAKERA_API_KEY to a valid key (default: test-key).
 
-Run locally: DAKERA_TEST_URL=http://localhost:3000 DAKERA_API_KEY=test-key pytest tests/test_integration.py -v
+Run locally:
+  DAKERA_TEST_URL=http://localhost:3000 DAKERA_API_KEY=test-key pytest tests/test_integration.py -v
 """
 
 import contextlib
