@@ -216,16 +216,17 @@ class TestCompressAgent:
             responses.POST,
             "http://localhost:3000/v1/agents/agent-1/compress",
             json={
-                "before_count": 500,
-                "after_count": 380,
+                "agent_id": "agent-1",
+                "memories_before": 500,
+                "memories_after": 380,
                 "removed_count": 120,
-                "elapsed_ms": 450,
+                "duration_ms": 450,
             },
             status=200,
         )
         result = client.compress_agent("agent-1")
-        assert result.before_count == 500
-        assert result.after_count == 380
+        assert result.memories_before == 500
+        assert result.memories_after == 380
         assert result.removed_count == 120
 
 
@@ -341,15 +342,25 @@ class TestMemoryFeedback:
             "http://localhost:3000/v1/memories/mem-1/feedback",
             json={
                 "memory_id": "mem-1",
-                "events": [
-                    {"signal": "upvote", "timestamp": "2026-05-17T10:00:00Z"},
-                    {"signal": "downvote", "timestamp": "2026-05-17T11:00:00Z"},
+                "entries": [
+                    {
+                        "signal": "upvote",
+                        "timestamp": "2026-05-17T10:00:00Z",
+                        "old_importance": 0.5,
+                        "new_importance": 0.6,
+                    },
+                    {
+                        "signal": "downvote",
+                        "timestamp": "2026-05-17T11:00:00Z",
+                        "old_importance": 0.6,
+                        "new_importance": 0.5,
+                    },
                 ],
             },
             status=200,
         )
         result = client.get_memory_feedback_history("mem-1")
-        assert len(result.events) == 2
+        assert len(result.entries) == 2
 
     def test_get_agent_feedback_summary(self, client, mock_responses):
         """Test getting agent feedback summary."""
@@ -361,6 +372,7 @@ class TestMemoryFeedback:
                 "upvotes": 50,
                 "downvotes": 5,
                 "flags": 1,
+                "total_feedback": 56,
                 "health_score": 0.89,
             },
             status=200,
@@ -374,7 +386,11 @@ class TestMemoryFeedback:
         mock_responses.add(
             responses.PATCH,
             "http://localhost:3000/v1/memories/mem-1/importance",
-            json={"memory_id": "mem-1", "new_importance": 0.95},
+            json={
+                "memory_id": "mem-1",
+                "new_importance": 0.95,
+                "signal": "positive",
+            },
             status=200,
         )
         result = client.patch_memory_importance("mem-1", "agent-1", 0.95)
@@ -386,6 +402,7 @@ class TestMemoryFeedback:
             responses.GET,
             "http://localhost:3000/v1/feedback/health",
             json={
+                "agent_id": "agent-1",
                 "health_score": 0.85,
                 "memory_count": 500,
                 "avg_importance": 0.72,
@@ -551,9 +568,18 @@ class TestAgentOperations:
             responses.GET,
             "http://localhost:3000/v1/agents/agent-1/wake-up",
             json={
+                "agent_id": "agent-1",
                 "memories": [
-                    {"id": "mem-1", "content": "critical fact", "importance": 0.95},
-                    {"id": "mem-2", "content": "important preference", "importance": 0.88},
+                    {
+                        "id": "mem-1",
+                        "content": "critical fact",
+                        "importance": 0.95,
+                    },
+                    {
+                        "id": "mem-2",
+                        "content": "important preference",
+                        "importance": 0.88,
+                    },
                 ],
                 "total_available": 150,
             },
@@ -572,7 +598,11 @@ class TestImportExport:
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/import",
-            json={"imported": 10, "failed": 1, "errors": ["row 5: invalid format"]},
+            json={
+                "imported_count": 10,
+                "skipped_count": 1,
+                "errors": ["row 5: invalid format"],
+            },
             status=200,
         )
         result = client.import_memories(
@@ -581,8 +611,8 @@ class TestImportExport:
             agent_id="agent-1",
             namespace="test-ns",
         )
-        assert result.imported == 10
-        assert result.failed == 1
+        assert result.imported_count == 10
+        assert result.skipped_count == 1
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["format"] == "jsonl"
         assert req_body["agent_id"] == "agent-1"
@@ -640,7 +670,8 @@ class TestAuditLog:
                         "timestamp": 1747500100,
                     },
                 ],
-                "next_cursor": "cursor-abc",
+                "total": 2,
+                "cursor": "cursor-abc",
             },
             status=200,
         )
@@ -648,14 +679,14 @@ class TestAuditLog:
             agent_id="agent-1", event_type="memory.stored", limit=50
         )
         assert len(result.events) == 2
-        assert result.next_cursor == "cursor-abc"
+        assert result.cursor == "cursor-abc"
 
     def test_list_audit_events_with_time_range(self, client, mock_responses):
         """Test listing audit events with time range."""
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/audit",
-            json={"events": [], "next_cursor": None},
+            json={"events": [], "total": 0, "cursor": None},
             status=200,
         )
         result = client.list_audit_events(from_ts=1747000000, to_ts=1747500000)
@@ -692,24 +723,27 @@ class TestEntityExtraction:
             "http://localhost:3000/v1/memories/extract",
             json={
                 "entities": [
-                    {"text": "John", "type": "person", "start": 0, "end": 4},
-                    {"text": "Acme Corp", "type": "org", "start": 18, "end": 27},
+                    {"entity_type": "person", "value": "John", "score": 0.95},
+                    {"entity_type": "org", "value": "Acme Corp", "score": 0.9},
                 ],
-                "count": 2,
             },
             status=200,
         )
         result = client.extract_entities("John works at Acme Corp")
         assert len(result.entities) == 2
-        assert result.entities[0].text == "John"
-        assert result.entities[0].type == "person"
+        assert result.entities[0].value == "John"
+        assert result.entities[0].entity_type == "person"
 
     def test_extract_entities_with_types(self, client, mock_responses):
         """Test extracting specific entity types."""
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/memories/extract",
-            json={"entities": [{"text": "Paris", "type": "location"}], "count": 1},
+            json={
+                "entities": [
+                    {"entity_type": "location", "value": "Paris", "score": 0.9}
+                ],
+            },
             status=200,
         )
         result = client.extract_entities(
@@ -727,8 +761,8 @@ class TestEntityExtraction:
             json={
                 "memory_id": "mem-1",
                 "entities": [
-                    {"text": "Alice", "type": "person"},
-                    {"text": "2026-05-17", "type": "date"},
+                    {"entity_type": "person", "value": "Alice", "score": 0.9},
+                    {"entity_type": "date", "value": "2026-05-17", "score": 0.8},
                 ],
             },
             status=200,
@@ -886,10 +920,15 @@ class TestNamespaceKeys:
                 "key": "dk_ns_abc123...",
                 "name": "ci-reader",
                 "namespace": "test-ns",
+                "created_at": 1747500000,
+                "warning": "Store this key securely",
+                "expires_at": 1755276000,
             },
             status=200,
         )
-        result = client.create_namespace_key("test-ns", "ci-reader", expires_in_days=90)
+        result = client.create_namespace_key(
+            "test-ns", "ci-reader", expires_in_days=90
+        )
         assert result.key_id == "key-1"
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["name"] == "ci-reader"
@@ -901,10 +940,24 @@ class TestNamespaceKeys:
             responses.GET,
             "http://localhost:3000/v1/namespaces/test-ns/keys",
             json={
+                "namespace": "test-ns",
                 "keys": [
-                    {"key_id": "key-1", "name": "ci-reader", "active": True},
-                    {"key_id": "key-2", "name": "admin", "active": True},
-                ]
+                    {
+                        "key_id": "key-1",
+                        "name": "ci-reader",
+                        "namespace": "test-ns",
+                        "created_at": 1747500000,
+                        "active": True,
+                    },
+                    {
+                        "key_id": "key-2",
+                        "name": "admin",
+                        "namespace": "test-ns",
+                        "created_at": 1747500000,
+                        "active": True,
+                    },
+                ],
+                "total": 2,
             },
             status=200,
         )
@@ -929,7 +982,11 @@ class TestNamespaceKeys:
             "http://localhost:3000/v1/namespaces/test-ns/keys/key-1/usage",
             json={
                 "key_id": "key-1",
+                "namespace": "test-ns",
                 "total_requests": 5000,
+                "successful_requests": 4900,
+                "failed_requests": 100,
+                "bytes_transferred": 1024000,
                 "avg_latency_ms": 3.2,
             },
             status=200,
@@ -1181,9 +1238,12 @@ class TestCacheWarming:
             responses.POST,
             "http://localhost:3000/v1/namespaces/test-ns/cache/warm",
             json={
+                "success": True,
                 "entries_warmed": 100,
-                "already_cached": 50,
-                "elapsed_ms": 200,
+                "entries_skipped": 50,
+                "message": "Cache warmed successfully",
+                "target_tier": "both",
+                "priority": "high",
             },
             status=200,
         )
@@ -1196,4 +1256,4 @@ class TestCacheWarming:
             target_tier=WarmingTargetTier.BOTH,
         )
         assert result.entries_warmed == 100
-        assert result.already_cached == 50
+        assert result.entries_skipped == 50

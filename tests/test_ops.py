@@ -289,16 +289,15 @@ class TestNamespaceOps:
             responses.GET,
             "http://localhost:3000/v1/namespaces/test-ns/stats",
             json={
-                "namespace": "test-ns",
-                "vector_count": 10000,
+                "total_vectors": 10000,
                 "dimensions": 384,
                 "index_type": "hnsw",
-                "storage_bytes": 5000000,
+                "memory_usage_bytes": 5000000,
             },
             status=200,
         )
         result = client.get_index_stats("test-ns")
-        assert result.vector_count == 10000
+        assert result.total_vectors == 10000
         assert result.dimensions == 384
 
     def test_compact_namespace(self, client, mock_responses):
@@ -407,14 +406,14 @@ class TestFulltextExtended:
             "http://localhost:3000/v1/namespaces/test-ns/fulltext/stats",
             json={
                 "document_count": 5000,
-                "term_count": 25000,
-                "index_size_bytes": 1000000,
+                "unique_terms": 25000,
+                "avg_doc_length": 120.5,
             },
             status=200,
         )
         result = client.fulltext_stats("test-ns")
         assert result.document_count == 5000
-        assert result.term_count == 25000
+        assert result.unique_terms == 25000
 
     def test_fulltext_stats_error(self, client, mock_responses):
         """Test fulltext stats with server error."""
@@ -451,14 +450,25 @@ class TestRouteQuery:
             "http://localhost:3000/v1/route",
             json={
                 "routes": [
-                    {"namespace": "ns-1", "similarity": 0.92},
-                    {"namespace": "ns-2", "similarity": 0.78},
+                    {
+                        "namespace": "ns-1",
+                        "similarity": 0.92,
+                        "description": "weather data",
+                    },
+                    {
+                        "namespace": "ns-2",
+                        "similarity": 0.78,
+                        "description": "general",
+                    },
                 ],
                 "model": "minilm",
+                "embedding_time_ms": 5,
             },
             status=200,
         )
-        result = client.route_query("what is the weather?", top_k=3, min_similarity=0.3)
+        result = client.route_query(
+            "what is the weather?", top_k=3, min_similarity=0.3
+        )
         assert len(result.routes) == 2
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["query"] == "what is the weather?"
@@ -487,9 +497,13 @@ class TestImportJobStatus:
             json={
                 "job_id": "job-123",
                 "status": "complete",
-                "imported": 100,
-                "failed": 2,
+                "format": "jsonl",
                 "total": 102,
+                "imported": 100,
+                "skipped": 0,
+                "errors": ["row 5: bad format", "row 99: bad format"],
+                "started_at": 1747500000,
+                "finished_at": 1747500060,
             },
             status=200,
         )
