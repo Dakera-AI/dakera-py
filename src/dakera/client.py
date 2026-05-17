@@ -704,7 +704,7 @@ class DakeraClient:
         Example:
             >>> client.index_documents("my-namespace", documents=[
             ...     {"id": "doc1", "content": "Hello world"},
-            ...     Document(id="doc2", content="Goodbye world"),
+            ...     Document(id="doc2", text="Goodbye world"),
             ... ])
         """
         doc_dicts = []

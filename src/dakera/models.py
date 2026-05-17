@@ -394,12 +394,12 @@ class Document:
     """Represents a document for full-text search."""
 
     id: str
-    content: str
+    text: str
     metadata: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API requests."""
-        result: dict[str, Any] = {"id": self.id, "content": self.content}
+        result: dict[str, Any] = {"id": self.id, "text": self.text}
         if self.metadata is not None:
             result["metadata"] = self.metadata
         return result
@@ -409,7 +409,7 @@ class Document:
         """Create Document from API response dictionary."""
         return cls(
             id=data["id"],
-            content=data["content"],
+            text=data["text"],
             metadata=data.get("metadata"),
         )
 
