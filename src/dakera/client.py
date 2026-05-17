@@ -1493,7 +1493,7 @@ class DakeraClient:
         Note:
             Requires CE-4 (GLiNER) on the server.
         """
-        data: dict[str, Any] = {"text": text}
+        data: dict[str, Any] = {"content": text}
         if entity_types is not None:
             data["entity_types"] = entity_types
         result = self._request("POST", "/v1/memories/extract", data=data)
