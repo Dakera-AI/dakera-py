@@ -629,7 +629,7 @@ class TestCog2AssociativeRecall:
 
         mock_responses.add(
             resp_lib.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories/recall",
+            "http://localhost:3000/v1/memory/recall",
             json={
                 "memories": [
                     {
@@ -669,7 +669,7 @@ class TestCog2AssociativeRecall:
 
         mock_responses.add(
             resp_lib.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories/recall",
+            "http://localhost:3000/v1/memory/recall",
             json={
                 "memories": [
                     {
@@ -698,7 +698,7 @@ class TestCog2AssociativeRecall:
 
         mock_responses.add(
             resp_lib.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories/recall",
+            "http://localhost:3000/v1/memory/recall",
             json={"memories": [], "associated_memories": []},
             status=200,
         )
@@ -1157,7 +1157,7 @@ class TestStoreMemoryExpiresAt:
 
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories",
+            "http://localhost:3000/v1/memory/store",
             json={"id": "mem_1", "content": "test content"},
             status=200,
         )
@@ -1174,7 +1174,7 @@ class TestStoreMemoryExpiresAt:
 
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories",
+            "http://localhost:3000/v1/memory/store",
             json={"id": "mem_1", "content": "test content"},
             status=200,
         )
@@ -1190,7 +1190,7 @@ class TestStoreMemoryExpiresAt:
 
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories",
+            "http://localhost:3000/v1/memory/store",
             json={"id": "mem_1", "content": "ephemeral"},
             status=200,
         )
@@ -1332,7 +1332,7 @@ class TestAsyncClientStoreMemoryParity:
         assert "expires_at" not in captured
 
     async def test_store_memory_posts_to_correct_endpoint(self):
-        """store_memory() calls POST /v1/agents/{agent_id}/memories."""
+        """store_memory() calls POST /v1/memory/store."""
         client = AsyncDakeraClient("http://localhost:3000")
         calls: list = []
 
@@ -1343,7 +1343,7 @@ class TestAsyncClientStoreMemoryParity:
         with patch.object(client, "_request", side_effect=fake_request):
             await client.store_memory("my-agent", "content")
 
-        assert calls == [("POST", "/v1/agents/my-agent/memories")]
+        assert calls == [("POST", "/v1/memory/store")]
 
 # ===========================================================================
 # Memory Knowledge Graph Tests (CE-5 / SDK-9)
@@ -1966,7 +1966,7 @@ class TestEntityExtractionSyncClient:
         assert result.entities[1].value == "Paris"
         import json as _json
         body = _json.loads(mock_responses.calls[0].request.body)
-        assert body["text"] == "Alice lives in Paris."
+        assert body["content"] == "Alice lives in Paris."
         assert "entity_types" not in body
 
     def test_extract_entities_with_entity_types(self, client, mock_responses):

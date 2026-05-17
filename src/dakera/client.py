@@ -792,9 +792,9 @@ class DakeraClient:
             >>> results = client.hybrid_search("my-namespace", query="hello world")
         """
         data: dict[str, Any] = {
-            "query": query,
+            "text": query,
             "top_k": top_k,
-            "alpha": alpha,
+            "vector_weight": alpha,
         }
         if vector is not None:
             data["vector"] = vector
@@ -820,7 +820,14 @@ class DakeraClient:
             List of NamespaceInfo objects
         """
         response = self._request("GET", "/v1/namespaces")
-        return [NamespaceInfo.from_dict(ns) for ns in response.get("namespaces", [])]
+        namespaces = response.get("namespaces", [])
+        result = []
+        for ns in namespaces:
+            if isinstance(ns, str):
+                result.append(NamespaceInfo(name=ns, vector_count=0))
+            else:
+                result.append(NamespaceInfo.from_dict(ns))
+        return result
 
     def get_namespace(self, namespace: str) -> NamespaceInfo:
         """
@@ -856,7 +863,7 @@ class DakeraClient:
         """
         data: dict[str, Any] = {"name": namespace}
         if dimensions:
-            data["dimensions"] = dimensions
+            data["dimension"] = dimensions
         if index_type:
             data["index_type"] = index_type
         if metadata:
@@ -961,6 +968,7 @@ class DakeraClient:
         importance: float | None = None,
         metadata: dict[str, Any] | None = None,
         session_id: str | None = None,
+        tags: list[str] | None = None,
         ttl_seconds: int | None = None,
         expires_at: int | None = None,
     ) -> dict[str, Any]:
@@ -974,6 +982,7 @@ class DakeraClient:
             importance: Importance score 0.0–1.0.
             metadata: Arbitrary metadata dictionary.
             session_id: Optional session ID to associate with.
+            tags: Optional list of tags to associate with the memory.
             ttl_seconds: Optional TTL in seconds. The memory is hard-deleted after
                 this many seconds from creation.
             expires_at: Optional explicit expiry as a Unix timestamp (seconds).
@@ -986,11 +995,18 @@ class DakeraClient:
             data["metadata"] = metadata
         if session_id is not None:
             data["session_id"] = session_id
+        if tags is not None:
+            data["tags"] = tags
         if ttl_seconds is not None:
             data["ttl_seconds"] = ttl_seconds
         if expires_at is not None:
             data["expires_at"] = expires_at
-        return self._request("POST", f"/v1/agents/{agent_id}/memories", data=data)
+        data["agent_id"] = agent_id
+        response = self._request("POST", "/v1/memory/store", data=data)
+        # Server wraps the memory in {"memory": {...}, "embedding_time_ms": ...}
+        if isinstance(response, dict) and "memory" in response:
+            return response["memory"]
+        return response
 
     def recall(
         self,
@@ -1089,14 +1105,15 @@ class DakeraClient:
             data["iterations"] = iterations
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
-        result = self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
+        data["agent_id"] = agent_id
+        result = self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
     def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""
-        return self._request("GET", f"/v1/agents/{agent_id}/memories/{memory_id}")
+        return self._request("GET", f"/v1/memory/get/{memory_id}", params={"agent_id": agent_id})
 
     def update_memory(
         self,
@@ -1114,11 +1131,12 @@ class DakeraClient:
             data["metadata"] = metadata
         if memory_type is not None:
             data["memory_type"] = memory_type
-        return self._request("PUT", f"/v1/agents/{agent_id}/memories/{memory_id}", data=data)
+        return self._request("PUT", f"/v1/memory/update/{memory_id}", data=data)
 
     def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Delete a memory."""
-        return self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
+        data = {"agent_id": agent_id, "memory_ids": [memory_id]}
+        return self._request("POST", "/v1/memory/forget", data=data)
 
     def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
         """Bulk-recall memories using filter predicates (CE-2).
@@ -1182,7 +1200,8 @@ class DakeraClient:
             data["routing"] = routing.value if hasattr(routing, "value") else routing
         if rerank is not None:
             data["rerank"] = rerank
-        result = self._request("POST", f"/v1/agents/{agent_id}/memories/search", data=data)
+        data["agent_id"] = agent_id
+        result = self._request("POST", "/v1/memory/search", data=data)
         return result.get("memories", result) if isinstance(result, dict) else result
 
     def compress_agent(self, agent_id: str) -> "CompressResponse":
@@ -1205,10 +1224,13 @@ class DakeraClient:
         agent_id: str,
         memory_ids: list[str],
         importance: float,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """Update importance of memories."""
-        data = {"memory_ids": memory_ids, "importance": importance}
-        return self._request("PUT", f"/v1/agents/{agent_id}/memories/importance", data=data)
+        results = []
+        for mid in memory_ids:
+            data = {"agent_id": agent_id, "memory_id": mid, "importance": importance}
+            results.append(self._request("POST", "/v1/memory/importance", data=data))
+        return results[0] if len(results) == 1 else results
 
     def consolidate(
         self,
@@ -1241,7 +1263,8 @@ class DakeraClient:
             data["threshold"] = threshold
         if config is not None:
             data["config"] = config.to_dict()
-        return self._request("POST", f"/v1/agents/{agent_id}/memories/consolidate", data=data)
+        data["agent_id"] = agent_id
+        return self._request("POST", "/v1/memory/consolidate", data=data)
 
     def memory_feedback(
         self,
@@ -1470,7 +1493,7 @@ class DakeraClient:
         Note:
             Requires CE-4 (GLiNER) on the server.
         """
-        data: dict[str, Any] = {"text": text}
+        data: dict[str, Any] = {"content": text}
         if entity_types is not None:
             data["entity_types"] = entity_types
         result = self._request("POST", "/v1/memories/extract", data=data)
@@ -1511,9 +1534,12 @@ class DakeraClient:
         result = self._request("POST", "/v1/sessions/start", data=data)
         return result["session"]
 
-    def end_session(self, session_id: str) -> dict[str, Any]:
+    def end_session(self, session_id: str, summary: str | None = None) -> dict[str, Any]:
         """End a session."""
-        return self._request("POST", f"/v1/sessions/{session_id}/end")
+        data: dict[str, Any] = {}
+        if summary is not None:
+            data["summary"] = summary
+        return self._request("POST", f"/v1/sessions/{session_id}/end", data=data)
 
     def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session details."""
@@ -1540,7 +1566,10 @@ class DakeraClient:
 
     def session_memories(self, session_id: str) -> list[dict[str, Any]]:
         """Get memories for a session."""
-        return self._request("GET", f"/v1/sessions/{session_id}/memories")
+        result = self._request("GET", f"/v1/sessions/{session_id}/memories")
+        if isinstance(result, dict):
+            return result.get("memories", [])
+        return result
 
     # =========================================================================
     # Agent Operations

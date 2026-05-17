@@ -666,6 +666,7 @@ class AsyncDakeraClient:
         importance: float | None = None,
         metadata: dict[str, Any] | None = None,
         session_id: str | None = None,
+        tags: list[str] | None = None,
         ttl_seconds: int | None = None,
         expires_at: int | None = None,
     ) -> dict[str, Any]:
@@ -679,6 +680,7 @@ class AsyncDakeraClient:
             importance: Importance score 0.0–1.0.
             metadata: Arbitrary metadata dictionary.
             session_id: Optional session ID to associate with.
+            tags: Optional list of tags to associate with the memory.
             ttl_seconds: Optional TTL in seconds. The memory is hard-deleted
                 after this many seconds from creation.
             expires_at: Optional explicit expiry as a Unix timestamp (seconds).
@@ -691,11 +693,18 @@ class AsyncDakeraClient:
             data["metadata"] = metadata
         if session_id is not None:
             data["session_id"] = session_id
+        if tags is not None:
+            data["tags"] = tags
         if ttl_seconds is not None:
             data["ttl_seconds"] = ttl_seconds
         if expires_at is not None:
             data["expires_at"] = expires_at
-        return await self._request("POST", f"/v1/agents/{agent_id}/memories", data=data)
+        data["agent_id"] = agent_id
+        response = await self._request("POST", "/v1/memory/store", data=data)
+        # Server wraps the memory in {"memory": {...}, "embedding_time_ms": ...}
+        if isinstance(response, dict) and "memory" in response:
+            return response["memory"]
+        return response
 
     async def recall(
         self,
@@ -794,14 +803,15 @@ class AsyncDakeraClient:
             data["iterations"] = iterations
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
-        result = await self._request("POST", f"/v1/agents/{agent_id}/memories/recall", data=data)
+        data["agent_id"] = agent_id
+        result = await self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
     async def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Get a specific memory."""
-        return await self._request("GET", f"/v1/agents/{agent_id}/memories/{memory_id}")
+        return await self._request("GET", f"/v1/memory/get/{memory_id}")
 
     async def update_memory(
         self,
@@ -819,11 +829,12 @@ class AsyncDakeraClient:
             data["metadata"] = metadata
         if memory_type is not None:
             data["memory_type"] = memory_type
-        return await self._request("PUT", f"/v1/agents/{agent_id}/memories/{memory_id}", data=data)
+        return await self._request("PUT", f"/v1/memory/update/{memory_id}", data=data)
 
     async def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Delete a memory."""
-        return await self._request("DELETE", f"/v1/agents/{agent_id}/memories/{memory_id}")
+        data = {"agent_id": agent_id, "memory_ids": [memory_id]}
+        return await self._request("POST", "/v1/memory/forget", data=data)
 
     async def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
         """Bulk-recall memories using filter predicates (CE-2).
@@ -872,7 +883,8 @@ class AsyncDakeraClient:
             data["routing"] = routing.value if hasattr(routing, "value") else routing
         if rerank is not None:
             data["rerank"] = rerank
-        result = await self._request("POST", f"/v1/agents/{agent_id}/memories/search", data=data)
+        data["agent_id"] = agent_id
+        result = await self._request("POST", "/v1/memory/search", data=data)
         return result.get("memories", result) if isinstance(result, dict) else result
 
     async def compress_agent(self, agent_id: str) -> CompressResponse:
@@ -888,9 +900,9 @@ class AsyncDakeraClient:
     ) -> dict[str, Any]:
         """Update importance of memories."""
         return await self._request(
-            "PUT",
-            f"/v1/agents/{agent_id}/memories/importance",
-            data={"memory_ids": memory_ids, "importance": importance},
+            "POST",
+            "/v1/memory/importance",
+            data={"agent_id": agent_id, "memory_ids": memory_ids, "importance": importance},
         )
 
     async def consolidate(
@@ -922,7 +934,8 @@ class AsyncDakeraClient:
             data["threshold"] = threshold
         if config is not None:
             data["config"] = config.to_dict()
-        return await self._request("POST", f"/v1/agents/{agent_id}/memories/consolidate", data=data)
+        data["agent_id"] = agent_id
+        return await self._request("POST", "/v1/memory/consolidate", data=data)
 
     async def memory_feedback(
         self,
@@ -1235,9 +1248,12 @@ class AsyncDakeraClient:
         result = await self._request("POST", "/v1/sessions/start", data=data)
         return result["session"]
 
-    async def end_session(self, session_id: str) -> dict[str, Any]:
+    async def end_session(self, session_id: str, summary: str | None = None) -> dict[str, Any]:
         """End a session."""
-        return await self._request("POST", f"/v1/sessions/{session_id}/end")
+        data: dict[str, Any] = {}
+        if summary is not None:
+            data["summary"] = summary
+        return await self._request("POST", f"/v1/sessions/{session_id}/end", data=data)
 
     async def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session details."""
