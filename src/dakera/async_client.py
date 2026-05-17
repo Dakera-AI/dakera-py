@@ -2601,6 +2601,191 @@ class AsyncDakeraClient:
         return FulltextReindexResponse.from_dict(result)
 
     # =========================================================================
+    # Admin — Cluster & Maintenance
+    # =========================================================================
+
+    async def admin_cluster_replication(self) -> dict[str, Any]:
+        """GET /admin/cluster/replication — cluster replication status."""
+        return await self._request("GET", "/admin/cluster/replication")
+
+    async def admin_list_shards(self) -> dict[str, Any]:
+        """GET /admin/cluster/shards — list shards."""
+        return await self._request("GET", "/admin/cluster/shards")
+
+    async def admin_rebalance_shards(self, shard_ids: list[str] | None = None, dry_run: bool = False) -> dict[str, Any]:
+        """POST /admin/cluster/shards/rebalance — rebalance shards."""
+        data: dict[str, Any] = {"dry_run": dry_run}
+        if shard_ids is not None:
+            data["shard_ids"] = shard_ids
+        return await self._request("POST", "/admin/cluster/shards/rebalance", data=data)
+
+    async def admin_maintenance_status(self) -> dict[str, Any]:
+        """GET /admin/cluster/maintenance — maintenance mode status."""
+        return await self._request("GET", "/admin/cluster/maintenance")
+
+    async def admin_enable_maintenance(self, reason: str, node_ids: list[str] | None = None, reject_requests: bool = False, duration_minutes: int | None = None) -> dict[str, Any]:
+        """POST /admin/cluster/maintenance/enable — enable maintenance mode."""
+        data: dict[str, Any] = {"reason": reason, "reject_requests": reject_requests}
+        if node_ids is not None:
+            data["node_ids"] = node_ids
+        if duration_minutes is not None:
+            data["duration_minutes"] = duration_minutes
+        return await self._request("POST", "/admin/cluster/maintenance/enable", data=data)
+
+    async def admin_disable_maintenance(self, force: bool | None = None) -> dict[str, Any]:
+        """POST /admin/cluster/maintenance/disable — disable maintenance mode."""
+        data: dict[str, Any] = {}
+        if force is not None:
+            data["force"] = force
+        return await self._request("POST", "/admin/cluster/maintenance/disable", data=data)
+
+    # =========================================================================
+    # Admin — Quotas
+    # =========================================================================
+
+    async def admin_list_quotas(self) -> dict[str, Any]:
+        """GET /admin/quotas — list all namespace quotas."""
+        return await self._request("GET", "/admin/quotas")
+
+    async def admin_get_default_quota(self) -> dict[str, Any]:
+        """GET /admin/quotas/default — get default quota configuration."""
+        return await self._request("GET", "/admin/quotas/default")
+
+    async def admin_set_default_quota(self, config: dict[str, Any] | None) -> dict[str, Any]:
+        """PUT /admin/quotas/default — set default quota configuration."""
+        return await self._request("PUT", "/admin/quotas/default", data={"config": config})
+
+    async def admin_get_quota(self, namespace: str) -> dict[str, Any]:
+        """GET /admin/quotas/{namespace} — get namespace quota."""
+        return await self._request("GET", f"/admin/quotas/{namespace}")
+
+    async def admin_set_quota(self, namespace: str, config: dict[str, Any]) -> dict[str, Any]:
+        """PUT /admin/quotas/{namespace} — set namespace quota."""
+        return await self._request("PUT", f"/admin/quotas/{namespace}", data={"config": config})
+
+    async def admin_delete_quota(self, namespace: str) -> dict[str, Any]:
+        """DELETE /admin/quotas/{namespace} — remove namespace quota."""
+        return await self._request("DELETE", f"/admin/quotas/{namespace}")
+
+    async def admin_check_quota(self, namespace: str, vector_ids: list[str], dimensions: int | None = None, metadata_bytes: int | None = None) -> dict[str, Any]:
+        """POST /admin/quotas/{namespace}/check — check if operation would exceed quota."""
+        data: dict[str, Any] = {"vector_ids": vector_ids}
+        if dimensions is not None:
+            data["dimensions"] = dimensions
+        if metadata_bytes is not None:
+            data["metadata_bytes"] = metadata_bytes
+        return await self._request("POST", f"/admin/quotas/{namespace}/check", data=data)
+
+    # =========================================================================
+    # Admin — Slow Queries
+    # =========================================================================
+
+    async def admin_list_slow_queries(self, namespace: str | None = None, query_type: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        """GET /admin/slow-queries — list recent slow queries."""
+        params: dict[str, Any] = {}
+        if namespace is not None:
+            params["namespace"] = namespace
+        if query_type is not None:
+            params["query_type"] = query_type
+        if limit is not None:
+            params["limit"] = limit
+        return await self._request("GET", "/admin/slow-queries", params=params)
+
+    async def admin_slow_query_summary(self) -> dict[str, Any]:
+        """GET /admin/slow-queries/summary — slow query summary."""
+        return await self._request("GET", "/admin/slow-queries/summary")
+
+    async def admin_clear_slow_queries(self, namespace: str | None = None) -> dict[str, Any]:
+        """DELETE /admin/slow-queries — clear slow query log."""
+        params: dict[str, Any] = {}
+        if namespace is not None:
+            params["namespace"] = namespace
+        return await self._request("DELETE", "/admin/slow-queries", params=params)
+
+    async def admin_update_slow_query_config(self, **kwargs: Any) -> dict[str, Any]:
+        """PATCH /admin/slow-queries/config — update slow query configuration."""
+        return await self._request("PATCH", "/admin/slow-queries/config", data=kwargs)
+
+    # =========================================================================
+    # Admin — Backups
+    # =========================================================================
+
+    async def admin_list_backups(self) -> dict[str, Any]:
+        """GET /admin/backups — list all backups."""
+        return await self._request("GET", "/admin/backups")
+
+    async def admin_create_backup(self, name: str, backup_type: str | None = None, namespaces: list[str] | None = None, encrypt: bool | None = None, compression: str | None = None) -> dict[str, Any]:
+        """POST /admin/backups — create a new backup."""
+        data: dict[str, Any] = {"name": name}
+        if backup_type is not None:
+            data["backup_type"] = backup_type
+        if namespaces is not None:
+            data["namespaces"] = namespaces
+        if encrypt is not None:
+            data["encrypt"] = encrypt
+        if compression is not None:
+            data["compression"] = compression
+        return await self._request("POST", "/admin/backups", data=data)
+
+    async def admin_get_backup(self, backup_id: str) -> dict[str, Any]:
+        """GET /admin/backups/{id} — get backup details."""
+        return await self._request("GET", f"/admin/backups/{backup_id}")
+
+    async def admin_delete_backup(self, backup_id: str) -> dict[str, Any]:
+        """DELETE /admin/backups/{id} — delete a backup."""
+        return await self._request("DELETE", f"/admin/backups/{backup_id}")
+
+    async def admin_get_backup_schedule(self) -> dict[str, Any]:
+        """GET /admin/backups/schedule — get backup schedule."""
+        return await self._request("GET", "/admin/backups/schedule")
+
+    async def admin_update_backup_schedule(self, **kwargs: Any) -> dict[str, Any]:
+        """POST /admin/backups/schedule — update backup schedule."""
+        return await self._request("POST", "/admin/backups/schedule", data=kwargs)
+
+    async def admin_restore_backup(self, backup_id: str, target_namespaces: list[str] | None = None, overwrite: bool | None = None, point_in_time: int | None = None) -> dict[str, Any]:
+        """POST /admin/backups/restore — restore from backup."""
+        data: dict[str, Any] = {"backup_id": backup_id}
+        if target_namespaces is not None:
+            data["target_namespaces"] = target_namespaces
+        if overwrite is not None:
+            data["overwrite"] = overwrite
+        if point_in_time is not None:
+            data["point_in_time"] = point_in_time
+        return await self._request("POST", "/admin/backups/restore", data=data)
+
+    async def admin_get_restore_status(self, restore_id: str) -> dict[str, Any]:
+        """GET /admin/backups/restore/{id} — restore operation status."""
+        return await self._request("GET", f"/admin/backups/restore/{restore_id}")
+
+    # =========================================================================
+    # Ops — Diagnostics & Jobs
+    # =========================================================================
+
+    async def ops_diagnostics(self) -> dict[str, Any]:
+        """GET /ops/diagnostics — system diagnostics."""
+        return await self._request("GET", "/ops/diagnostics")
+
+    async def ops_list_jobs(self) -> list[dict[str, Any]]:
+        """GET /ops/jobs — list background jobs."""
+        return await self._request("GET", "/ops/jobs")
+
+    async def ops_get_job(self, job_id: str) -> dict[str, Any]:
+        """GET /ops/jobs/{id} — get job status."""
+        return await self._request("GET", f"/ops/jobs/{job_id}")
+
+    async def ops_compact(self, namespace: str | None = None, force: bool = False) -> dict[str, Any]:
+        """POST /ops/compact — trigger compaction."""
+        data: dict[str, Any] = {"force": force}
+        if namespace is not None:
+            data["namespace"] = namespace
+        return await self._request("POST", "/ops/compact", data=data)
+
+    async def ops_shutdown(self) -> dict[str, Any]:
+        """POST /ops/shutdown — request graceful shutdown."""
+        return await self._request("POST", "/ops/shutdown")
+
+    # =========================================================================
     # Context Manager Support
     # =========================================================================
 
