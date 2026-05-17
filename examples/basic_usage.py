@@ -101,7 +101,10 @@ def main():
 
     # Delete specific vectors
     print("\nDeleting vec4...")
-    client.delete("example-namespace", ids=["vec4"])
+    try:
+        client.delete("example-namespace", ids=["vec4"])
+    except Exception as e:
+        print(f"  Delete not supported on this server version: {e}")
 
     # Cleanup - delete namespace
     print("\nCleaning up...")
