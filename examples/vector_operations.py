@@ -74,7 +74,7 @@ def main():
 
     # Verify update by fetching a vector
     fetched = client.fetch(namespace, ids=["doc-0000", "doc-0001"])
-    print(f"Fetched after update:")
+    print("Fetched after update:")
     for vec in fetched:
         print(f"  - {vec['id']}: metadata={vec.get('metadata')}")
 
