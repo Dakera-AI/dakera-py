@@ -2645,3 +2645,300 @@ class KpiSnapshot:
             cross_agent_network_node_count=int(data["cross_agent_network_node_count"]),
             memory_retention_7d_pct=float(data["memory_retention_7d_pct"]),
         )
+
+
+# ============================================================================
+# Phase 3 — Engine Parity
+# ============================================================================
+
+
+@dataclass
+class FullTextIndexStats:
+    """Stats for a namespace's full-text index."""
+
+    document_count: int
+    unique_terms: int
+    avg_doc_length: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FullTextIndexStats":
+        """Construct from API response dict."""
+        return cls(
+            document_count=int(data["document_count"]),
+            unique_terms=int(data["unique_terms"]),
+            avg_doc_length=float(data["avg_doc_length"]),
+        )
+
+
+@dataclass
+class TtlNamespaceStats:
+    """TTL stats for a single namespace."""
+
+    namespace: str
+    vectors_with_ttl: int
+    expiring_within_hour: int
+    expiring_within_day: int
+    expired_pending_cleanup: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TtlNamespaceStats":
+        """Construct from API response dict."""
+        return cls(
+            namespace=str(data["namespace"]),
+            vectors_with_ttl=int(data["vectors_with_ttl"]),
+            expiring_within_hour=int(data["expiring_within_hour"]),
+            expiring_within_day=int(data["expiring_within_day"]),
+            expired_pending_cleanup=int(data["expired_pending_cleanup"]),
+        )
+
+
+@dataclass
+class TtlStatsResponse:
+    """Aggregated TTL stats across all namespaces."""
+
+    namespaces: list[TtlNamespaceStats]
+    total_with_ttl: int
+    total_expired: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TtlStatsResponse":
+        """Construct from API response dict."""
+        return cls(
+            namespaces=[TtlNamespaceStats.from_dict(n) for n in data["namespaces"]],
+            total_with_ttl=int(data["total_with_ttl"]),
+            total_expired=int(data["total_expired"]),
+        )
+
+
+@dataclass
+class RouteMatch:
+    """A single route match from semantic routing."""
+
+    namespace: str
+    similarity: float
+    description: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RouteMatch":
+        """Construct from API response dict."""
+        return cls(
+            namespace=str(data["namespace"]),
+            similarity=float(data["similarity"]),
+            description=data.get("description"),
+        )
+
+
+@dataclass
+class RouteResponse:
+    """Response from the query routing endpoint."""
+
+    routes: list[RouteMatch]
+    model: str
+    embedding_time_ms: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RouteResponse":
+        """Construct from API response dict."""
+        return cls(
+            routes=[RouteMatch.from_dict(r) for r in data["routes"]],
+            model=str(data["model"]),
+            embedding_time_ms=int(data["embedding_time_ms"]),
+        )
+
+
+@dataclass
+class ImportJobStatus:
+    """Status of an import job."""
+
+    job_id: str
+    status: str
+    format: str
+    total: int
+    imported: int
+    skipped: int
+    errors: list[str]
+    started_at: int
+    finished_at: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ImportJobStatus":
+        """Construct from API response dict."""
+        return cls(
+            job_id=str(data["job_id"]),
+            status=str(data["status"]),
+            format=str(data["format"]),
+            total=int(data["total"]),
+            imported=int(data["imported"]),
+            skipped=int(data["skipped"]),
+            errors=list(data["errors"]),
+            started_at=int(data["started_at"]),
+            finished_at=int(data["finished_at"]) if data.get("finished_at") is not None else None,
+        )
+
+
+@dataclass
+class TierInfo:
+    """Information about a single storage tier."""
+
+    name: str
+    tier_type: str
+    technology: str
+    description: str
+    target_latency: str
+    capacity: str | None
+    status: str
+    current_count: int
+    hit_count: int
+    hit_rate: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TierInfo":
+        """Construct from API response dict."""
+        return cls(
+            name=str(data["name"]),
+            tier_type=str(data["tier_type"]),
+            technology=str(data["technology"]),
+            description=str(data["description"]),
+            target_latency=str(data["target_latency"]),
+            capacity=data.get("capacity"),
+            status=str(data["status"]),
+            current_count=int(data["current_count"]),
+            hit_count=int(data["hit_count"]),
+            hit_rate=float(data["hit_rate"]),
+        )
+
+
+@dataclass
+class TierConfig:
+    """Storage tier configuration."""
+
+    hot_tier_capacity: int
+    hot_to_warm_threshold_secs: int
+    warm_to_cold_threshold_secs: int
+    auto_tier_enabled: bool
+    tier_check_interval_secs: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TierConfig":
+        """Construct from API response dict."""
+        return cls(
+            hot_tier_capacity=int(data["hot_tier_capacity"]),
+            hot_to_warm_threshold_secs=int(data["hot_to_warm_threshold_secs"]),
+            warm_to_cold_threshold_secs=int(data["warm_to_cold_threshold_secs"]),
+            auto_tier_enabled=bool(data["auto_tier_enabled"]),
+            tier_check_interval_secs=int(data["tier_check_interval_secs"]),
+        )
+
+
+@dataclass
+class TierActivity:
+    """Storage tier activity metrics."""
+
+    promotions: int
+    demotions: int
+    cache_hit_rate: float
+    storage_backend: str
+    promotions_to_hot: int
+    demotions_to_warm: int
+    demotions_to_cold: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TierActivity":
+        """Construct from API response dict."""
+        return cls(
+            promotions=int(data["promotions"]),
+            demotions=int(data["demotions"]),
+            cache_hit_rate=float(data["cache_hit_rate"]),
+            storage_backend=str(data["storage_backend"]),
+            promotions_to_hot=int(data["promotions_to_hot"]),
+            demotions_to_warm=int(data["demotions_to_warm"]),
+            demotions_to_cold=int(data["demotions_to_cold"]),
+        )
+
+
+@dataclass
+class StorageTierOverview:
+    """Full storage tier overview."""
+
+    tiers_enabled: bool
+    architecture: list[TierInfo]
+    config: TierConfig
+    activity: TierActivity
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StorageTierOverview":
+        """Construct from API response dict."""
+        return cls(
+            tiers_enabled=bool(data["tiers_enabled"]),
+            architecture=[TierInfo.from_dict(t) for t in data["architecture"]],
+            config=TierConfig.from_dict(data["config"]),
+            activity=TierActivity.from_dict(data["activity"]),
+        )
+
+
+@dataclass
+class MemoryTypeStatsResponse:
+    """Memory type distribution stats."""
+
+    total: int
+    working: int
+    episodic: int
+    semantic: int
+    procedural: int
+    agent_namespaces: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryTypeStatsResponse":
+        """Construct from API response dict."""
+        return cls(
+            total=int(data["total"]),
+            working=int(data["working"]),
+            episodic=int(data["episodic"]),
+            semantic=int(data["semantic"]),
+            procedural=int(data["procedural"]),
+            agent_namespaces=int(data["agent_namespaces"]),
+        )
+
+
+@dataclass
+class NamespaceMigrationResult:
+    """Result of migrating a single namespace's dimensions."""
+
+    namespace: str
+    original_dimension: int
+    vectors_migrated: int
+    vectors_skipped: int
+    status: str
+    error: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NamespaceMigrationResult":
+        """Construct from API response dict."""
+        return cls(
+            namespace=str(data["namespace"]),
+            original_dimension=int(data["original_dimension"]),
+            vectors_migrated=int(data["vectors_migrated"]),
+            vectors_skipped=int(data["vectors_skipped"]),
+            status=str(data["status"]),
+            error=data.get("error"),
+        )
+
+
+@dataclass
+class MigrateDimensionsResponse:
+    """Response from the dimension migration endpoint."""
+
+    migrated: int
+    failed: int
+    already_current: int
+    results: list[NamespaceMigrationResult]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MigrateDimensionsResponse":
+        """Construct from API response dict."""
+        return cls(
+            migrated=int(data["migrated"]),
+            failed=int(data["failed"]),
+            already_current=int(data["already_current"]),
+            results=[NamespaceMigrationResult.from_dict(r) for r in data["results"]],
+        )
