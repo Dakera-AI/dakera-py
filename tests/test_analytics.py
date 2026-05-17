@@ -293,22 +293,26 @@ class TestKG2QueryExport:
             responses.GET,
             "http://localhost:3000/v1/knowledge/query",
             json={
+                "agent_id": "agent-1",
+                "node_count": 2,
+                "edge_count": 1,
                 "edges": [
                     {
-                        "source": "mem-1",
-                        "target": "mem-2",
+                        "id": "edge-1",
+                        "source_id": "mem-1",
+                        "target_id": "mem-2",
                         "edge_type": "related_to",
                         "weight": 0.85,
+                        "created_at": 1700000000,
                     }
                 ],
-                "total": 1,
             },
             status=200,
         )
         result = client.knowledge_query(
             "agent-1", root_id="mem-1", edge_type="related_to", min_weight=0.5, max_depth=2
         )
-        assert result.total == 1
+        assert result.edge_count == 1
         assert len(result.edges) == 1
 
     def test_knowledge_query_error(self, client, mock_responses):
@@ -328,14 +332,16 @@ class TestKG2QueryExport:
             responses.GET,
             "http://localhost:3000/v1/knowledge/path",
             json={
+                "agent_id": "agent-1",
+                "from_id": "mem-1",
+                "to_id": "mem-5",
+                "hop_count": 2,
                 "path": ["mem-1", "mem-3", "mem-5"],
-                "hops": 2,
-                "total_weight": 1.6,
             },
             status=200,
         )
         result = client.knowledge_path("agent-1", from_id="mem-1", to_id="mem-5")
-        assert result.hops == 2
+        assert result.hop_count == 2
         assert len(result.path) == 3
 
     def test_knowledge_path_not_found(self, client, mock_responses):
@@ -355,14 +361,25 @@ class TestKG2QueryExport:
             responses.GET,
             "http://localhost:3000/v1/knowledge/export",
             json={
-                "nodes": [{"id": "mem-1"}, {"id": "mem-2"}],
-                "edges": [{"source": "mem-1", "target": "mem-2", "weight": 0.8}],
+                "agent_id": "agent-1",
                 "format": "json",
+                "node_count": 2,
+                "edge_count": 1,
+                "edges": [
+                    {
+                        "id": "edge-1",
+                        "source_id": "mem-1",
+                        "target_id": "mem-2",
+                        "edge_type": "related_to",
+                        "weight": 0.8,
+                        "created_at": 1700000000,
+                    }
+                ],
             },
             status=200,
         )
         result = client.knowledge_export("agent-1", format="json")
-        assert len(result.nodes) == 2
+        assert result.node_count == 2
         assert len(result.edges) == 1
 
 
@@ -376,21 +393,45 @@ class TestCrossAgentNetwork:
             "http://localhost:3000/v1/knowledge/network/cross-agent",
             json={
                 "agents": [
-                    {"agent_id": "agent-1", "memory_count": 100},
-                    {"agent_id": "agent-2", "memory_count": 50},
+                    {"agent_id": "agent-1", "memory_count": 100, "avg_importance": 0.7},
+                    {"agent_id": "agent-2", "memory_count": 50, "avg_importance": 0.6},
                 ],
                 "nodes": [
-                    {"id": "mem-1", "agent_id": "agent-1"},
-                    {"id": "mem-2", "agent_id": "agent-2"},
+                    {
+                        "id": "mem-1",
+                        "agent_id": "agent-1",
+                        "content": "memory one",
+                        "importance": 0.8,
+                        "tags": ["tag1"],
+                        "memory_type": "episodic",
+                        "created_at": 1700000000,
+                    },
+                    {
+                        "id": "mem-2",
+                        "agent_id": "agent-2",
+                        "content": "memory two",
+                        "importance": 0.6,
+                        "tags": [],
+                        "memory_type": "semantic",
+                        "created_at": 1700000001,
+                    },
                 ],
                 "edges": [
-                    {"source": "mem-1", "target": "mem-2", "similarity": 0.72}
+                    {
+                        "source": "mem-1",
+                        "target": "mem-2",
+                        "source_agent": "agent-1",
+                        "target_agent": "agent-2",
+                        "similarity": 0.72,
+                    }
                 ],
                 "stats": {
                     "total_agents": 2,
                     "total_nodes": 2,
                     "total_cross_edges": 1,
+                    "density": 0.5,
                 },
+                "node_count": 2,
             },
             status=200,
         )
@@ -426,16 +467,27 @@ class TestMemoryKnowledgeGraph:
             responses.GET,
             "http://localhost:3000/v1/memories/mem-1/graph",
             json={
-                "root": "mem-1",
-                "nodes": [{"id": "mem-1"}, {"id": "mem-2"}],
+                "root_id": "mem-1",
+                "depth": 2,
+                "nodes": [
+                    {"memory_id": "mem-1", "content_preview": "first", "importance": 0.9, "depth": 0},
+                    {"memory_id": "mem-2", "content_preview": "second", "importance": 0.7, "depth": 1},
+                ],
                 "edges": [
-                    {"source": "mem-1", "target": "mem-2", "type": "related_to", "weight": 0.8}
+                    {
+                        "id": "edge-1",
+                        "source_id": "mem-1",
+                        "target_id": "mem-2",
+                        "edge_type": "related_to",
+                        "weight": 0.8,
+                        "created_at": 1700000000,
+                    }
                 ],
             },
             status=200,
         )
         result = client.memory_graph("mem-1", depth=2, types=["related_to"])
-        assert result.root == "mem-1"
+        assert result.root_id == "mem-1"
         assert len(result.nodes) == 2
 
     def test_memory_path(self, client, mock_responses):
@@ -444,10 +496,28 @@ class TestMemoryKnowledgeGraph:
             responses.GET,
             "http://localhost:3000/v1/memories/mem-1/path",
             json={
-                "source": "mem-1",
-                "target": "mem-5",
+                "source_id": "mem-1",
+                "target_id": "mem-5",
                 "path": ["mem-1", "mem-3", "mem-5"],
                 "hops": 2,
+                "edges": [
+                    {
+                        "id": "edge-1",
+                        "source_id": "mem-1",
+                        "target_id": "mem-3",
+                        "edge_type": "related_to",
+                        "weight": 0.9,
+                        "created_at": 1700000000,
+                    },
+                    {
+                        "id": "edge-2",
+                        "source_id": "mem-3",
+                        "target_id": "mem-5",
+                        "edge_type": "related_to",
+                        "weight": 0.7,
+                        "created_at": 1700000001,
+                    },
+                ],
             },
             status=200,
         )
@@ -459,13 +529,23 @@ class TestMemoryKnowledgeGraph:
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/memories/mem-1/links",
-            json={"source": "mem-1", "target": "mem-2", "edge_type": "linked_by", "created": True},
+            json={
+                "edge": {
+                    "id": "edge-new",
+                    "source_id": "mem-1",
+                    "target_id": "mem-2",
+                    "edge_type": "linked_by",
+                    "weight": 1.0,
+                    "created_at": 1700000000,
+                }
+            },
             status=200,
         )
         from dakera.models import EdgeType
 
         result = client.memory_link("mem-1", "mem-2", edge_type=EdgeType.LINKED_BY)
-        assert result.created is True
+        assert result.edge.source_id == "mem-1"
+        assert result.edge.target_id == "mem-2"
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["target_id"] == "mem-2"
         assert req_body["edge_type"] == "linked_by"
@@ -476,12 +556,14 @@ class TestMemoryKnowledgeGraph:
             responses.GET,
             "http://localhost:3000/v1/agents/agent-1/graph/export",
             json={
-                "nodes": [{"id": "mem-1"}, {"id": "mem-2"}],
-                "edges": [{"source": "mem-1", "target": "mem-2"}],
-                "format": "json",
                 "agent_id": "agent-1",
+                "format": "json",
+                "data": '{"nodes":["mem-1","mem-2"],"edges":[]}',
+                "node_count": 2,
+                "edge_count": 1,
             },
             status=200,
         )
         result = client.agent_graph_export("agent-1", format="json")
-        assert len(result.nodes) == 2
+        assert result.node_count == 2
+        assert result.agent_id == "agent-1"

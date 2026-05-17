@@ -829,17 +829,20 @@ class TestMemoryPolicy:
             responses.GET,
             "http://localhost:3000/v1/namespaces/test-ns/memory_policy",
             json={
-                "working_ttl_hours": 4,
-                "episodic_ttl_days": 30,
-                "semantic_ttl_days": 365,
-                "procedural_ttl_days": 730,
-                "decay_strategy": "exponential",
+                "working_ttl_seconds": 14400,
+                "episodic_ttl_seconds": 2592000,
+                "semantic_ttl_seconds": 31536000,
+                "procedural_ttl_seconds": 63072000,
+                "working_decay": "exponential",
+                "episodic_decay": "power_law",
+                "semantic_decay": "logarithmic",
+                "procedural_decay": "flat",
             },
             status=200,
         )
         result = client.get_memory_policy("test-ns")
-        assert result.working_ttl_hours == 4
-        assert result.decay_strategy == "exponential"
+        assert result.working_ttl_seconds == 14400
+        assert result.working_decay == "exponential"
 
     def test_set_memory_policy(self, client, mock_responses):
         """Test setting memory policy."""
@@ -849,22 +852,25 @@ class TestMemoryPolicy:
             responses.PUT,
             "http://localhost:3000/v1/namespaces/test-ns/memory_policy",
             json={
-                "working_ttl_hours": 8,
-                "episodic_ttl_days": 60,
-                "semantic_ttl_days": 365,
-                "procedural_ttl_days": 730,
-                "decay_strategy": "linear",
+                "working_ttl_seconds": 28800,
+                "episodic_ttl_seconds": 5184000,
+                "semantic_ttl_seconds": 31536000,
+                "procedural_ttl_seconds": 63072000,
+                "working_decay": "linear",
+                "episodic_decay": "power_law",
+                "semantic_decay": "logarithmic",
+                "procedural_decay": "flat",
             },
             status=200,
         )
         policy = MemoryPolicy(
-            working_ttl_hours=8,
-            episodic_ttl_days=60,
-            decay_strategy="linear",
+            working_ttl_seconds=28800,
+            episodic_ttl_seconds=5184000,
+            working_decay="linear",
         )
         result = client.set_memory_policy("test-ns", policy)
-        assert result.working_ttl_hours == 8
-        assert result.decay_strategy == "linear"
+        assert result.working_ttl_seconds == 28800
+        assert result.working_decay == "linear"
 
 
 class TestNamespaceKeys:

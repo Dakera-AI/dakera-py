@@ -422,16 +422,55 @@ class TestStorageAndTiers:
             responses.GET,
             "http://localhost:3000/admin/storage/tiers",
             json={
-                "tiers": [
-                    {"name": "hot", "size_bytes": 1000000, "vector_count": 5000},
-                    {"name": "warm", "size_bytes": 5000000, "vector_count": 50000},
+                "tiers_enabled": True,
+                "architecture": [
+                    {
+                        "name": "hot",
+                        "tier_type": "memory",
+                        "technology": "in-memory",
+                        "description": "Hot tier for fast access",
+                        "target_latency": "<1ms",
+                        "capacity": "1GB",
+                        "status": "active",
+                        "current_count": 5000,
+                        "hit_count": 4500,
+                        "hit_rate": 0.9,
+                    },
+                    {
+                        "name": "warm",
+                        "tier_type": "disk",
+                        "technology": "mmap",
+                        "description": "Warm tier for moderate access",
+                        "target_latency": "<10ms",
+                        "capacity": "10GB",
+                        "status": "active",
+                        "current_count": 50000,
+                        "hit_count": 30000,
+                        "hit_rate": 0.6,
+                    },
                 ],
-                "total_size_bytes": 6000000,
+                "config": {
+                    "hot_tier_capacity": 10000,
+                    "hot_to_warm_threshold_secs": 3600,
+                    "warm_to_cold_threshold_secs": 86400,
+                    "auto_tier_enabled": True,
+                    "tier_check_interval_secs": 300,
+                },
+                "activity": {
+                    "promotions": 100,
+                    "demotions": 50,
+                    "cache_hit_rate": 0.85,
+                    "storage_backend": "mmap",
+                    "promotions_to_hot": 80,
+                    "demotions_to_warm": 30,
+                    "demotions_to_cold": 20,
+                },
             },
             status=200,
         )
         result = client.storage_tier_overview()
-        assert result.total_size_bytes == 6000000
+        assert result.tiers_enabled is True
+        assert len(result.architecture) == 2
 
     def test_storage_tier_overview_error(self, client, mock_responses):
         """Test storage tier overview with server error."""
@@ -450,18 +489,18 @@ class TestStorageAndTiers:
             responses.GET,
             "http://localhost:3000/admin/memory-type-stats",
             json={
-                "types": {
-                    "episodic": 1500,
-                    "semantic": 800,
-                    "procedural": 200,
-                    "working": 50,
-                },
                 "total": 2550,
+                "working": 50,
+                "episodic": 1500,
+                "semantic": 800,
+                "procedural": 200,
+                "agent_namespaces": 5,
             },
             status=200,
         )
         result = client.memory_type_stats()
         assert result.total == 2550
+        assert result.working == 50
 
     def test_background_activity(self, client, mock_responses):
         """Test getting background activity."""
@@ -489,16 +528,33 @@ class TestDimensionMigration:
             responses.POST,
             "http://localhost:3000/admin/namespaces/migrate-dimensions",
             json={
-                "migrated": ["ns-1", "ns-2"],
-                "skipped": [],
-                "target_dimension": 1024,
+                "migrated": 2,
+                "failed": 0,
+                "already_current": 0,
+                "results": [
+                    {
+                        "namespace": "ns-1",
+                        "original_dimension": 768,
+                        "vectors_migrated": 100,
+                        "vectors_skipped": 0,
+                        "status": "completed",
+                    },
+                    {
+                        "namespace": "ns-2",
+                        "original_dimension": 768,
+                        "vectors_migrated": 50,
+                        "vectors_skipped": 0,
+                        "status": "completed",
+                    },
+                ],
             },
             status=200,
         )
         result = client.migrate_namespace_dimensions(
             target_dimension=1024, namespaces=["ns-1", "ns-2"]
         )
-        assert result.target_dimension == 1024
+        assert result.migrated == 2
+        assert len(result.results) == 2
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["target_dimension"] == 1024
         assert req_body["namespaces"] == ["ns-1", "ns-2"]
@@ -539,16 +595,22 @@ class TestTTLAdmin:
             "http://localhost:3000/admin/ttl/stats",
             json={
                 "namespaces": [
-                    {"namespace": "ns-1", "expired": 50, "pending": 10}
+                    {
+                        "namespace": "ns-1",
+                        "vectors_with_ttl": 100,
+                        "expiring_within_hour": 5,
+                        "expiring_within_day": 20,
+                        "expired_pending_cleanup": 10,
+                    }
                 ],
-                "total_expired": 50,
-                "total_pending": 10,
+                "total_with_ttl": 100,
+                "total_expired": 10,
             },
             status=200,
         )
         result = client.ttl_stats()
-        assert result.total_expired == 50
-        assert result.total_pending == 10
+        assert result.total_expired == 10
+        assert result.total_with_ttl == 100
 
 
 class TestEncryptionAdmin:
@@ -757,21 +819,21 @@ class TestKPIs:
             responses.GET,
             "http://localhost:3000/v1/kpis",
             json={
-                "p50_latency_ms": 2.5,
-                "p99_latency_ms": 15.0,
-                "error_rate": 0.001,
-                "qps": 150.0,
-                "memory_count": 25000,
-                "agent_count": 12,
-                "uptime_seconds": 86400,
-                "storage_bytes": 500000000,
+                "recall_latency_p50_ms": 2.5,
+                "recall_latency_p99_ms": 15.0,
+                "store_latency_p50_ms": 3.0,
+                "api_error_rate_5xx_pct": 0.1,
+                "active_agents_count": 12,
+                "session_count_week": 500,
+                "cross_agent_network_node_count": 150,
+                "memory_retention_7d_pct": 95.5,
             },
             status=200,
         )
         result = client.get_kpis()
-        assert result.p50_latency_ms == 2.5
-        assert result.p99_latency_ms == 15.0
-        assert result.error_rate == 0.001
+        assert result.recall_latency_p50_ms == 2.5
+        assert result.recall_latency_p99_ms == 15.0
+        assert result.active_agents_count == 12
 
     def test_get_kpis_error(self, client, mock_responses):
         """Test KPI endpoint with server error."""
