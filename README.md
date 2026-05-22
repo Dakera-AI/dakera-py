@@ -38,11 +38,11 @@
 ```bash
 docker run -d \
   --name dakera \
-  -p 3300:3300 \
+  -p 3000:3000 \
   -e DAKERA_ROOT_API_KEY=dk-mykey \
   ghcr.io/dakera-ai/dakera:latest
 
-curl http://localhost:3300/health  # → {"status":"ok"}
+curl http://localhost:3000/health  # → {"status":"ok"}
 ```
 
 For persistent storage with Docker Compose:
@@ -78,7 +78,7 @@ Works with **LangChain**, **LlamaIndex**, **CrewAI**, **AutoGen**, and any Pytho
 ```python
 from dakera import DakeraClient
 
-client = DakeraClient(base_url="http://localhost:3300", api_key="dk-mykey")
+client = DakeraClient(base_url="http://localhost:3000", api_key="dk-mykey")
 
 # Store an agent memory
 client.store_memory(
@@ -111,7 +111,7 @@ import asyncio
 from dakera import AsyncDakeraClient
 
 async def main():
-    client = AsyncDakeraClient(base_url="http://localhost:3300", api_key="dk-mykey")
+    client = AsyncDakeraClient(base_url="http://localhost:3000", api_key="dk-mykey")
     response = await client.recall(agent_id="my-agent", query="preferences", top_k=5)
     for m in response.memories:
         print(m.content)
@@ -147,14 +147,14 @@ asyncio.run(main())
 from dakera import DakeraClient, RetryConfig
 
 # Self-hosted
-client = DakeraClient(base_url="http://your-server:3300", api_key="your-key")
+client = DakeraClient(base_url="http://your-server:3000", api_key="your-key")
 
 # Cloud (early access)
-client = DakeraClient(base_url="http://localhost:3300", api_key="your-key")
+client = DakeraClient(base_url="http://localhost:3000", api_key="your-key")
 
 # With custom retry config
 client = DakeraClient(
-    base_url="http://localhost:3300",
+    base_url="http://localhost:3000",
     api_key="your-key",
     retry_config=RetryConfig(max_retries=5, base_delay=0.2),
 )
