@@ -1565,6 +1565,117 @@ class BatchForgetResponse:
         return cls(deleted_count=data.get("deleted_count", 0))
 
 
+@dataclass
+class BatchStoreMemoryItem:
+    """A single memory entry within a :class:`BatchStoreMemoryRequest` (DAK-5508).
+
+    Mirrors :class:`StoreMemoryRequest` but omits ``agent_id`` — supplied at batch level.
+    """
+
+    content: str
+    """Memory content text (required, max 100 000 chars)."""
+    memory_type: str = "episodic"
+    """One of ``"episodic"``, ``"semantic"``, ``"procedural"``, or ``"working"``."""
+    importance: float = 0.5
+    """Importance score 0.0–1.0 (default: 0.5)."""
+    tags: list[str] | None = None
+    """Optional tags to associate with the memory."""
+    session_id: str | None = None
+    """Optional session ID to associate with."""
+    metadata: dict[str, Any] | None = None
+    """Arbitrary metadata dictionary."""
+    ttl_seconds: int | None = None
+    """Optional TTL in seconds."""
+    expires_at: int | None = None
+    """Optional explicit expiry as a Unix timestamp (seconds)."""
+    id: str | None = None
+    """Optional custom ID. Auto-generated if not provided."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "content": self.content,
+            "memory_type": self.memory_type,
+            "importance": self.importance,
+        }
+        if self.tags is not None:
+            d["tags"] = self.tags
+        if self.session_id is not None:
+            d["session_id"] = self.session_id
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
+        if self.ttl_seconds is not None:
+            d["ttl_seconds"] = self.ttl_seconds
+        if self.expires_at is not None:
+            d["expires_at"] = self.expires_at
+        if self.id is not None:
+            d["id"] = self.id
+        return d
+
+
+@dataclass
+class BatchStoreMemoryRequest:
+    """Request body for ``POST /v1/memories/store/batch`` (DAK-5508).
+
+    Accepts up to 1 000 memories per call. The server embeds all contents in a
+    single ONNX inference pass and upserts them in one write, yielding ≥100×
+    throughput vs. N sequential single-store calls.
+    """
+
+    agent_id: str
+    """Agent namespace to store the memories in."""
+    memories: list[BatchStoreMemoryItem]
+    """Memories to store (1–1000 items)."""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "agent_id": self.agent_id,
+            "memories": [m.to_dict() for m in self.memories],
+        }
+
+
+@dataclass
+class BatchStoredMemory:
+    """A single stored memory returned in a :class:`BatchStoreMemoryResponse`."""
+
+    id: str
+    content: str
+    agent_id: str
+    tags: list[str]
+    importance: float
+    created_at: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BatchStoredMemory":
+        return cls(
+            id=data["id"],
+            content=data["content"],
+            agent_id=data["agent_id"],
+            tags=data.get("tags", []),
+            importance=data.get("importance", 0.5),
+            created_at=data.get("created_at", 0),
+        )
+
+
+@dataclass
+class BatchStoreMemoryResponse:
+    """Response from ``POST /v1/memories/store/batch``."""
+
+    stored: list[BatchStoredMemory]
+    """Stored memories in the same order as the request items."""
+    stored_count: int
+    """Number of memories successfully stored."""
+    total_embedding_time_ms: int
+    """Time spent on ONNX embedding for the entire batch (milliseconds)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BatchStoreMemoryResponse":
+        return cls(
+            stored=[BatchStoredMemory.from_dict(m) for m in data.get("stored", [])],
+            stored_count=data.get("stored_count", 0),
+            total_embedding_time_ms=data.get("total_embedding_time_ms", 0),
+        )
+
+
 # ============================================================================
 # Memory Knowledge Graph Types (CE-5 / SDK-9)
 # ============================================================================
