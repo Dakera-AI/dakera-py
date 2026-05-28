@@ -829,6 +829,81 @@ class TestBatchMemoryOperations:
         assert resp.filtered == 0
         assert resp.memories == []
 
+    def test_store_memories_batch_sends_correct_request(self, client, mock_responses):
+        """store_memories_batch() POSTs to /v1/memories/store/batch."""
+        from dakera import BatchStoreMemoryItem, BatchStoreMemoryRequest, BatchStoreMemoryResponse
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/store/batch",
+            json={
+                "stored": [
+                    {
+                        "id": "mem-1", "content": "Dark mode", "agent_id": "agent-1",
+                        "tags": [], "importance": 0.8, "created_at": 1700000000,
+                    },
+                    {
+                        "id": "mem-2", "content": "Berlin user", "agent_id": "agent-1",
+                        "tags": [], "importance": 0.7, "created_at": 1700000001,
+                    },
+                ],
+                "stored_count": 2,
+                "total_embedding_time_ms": 42,
+            },
+            status=200,
+        )
+
+        items = [
+            BatchStoreMemoryItem("Dark mode", importance=0.8),
+            BatchStoreMemoryItem("Berlin user", importance=0.7),
+        ]
+        req = BatchStoreMemoryRequest("agent-1", items)
+        resp = client.store_memories_batch(req)
+
+        assert isinstance(resp, BatchStoreMemoryResponse)
+        assert resp.stored_count == 2
+        assert len(resp.stored) == 2
+        assert resp.stored[0].id == "mem-1"
+        assert resp.total_embedding_time_ms == 42
+        assert mock_responses.calls[0].request.method == "POST"
+        assert "/v1/memories/store/batch" in mock_responses.calls[0].request.url
+
+    def test_batch_store_memory_item_to_dict(self):
+        """BatchStoreMemoryItem.to_dict() serializes all fields correctly."""
+        from dakera import BatchStoreMemoryItem
+
+        item = BatchStoreMemoryItem(
+            content="Test memory",
+            importance=0.9,
+            tags=["test", "qa"],
+            memory_type="semantic",
+            session_id="sess-1",
+        )
+        d = item.to_dict()
+        assert d["content"] == "Test memory"
+        assert d["importance"] == 0.9
+        assert d["tags"] == ["test", "qa"]
+        assert d["memory_type"] == "semantic"
+        assert d["session_id"] == "sess-1"
+
+    def test_batch_store_memory_response_from_dict(self):
+        """BatchStoreMemoryResponse.from_dict() parses stored_count and memories."""
+        from dakera import BatchStoreMemoryResponse
+
+        resp = BatchStoreMemoryResponse.from_dict({
+            "stored": [
+                {
+                    "id": "x", "content": "c", "agent_id": "a",
+                    "tags": [], "importance": 0.5, "created_at": 0,
+                },
+            ],
+            "stored_count": 1,
+            "total_embedding_time_ms": 10,
+        })
+        assert resp.stored_count == 1
+        assert resp.total_embedding_time_ms == 10
+        assert resp.stored[0].id == "x"
+
 
 class TestRateLimitHeaders:
     """Tests for OPS-1 RateLimitHeaders (v0.7.0)."""

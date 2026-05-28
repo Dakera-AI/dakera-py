@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dakera"
-version = "0.11.56"
+version = "0.11.57"
 description = "Python SDK for Dakera - AI memory platform"
 readme = "README.md"
 license = {text = "MIT"}

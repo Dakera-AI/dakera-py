@@ -35,6 +35,8 @@ from dakera.models import (
     BatchForgetResponse,
     BatchRecallRequest,
     BatchRecallResponse,
+    BatchStoreMemoryRequest,
+    BatchStoreMemoryResponse,
     BatchTextQueryResponse,
     # CE-12
     CompressResponse,
@@ -1259,6 +1261,31 @@ class DakeraClient:
         """
         result = self._request("DELETE", "/v1/memories/forget/batch", data=request.to_dict())
         return BatchForgetResponse.from_dict(result)
+
+    def store_memories_batch(self, request: BatchStoreMemoryRequest) -> BatchStoreMemoryResponse:
+        """Store multiple memories in a single request (DAK-5508).
+
+        Uses ``POST /v1/memories/store/batch``. The server embeds all contents
+        in a single ONNX inference pass, yielding ≥100× throughput vs. N
+        sequential single-store calls. Accepts up to 1 000 memories per call.
+
+        Args:
+            request: Batch store request containing ``agent_id`` and list of
+                :class:`BatchStoreMemoryItem` (1–1000 items).
+
+        Returns:
+            :class:`BatchStoreMemoryResponse` with stored memories and timing.
+
+        Example:
+            >>> items = [
+            ...     BatchStoreMemoryItem("The user prefers dark mode", importance=0.8),
+            ...     BatchStoreMemoryItem("The user is based in Berlin", importance=0.7),
+            ... ]
+            >>> resp = client.store_memories_batch(BatchStoreMemoryRequest("agent-1", items))
+            >>> print(f"Stored {resp.stored_count} memories")
+        """
+        result = self._request("POST", "/v1/memories/store/batch", data=request.to_dict())
+        return BatchStoreMemoryResponse.from_dict(result)
 
     def search_memories(
         self,

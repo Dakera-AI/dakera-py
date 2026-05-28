@@ -150,7 +150,7 @@ from dakera import DakeraClient, RetryConfig
 client = DakeraClient(base_url="http://your-server:3000", api_key="your-key")
 
 # Cloud (early access)
-client = DakeraClient(base_url="http://localhost:3000", api_key="your-key")
+client = DakeraClient(base_url="http://<your-server-ip>:3000", api_key="your-key")
 
 # With custom retry config
 client = DakeraClient(

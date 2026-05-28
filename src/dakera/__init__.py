@@ -48,6 +48,10 @@ from dakera.models import (
     BatchMemoryFilter,
     BatchRecallRequest,
     BatchRecallResponse,
+    BatchStoredMemory,
+    BatchStoreMemoryItem,
+    BatchStoreMemoryRequest,
+    BatchStoreMemoryResponse,
     # CE-12
     CompressResponse,
     ConfigureNamespaceRequest,
@@ -175,12 +179,16 @@ __all__ = [
     "RecalledMemory",
     "RecallResponse",
     "ConsolidateResponse",
-    # Batch memory operations (CE-2)
+    # Batch memory operations (CE-2, DAK-5508)
     "BatchMemoryFilter",
     "BatchRecallRequest",
     "BatchRecallResponse",
     "BatchForgetRequest",
     "BatchForgetResponse",
+    "BatchStoreMemoryItem",
+    "BatchStoreMemoryRequest",
+    "BatchStoreMemoryResponse",
+    "BatchStoredMemory",
     # Rate-limit headers (OPS-1)
     "RateLimitHeaders",
     # Session types
