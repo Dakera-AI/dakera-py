@@ -114,6 +114,7 @@ from dakera.models import (
     MemoryPolicy,
     MemoryTypeStatsResponse,
     MigrateDimensionsResponse,
+    DrainReembedResponse,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
@@ -2919,6 +2920,35 @@ class AsyncDakeraClient:
             data["namespaces"] = namespaces
         resp = await self._request("POST", "/admin/namespaces/migrate-dimensions", data=data)
         return MigrateDimensionsResponse.from_dict(resp)
+
+    async def drain_reembed(
+        self,
+        timeout_secs: int | None = None,
+        batch_size: int | None = None,
+        min_importance: float | None = None,
+    ) -> DrainReembedResponse:
+        """``POST /admin/reembed/drain`` — synchronously drain all static vectors to full ONNX quality (v0.11.82+).
+
+        Async variant of :meth:`DakeraClient.drain_reembed`.
+        Requires Admin scope.
+
+        Args:
+            timeout_secs: Hard wall-clock cap in seconds (default 600).
+            batch_size: Candidates upgraded per cycle (default 10000).
+            min_importance: Minimum importance threshold (default 0.0).
+
+        Returns:
+            :class:`DrainReembedResponse` with ``remaining=0`` on a full drain.
+        """
+        body: dict[str, Any] = {}
+        if timeout_secs is not None:
+            body["timeout_secs"] = timeout_secs
+        if batch_size is not None:
+            body["batch_size"] = batch_size
+        if min_importance is not None:
+            body["min_importance"] = min_importance
+        resp = await self._request("POST", "/admin/reembed/drain", data=body if body else None)
+        return DrainReembedResponse.from_dict(resp)
 
     # =========================================================================
     # Context Manager Support
