@@ -879,3 +879,115 @@ class TestFulltextReindex:
         )
         result = client.admin_fulltext_reindex()
         assert result.total_indexed == 200
+
+
+class TestDrainReembed:
+    """Tests for drain_reembed() — POST /admin/reembed/drain (v0.11.82+, DAK-6326)."""
+
+    def test_drain_reembed_full_drain(self, client, mock_responses):
+        """A full drain returns remaining=0 and parsed counters."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/admin/reembed/drain",
+            json={
+                "processed": 1280,
+                "remaining": 0,
+                "elapsed_ms": 4210,
+                "cycles": 3,
+                "timed_out": False,
+            },
+            status=200,
+        )
+        result = client.drain_reembed()
+        assert result.processed == 1280
+        assert result.remaining == 0
+        assert result.cycles == 3
+        assert result.timed_out is False
+        assert len(mock_responses.calls) == 1
+        # No params set -> empty/no body, never sends null fields
+        body = mock_responses.calls[0].request.body
+        assert body in (None, b"", b"{}", "{}")
+
+    def test_drain_reembed_passes_params(self, client, mock_responses):
+        """timeout_secs / batch_size / min_importance are forwarded in the body."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/admin/reembed/drain",
+            json={
+                "processed": 500,
+                "remaining": 120,
+                "elapsed_ms": 600000,
+                "cycles": 50,
+                "timed_out": True,
+            },
+            status=200,
+        )
+        result = client.drain_reembed(
+            timeout_secs=600, batch_size=5000, min_importance=0.5
+        )
+        assert result.timed_out is True
+        assert result.remaining == 120
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body["timeout_secs"] == 600
+        assert req_body["batch_size"] == 5000
+        assert req_body["min_importance"] == 0.5
+
+    def test_drain_reembed_requires_admin_scope(self, client, mock_responses):
+        """A 403 (missing Admin scope) surfaces as AuthorizationError."""
+        from dakera import AuthorizationError
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/admin/reembed/drain",
+            json={"error": "admin scope required"},
+            status=403,
+        )
+        with pytest.raises(AuthorizationError):
+            client.drain_reembed()
+
+    def test_drain_reembed_server_error(self, client, mock_responses):
+        """A 500 surfaces as ServerError."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/admin/reembed/drain",
+            json={"error": "internal failure"},
+            status=500,
+        )
+        with pytest.raises(ServerError):
+            client.drain_reembed()
+
+
+class TestAsyncDrainReembed:
+    """AsyncDakeraClient.drain_reembed() parity (DAK-6326)."""
+
+    async def test_async_drain_reembed_parses_and_forwards_params(self):
+        """Async variant forwards params and parses the DrainReembedResponse."""
+        from unittest.mock import patch
+
+        from dakera import AsyncDakeraClient
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["data"] = data or {}
+            return {
+                "processed": 10,
+                "remaining": 0,
+                "elapsed_ms": 12,
+                "cycles": 1,
+                "timed_out": False,
+            }
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.drain_reembed(timeout_secs=30, batch_size=100)
+
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/admin/reembed/drain"
+        assert captured["data"]["timeout_secs"] == 30
+        assert captured["data"]["batch_size"] == 100
+        assert result.processed == 10
+        assert result.remaining == 0
+        assert result.timed_out is False

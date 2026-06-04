@@ -72,6 +72,7 @@ from dakera.models import (
     DistanceMetric,
     Document,
     DocumentInput,
+    DrainReembedResponse,
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
@@ -114,7 +115,6 @@ from dakera.models import (
     MemoryPolicy,
     MemoryTypeStatsResponse,
     MigrateDimensionsResponse,
-    DrainReembedResponse,
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
@@ -2927,7 +2927,7 @@ class AsyncDakeraClient:
         batch_size: int | None = None,
         min_importance: float | None = None,
     ) -> DrainReembedResponse:
-        """``POST /admin/reembed/drain`` — synchronously drain all static vectors to full ONNX quality (v0.11.82+).
+        """``POST /admin/reembed/drain`` — drain static vectors to full ONNX quality (v0.11.82+).
 
         Async variant of :meth:`DakeraClient.drain_reembed`.
         Requires Admin scope.
