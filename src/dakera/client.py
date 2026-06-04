@@ -50,6 +50,7 @@ from dakera.models import (
     DistanceMetric,
     Document,
     DocumentInput,
+    DrainReembedResponse,
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
@@ -3545,6 +3546,38 @@ class DakeraClient:
             data["namespaces"] = namespaces
         resp = self._request("POST", "/admin/namespaces/migrate-dimensions", data=data)
         return MigrateDimensionsResponse.from_dict(resp)
+
+    def drain_reembed(
+        self,
+        timeout_secs: int | None = None,
+        batch_size: int | None = None,
+        min_importance: float | None = None,
+    ) -> DrainReembedResponse:
+        """``POST /admin/reembed/drain`` — drain static vectors to full ONNX quality (v0.11.82+).
+
+        Runs the re-embedding upgrade loop until zero ``_embedding_kind=static``
+        candidates remain across all namespaces (or ``timeout_secs`` elapses).
+        Requires Admin scope. Useful as a pre-bench steady-state gate when
+        ``DAKERA_TIERED=1``.
+
+        Args:
+            timeout_secs: Hard wall-clock cap in seconds (default 600).
+            batch_size: Candidates upgraded per cycle (default 10000).
+            min_importance: Minimum importance threshold; defaults to 0.0
+                (upgrade all statics — differs from background job default of 0.5).
+
+        Returns:
+            :class:`DrainReembedResponse` with ``remaining=0`` on a full drain.
+        """
+        body: dict[str, Any] = {}
+        if timeout_secs is not None:
+            body["timeout_secs"] = timeout_secs
+        if batch_size is not None:
+            body["batch_size"] = batch_size
+        if min_importance is not None:
+            body["min_importance"] = min_importance
+        resp = self._request("POST", "/admin/reembed/drain", data=body if body else None)
+        return DrainReembedResponse.from_dict(resp)
 
     # =========================================================================
     # Context Manager Support

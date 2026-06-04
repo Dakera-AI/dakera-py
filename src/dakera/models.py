@@ -3053,3 +3053,30 @@ class MigrateDimensionsResponse:
             already_current=int(data["already_current"]),
             results=[NamespaceMigrationResult.from_dict(r) for r in data["results"]],
         )
+
+
+@dataclass
+class DrainReembedResponse:
+    """Response from ``POST /admin/reembed/drain`` (v0.11.82+).
+
+    Returned once the synchronous re-embedding drain completes (or times out).
+    A ``remaining`` of 0 means all static vectors have been upgraded to full
+    ONNX quality — suitable as a pre-bench steady-state gate.
+    """
+
+    processed: int
+    remaining: int
+    elapsed_ms: int
+    cycles: int
+    timed_out: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DrainReembedResponse":
+        """Construct from API response dict."""
+        return cls(
+            processed=int(data["processed"]),
+            remaining=int(data["remaining"]),
+            elapsed_ms=int(data["elapsed_ms"]),
+            cycles=int(data["cycles"]),
+            timed_out=bool(data["timed_out"]),
+        )
