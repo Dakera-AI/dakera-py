@@ -441,6 +441,30 @@ class TestClientConfiguration:
             result = client.health()
             assert result["status"] == "ok"
 
+    def test_health_build_sha_present(self, mock_responses):
+        """health() passes through build_sha from server v0.11.84+."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"status": "healthy", "version": "0.11.84", "build_sha": "abc1234def5678"},
+            status=200,
+        )
+        client = DakeraClient("http://localhost:3000")
+        result = client.health()
+        assert result["build_sha"] == "abc1234def5678"
+
+    def test_health_build_sha_absent_on_older_server(self, mock_responses):
+        """health() works normally when server does not return build_sha."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/health",
+            json={"status": "healthy", "version": "0.11.83"},
+            status=200,
+        )
+        client = DakeraClient("http://localhost:3000")
+        result = client.health()
+        assert "build_sha" not in result
+
 
 class TestModels:
     """Tests for data models."""

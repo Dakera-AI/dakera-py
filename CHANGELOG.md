@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.85] - 2026-06-05
+
+### Changed
+
+- **Server compatibility**: tracks Dakera server v0.11.84–v0.11.85.
+  - v0.11.84: Entity vector search for temporal queries (BM25 + entity-filtered HNSW,
+    automatic routing — no client changes required); reranker queues under load instead
+    of dropping to unranked results; background re-embed now upgrades all memories
+    regardless of importance floor; `build_sha` added to `/health` response.
+  - v0.11.85: `compute_fetch_n` extracted + `DAKERA_HYBRID_FETCH_MULT` /
+    `DAKERA_CROSS_SESSION_FETCH_MULT` server-side env knobs — no client API changes.
+
 ## [0.11.83] - 2026-06-04
 
 ### Added
