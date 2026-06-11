@@ -34,3 +34,25 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  # Trigger website version sync on every SDK release (DAK-5974).
+  # Requires DOCS_CHECKOUT_TOKEN secret with write access to dakera-ai/website.
+  trigger-website-sync:
+    name: Trigger Website SDK Version Sync
+    needs: publish
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Dispatch SDK version sync to website repo
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_CHECKOUT_TOKEN }}
+        run: |
+          if [[ -z "${GH_TOKEN}" ]]; then
+            echo "::warning::DOCS_CHECKOUT_TOKEN not set in dakera-py repo — website SDK version sync skipped. Add this secret to enable automatic website updates on SDK release."
+            exit 0
+          fi
+          gh api repos/dakera-ai/website/dispatches \
+            --method POST \
+            -f "event_type=dakera-sdk-release" \
+            -f "client_payload[version]=${{ github.ref_name }}"
+          echo "✅ Website SDK version sync dispatched: sdk=${{ github.ref_name }}"
