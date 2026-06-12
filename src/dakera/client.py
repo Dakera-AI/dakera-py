@@ -63,7 +63,6 @@ from dakera.models import (
     FeedbackHistoryResponse,
     FeedbackResponse,
     FeedbackSignal,
-    TifScore,
     FilterDict,
     FullTextIndexStats,
     # CE-54
@@ -114,6 +113,7 @@ from dakera.models import (
     TextDocumentInput,
     TextQueryResponse,
     TextUpsertResponse,
+    TifScore,
     TtlStatsResponse,
     Vector,
     VectorInput,
