@@ -2184,7 +2184,11 @@ class TifScore:
         downvotes = 0
         flags = 0
         for entry in history.entries:
-            sig = entry.signal.value if isinstance(entry.signal, FeedbackSignal) else str(entry.signal)
+            sig = (
+                entry.signal.value
+                if isinstance(entry.signal, FeedbackSignal)
+                else str(entry.signal)
+            )
             if sig in ("upvote", "positive"):
                 upvotes += 1
             elif sig in ("downvote", "negative"):

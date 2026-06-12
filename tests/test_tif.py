@@ -1,6 +1,7 @@
 """Tests for T-I-F reliability scoring (T-I-F RFC Phase 3)."""
 
 import pytest
+
 from dakera.models import (
     FeedbackHistoryEntry,
     FeedbackHistoryResponse,
@@ -54,7 +55,11 @@ class TestTifScoreFromFeedbackHistory:
     def test_mixed_signals(self):
         # 4 upvotes, 2 downvotes, 4 flags → total 10
         score = TifScore.from_feedback_history(
-            _make_history("upvote", "upvote", "upvote", "upvote", "downvote", "downvote", "flag", "flag", "flag", "flag")
+            _make_history(
+                "upvote", "upvote", "upvote", "upvote",
+                "downvote", "downvote",
+                "flag", "flag", "flag", "flag",
+            )
         )
         assert score.truth == pytest.approx(0.4)
         assert score.falsity == pytest.approx(0.2)
@@ -97,7 +102,11 @@ class TestTifScoreClassification:
     def test_verify_before_use_from_history(self):
         # 4 upvotes, 3 downvotes, 3 flags → truth=0.4, falsity=0.3, indeterminacy=0.3
         score = TifScore.from_feedback_history(
-            _make_history("upvote", "upvote", "upvote", "upvote", "downvote", "downvote", "downvote", "flag", "flag", "flag")
+            _make_history(
+                "upvote", "upvote", "upvote", "upvote",
+                "downvote", "downvote", "downvote",
+                "flag", "flag", "flag",
+            )
         )
         assert score.classification == "verify_before_use"
 

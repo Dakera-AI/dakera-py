@@ -83,7 +83,6 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
-    TifScore,
     # CE-54: fulltext reindex
     FulltextReindexNamespaceResult,
     FulltextReindexResponse,
@@ -139,6 +138,7 @@ from dakera.models import (
     StalenessConfig,
     StoreMemoryRequest,
     SummarizeResponse,
+    TifScore,
     Vector,
     VectorMutationOp,
     WakeUpResponse,
