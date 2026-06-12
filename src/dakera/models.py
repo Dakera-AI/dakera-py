@@ -2126,6 +2126,96 @@ class FeedbackHealthResponse:
 
 
 # =============================================================================
+# T-I-F Reliability Scoring (Phase 3 T-I-F RFC)
+# =============================================================================
+
+
+@dataclass
+class TifScore:
+    """Truth-Indeterminacy-Falsity reliability score for a memory (T-I-F RFC Phase 3).
+
+    Summarises the aggregate feedback signal on a memory as three proportions that
+    sum to 1.0.  Use :meth:`from_feedback_history` to compute from the live
+    feedback log, or :meth:`from_metadata` to deserialise a value already stored
+    in ``memory.metadata["reliability"]``.
+    """
+
+    truth: float
+    """Proportion of positive feedback signals (upvote / positive)."""
+    indeterminacy: float
+    """Proportion of uncertainty signals (flag)."""
+    falsity: float
+    """Proportion of negative feedback signals (downvote / negative)."""
+    feedback_count: int
+    """Total number of feedback events used to compute this score."""
+
+    @property
+    def classification(self) -> str:
+        """Classify the memory reliability from the T-I-F proportions.
+
+        Returns one of:
+        - ``"surface_contradiction"`` — falsity ≥ 0.50
+        - ``"ask_clarification"``    — indeterminacy ≥ 0.50
+        - ``"confident_reuse"``      — truth ≥ 0.70
+        - ``"verify_before_use"``    — all other cases
+        """
+        if self.falsity >= 0.50:
+            return "surface_contradiction"
+        if self.indeterminacy >= 0.50:
+            return "ask_clarification"
+        if self.truth >= 0.70:
+            return "confident_reuse"
+        return "verify_before_use"
+
+    @classmethod
+    def from_feedback_history(cls, history: "FeedbackHistoryResponse") -> "TifScore":
+        """Compute a :class:`TifScore` from a memory's feedback history.
+
+        Signals are bucketed as:
+        - ``upvote`` / ``positive`` → truth
+        - ``downvote`` / ``negative`` → falsity
+        - ``flag`` → indeterminacy
+
+        When no feedback has been recorded the score is
+        ``TifScore(truth=0.0, indeterminacy=1.0, falsity=0.0, feedback_count=0)``
+        to reflect maximum uncertainty.
+        """
+        upvotes = 0
+        downvotes = 0
+        flags = 0
+        for entry in history.entries:
+            sig = entry.signal.value if isinstance(entry.signal, FeedbackSignal) else str(entry.signal)
+            if sig in ("upvote", "positive"):
+                upvotes += 1
+            elif sig in ("downvote", "negative"):
+                downvotes += 1
+            elif sig == "flag":
+                flags += 1
+        total = upvotes + downvotes + flags
+        if total == 0:
+            return cls(truth=0.0, indeterminacy=1.0, falsity=0.0, feedback_count=0)
+        return cls(
+            truth=upvotes / total,
+            indeterminacy=flags / total,
+            falsity=downvotes / total,
+            feedback_count=total,
+        )
+
+    @classmethod
+    def from_metadata(cls, data: dict[str, Any]) -> "TifScore":
+        """Deserialise a :class:`TifScore` from a ``metadata.reliability`` dict.
+
+        Expected keys: ``truth``, ``indeterminacy``, ``falsity``, ``feedback_count``.
+        """
+        return cls(
+            truth=float(data["truth"]),
+            indeterminacy=float(data["indeterminacy"]),
+            falsity=float(data["falsity"]),
+            feedback_count=int(data.get("feedback_count", 0)),
+        )
+
+
+# =============================================================================
 # Namespace API Keys (SEC-1)
 # =============================================================================
 

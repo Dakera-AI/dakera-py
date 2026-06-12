@@ -83,6 +83,7 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    TifScore,
     # CE-54: fulltext reindex
     FulltextReindexNamespaceResult,
     FulltextReindexResponse,
@@ -222,6 +223,8 @@ __all__ = [
     "MemoryEntitiesResponse",
     # Memory Feedback Loop (INT-1)
     "FeedbackSignal",
+    # T-I-F Reliability (T-I-F RFC Phase 3)
+    "TifScore",
     "FeedbackHistoryEntry",
     "FeedbackResponse",
     "FeedbackHistoryResponse",
