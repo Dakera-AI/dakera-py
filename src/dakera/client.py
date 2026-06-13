@@ -213,7 +213,7 @@ class DakeraClient:
 
         try:
             body = response.json() if response.content else None
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError):
             body = response.text
 
         if response.status_code == 200 or response.status_code == 201:
