@@ -2881,3 +2881,224 @@ class TestOdeEntityModelODE2:
         )
         assert resp.entities == []
         assert resp.model == "m"
+
+
+# ===========================================================================
+# AsyncDakeraClient parity — store_memories_batch, autopilot, decay (DAK-6588)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+class TestAsyncClientBatchStoreParity:
+    """AsyncDakeraClient.store_memories_batch() parity with sync client (DAK-6588)."""
+
+    async def test_store_memories_batch_posts_to_correct_endpoint(self):
+        """store_memories_batch() POSTs to /v1/memories/store/batch."""
+        from dakera import BatchStoreMemoryItem, BatchStoreMemoryRequest, BatchStoreMemoryResponse
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["data"] = data
+            return {
+                "stored": [{"id": "mem-1", "content": "Dark mode", "agent_id": "agent-1",
+                             "tags": [], "importance": 0.8, "created_at": 1700000000}],
+                "stored_count": 1,
+                "total_embedding_time_ms": 10,
+            }
+
+        items = [BatchStoreMemoryItem("Dark mode", importance=0.8)]
+        req = BatchStoreMemoryRequest("agent-1", items)
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            resp = await client.store_memories_batch(req)
+
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/v1/memories/store/batch"
+        assert isinstance(resp, BatchStoreMemoryResponse)
+        assert resp.stored_count == 1
+
+    async def test_store_memories_batch_returns_response_object(self):
+        """store_memories_batch() deserializes response into BatchStoreMemoryResponse."""
+        from dakera import BatchStoreMemoryItem, BatchStoreMemoryRequest, BatchStoreMemoryResponse
+
+        client = AsyncDakeraClient("http://localhost:3000")
+
+        async def fake_request(method, path, data=None, **kwargs):
+            return {
+                "stored": [
+                    {"id": "m1", "content": "A", "agent_id": "ag", "tags": [],
+                     "importance": 0.5, "created_at": 1000},
+                    {"id": "m2", "content": "B", "agent_id": "ag", "tags": [],
+                     "importance": 0.6, "created_at": 1001},
+                ],
+                "stored_count": 2,
+                "total_embedding_time_ms": 25,
+            }
+
+        items = [BatchStoreMemoryItem("A"), BatchStoreMemoryItem("B")]
+        req = BatchStoreMemoryRequest("ag", items)
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            resp = await client.store_memories_batch(req)
+
+        assert isinstance(resp, BatchStoreMemoryResponse)
+        assert resp.stored_count == 2
+        assert len(resp.stored) == 2
+        assert resp.stored[0].id == "m1"
+        assert resp.stored[1].id == "m2"
+
+
+@pytest.mark.asyncio
+class TestAsyncClientAutopilotParity:
+    """AsyncDakeraClient autopilot methods parity with sync client (DAK-6588)."""
+
+    async def test_autopilot_status_gets_correct_endpoint(self):
+        """autopilot_status() GETs /v1/admin/autopilot/status."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            return {"enabled": True, "last_run": None}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.autopilot_status()
+
+        assert captured["method"] == "GET"
+        assert captured["path"] == "/v1/admin/autopilot/status"
+        assert result["enabled"] is True
+
+    async def test_autopilot_update_config_sends_only_set_fields(self):
+        """autopilot_update_config() PUTs only the fields that were provided."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["data"] = data
+            return {}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.autopilot_update_config(enabled=False, dedup_threshold=0.90)
+
+        assert captured["method"] == "PUT"
+        assert captured["path"] == "/v1/admin/autopilot/config"
+        assert captured["data"]["enabled"] is False
+        assert captured["data"]["dedup_threshold"] == 0.90
+        assert "consolidation_interval_hours" not in captured["data"]
+
+    async def test_autopilot_update_config_omits_unset_fields(self):
+        """autopilot_update_config() omits fields that are None."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["data"] = data
+            return {}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.autopilot_update_config(dedup_interval_hours=4)
+
+        assert "enabled" not in captured["data"]
+        assert "dedup_threshold" not in captured["data"]
+        assert captured["data"]["dedup_interval_hours"] == 4
+
+    async def test_autopilot_trigger_posts_action(self):
+        """autopilot_trigger() POSTs /v1/admin/autopilot/trigger with action in body."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["data"] = data
+            return {"triggered": True}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.autopilot_trigger("dedup")
+
+        assert captured["method"] == "POST"
+        assert captured["path"] == "/v1/admin/autopilot/trigger"
+        assert captured["data"]["action"] == "dedup"
+        assert result["triggered"] is True
+
+
+@pytest.mark.asyncio
+class TestAsyncClientDecayParity:
+    """AsyncDakeraClient decay methods parity with sync client (DAK-6588)."""
+
+    async def test_decay_config_gets_correct_endpoint(self):
+        """decay_config() GETs /v1/admin/decay/config."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            return {"strategy": "exponential", "half_life_hours": 168.0, "min_importance": 0.01}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.decay_config()
+
+        assert captured["method"] == "GET"
+        assert captured["path"] == "/v1/admin/decay/config"
+        assert result["strategy"] == "exponential"
+
+    async def test_decay_update_config_sends_only_set_fields(self):
+        """decay_update_config() PUTs /v1/admin/decay/config with only provided fields."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["data"] = data
+            return {}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.decay_update_config(strategy="linear", half_life_hours=72.0)
+
+        assert captured["method"] == "PUT"
+        assert captured["path"] == "/v1/admin/decay/config"
+        assert captured["data"]["strategy"] == "linear"
+        assert captured["data"]["half_life_hours"] == 72.0
+        assert "min_importance" not in captured["data"]
+
+    async def test_decay_update_config_omits_unset_fields(self):
+        """decay_update_config() omits None fields from PUT body."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["data"] = data
+            return {}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.decay_update_config(min_importance=0.05)
+
+        assert "strategy" not in captured["data"]
+        assert "half_life_hours" not in captured["data"]
+        assert captured["data"]["min_importance"] == 0.05
+
+    async def test_decay_stats_gets_correct_endpoint(self):
+        """decay_stats() GETs /v1/admin/decay/stats."""
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            return {"cycles_run": 42, "memories_decayed": 100, "memories_deleted": 5}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.decay_stats()
+
+        assert captured["method"] == "GET"
+        assert captured["path"] == "/v1/admin/decay/stats"
+        assert result["cycles_run"] == 42

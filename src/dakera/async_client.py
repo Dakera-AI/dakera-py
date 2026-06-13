@@ -59,6 +59,8 @@ from dakera.models import (
     BatchForgetResponse,
     BatchRecallRequest,
     BatchRecallResponse,
+    BatchStoreMemoryRequest,
+    BatchStoreMemoryResponse,
     BatchTextQueryResponse,
     # CE-12
     CompressResponse,
@@ -924,6 +926,31 @@ class AsyncDakeraClient:
         """
         result = await self._request("DELETE", "/v1/memories/forget/batch", data=request.to_dict())
         return BatchForgetResponse.from_dict(result)
+
+    async def store_memories_batch(self, request: BatchStoreMemoryRequest) -> BatchStoreMemoryResponse:
+        """Store multiple memories in a single request (DAK-5508).
+
+        Uses ``POST /v1/memories/store/batch``. The server embeds all contents
+        in a single ONNX inference pass, yielding ≥100× throughput vs. N
+        sequential single-store calls. Accepts up to 1 000 memories per call.
+
+        Args:
+            request: Batch store request containing ``agent_id`` and list of
+                :class:`BatchStoreMemoryItem` (1–1000 items).
+
+        Returns:
+            :class:`BatchStoreMemoryResponse` with stored memories and timing.
+
+        Example:
+            >>> items = [
+            ...     BatchStoreMemoryItem("The user prefers dark mode", importance=0.8),
+            ...     BatchStoreMemoryItem("The user is based in Berlin", importance=0.7),
+            ... ]
+            >>> resp = await client.store_memories_batch(BatchStoreMemoryRequest("agent-1", items))
+            >>> print(f"Stored {resp.stored_count} memories")
+        """
+        result = await self._request("POST", "/v1/memories/store/batch", data=request.to_dict())
+        return BatchStoreMemoryResponse.from_dict(result)
 
     async def search_memories(
         self,
@@ -1967,6 +1994,83 @@ class AsyncDakeraClient:
         if strategy is not None:
             data["strategy"] = strategy
         return await self._request("PUT", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
+
+    async def autopilot_status(self) -> dict[str, Any]:
+        """Get AutoPilot status: current config and last-run statistics (PILOT-1)."""
+        return await self._request("GET", "/v1/admin/autopilot/status")
+
+    async def autopilot_update_config(
+        self,
+        enabled: bool | None = None,
+        dedup_threshold: float | None = None,
+        dedup_interval_hours: int | None = None,
+        consolidation_interval_hours: int | None = None,
+    ) -> dict[str, Any]:
+        """Update AutoPilot configuration at runtime (PILOT-2).
+
+        All parameters are optional — omit any to keep its current value.
+        """
+        data: dict[str, Any] = {}
+        if enabled is not None:
+            data["enabled"] = enabled
+        if dedup_threshold is not None:
+            data["dedup_threshold"] = dedup_threshold
+        if dedup_interval_hours is not None:
+            data["dedup_interval_hours"] = dedup_interval_hours
+        if consolidation_interval_hours is not None:
+            data["consolidation_interval_hours"] = consolidation_interval_hours
+        return await self._request("PUT", "/v1/admin/autopilot/config", data=data)
+
+    async def autopilot_trigger(self, action: str) -> dict[str, Any]:
+        """Manually trigger an AutoPilot cycle (PILOT-3).
+
+        Args:
+            action: One of ``"dedup"``, ``"consolidate"``, or ``"all"``.
+        """
+        return await self._request("POST", "/v1/admin/autopilot/trigger", data={"action": action})
+
+    async def decay_config(self) -> dict[str, Any]:
+        """Get current decay engine configuration (DECAY-1).
+
+        Returns the active decay strategy, half-life, and minimum importance
+        threshold. Requires Admin scope.
+        """
+        return await self._request("GET", "/v1/admin/decay/config")
+
+    async def decay_update_config(
+        self,
+        strategy: str | None = None,
+        half_life_hours: float | None = None,
+        min_importance: float | None = None,
+    ) -> dict[str, Any]:
+        """Update decay engine configuration at runtime (DECAY-1).
+
+        Changes take effect on the next decay cycle — no restart required.
+        All parameters are optional; omit any to keep its current value.
+
+        Args:
+            strategy: Decay strategy: ``"exponential"``, ``"linear"``, or
+                ``"step"``.
+            half_life_hours: Half-life in hours (must be > 0).
+            min_importance: Minimum importance threshold 0.0–1.0; memories
+                below this value are hard-deleted on the next cycle.
+        """
+        data: dict[str, Any] = {}
+        if strategy is not None:
+            data["strategy"] = strategy
+        if half_life_hours is not None:
+            data["half_life_hours"] = half_life_hours
+        if min_importance is not None:
+            data["min_importance"] = min_importance
+        return await self._request("PUT", "/v1/admin/decay/config", data=data)
+
+    async def decay_stats(self) -> dict[str, Any]:
+        """Get decay engine activity counters and last-cycle snapshot (DECAY-2).
+
+        Returns cumulative totals (memories decayed/deleted, cycles run) and
+        per-cycle statistics from the most recent run. Requires Admin scope.
+        """
+        return await self._request("GET", "/v1/admin/decay/stats")
 
     async def get_kpis(self) -> KpiSnapshot:
         """Return a point-in-time product KPI snapshot (OBS-2).
