@@ -927,7 +927,9 @@ class AsyncDakeraClient:
         result = await self._request("DELETE", "/v1/memories/forget/batch", data=request.to_dict())
         return BatchForgetResponse.from_dict(result)
 
-    async def store_memories_batch(self, request: BatchStoreMemoryRequest) -> BatchStoreMemoryResponse:
+    async def store_memories_batch(
+        self, request: BatchStoreMemoryRequest
+    ) -> BatchStoreMemoryResponse:
         """Store multiple memories in a single request (DAK-5508).
 
         Uses ``POST /v1/memories/store/batch``. The server embeds all contents
