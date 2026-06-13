@@ -2178,7 +2178,9 @@ class TifScore:
 
         When no feedback has been recorded the score is
         ``TifScore(truth=0.0, indeterminacy=1.0, falsity=0.0, feedback_count=0)``
-        to reflect maximum uncertainty.
+        to reflect maximum uncertainty.  When fewer than 3 signals exist, a
+        thin-evidence base indeterminacy term is injected and the triple is
+        normalised so ``T + I + F == 1.0``.
         """
         upvotes = 0
         downvotes = 0
@@ -2198,10 +2200,15 @@ class TifScore:
         total = upvotes + downvotes + flags
         if total == 0:
             return cls(truth=0.0, indeterminacy=1.0, falsity=0.0, feedback_count=0)
+        base_indeterminacy = (3 - total) * 0.25 if total < 3 else 0.0
+        truth = upvotes / total
+        falsity = downvotes / total
+        indeterminacy = flags / total + base_indeterminacy
+        s = truth + falsity + indeterminacy
         return cls(
-            truth=upvotes / total,
-            indeterminacy=flags / total,
-            falsity=downvotes / total,
+            truth=truth / s,
+            indeterminacy=indeterminacy / s,
+            falsity=falsity / s,
             feedback_count=total,
         )
 

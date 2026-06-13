@@ -41,8 +41,8 @@ class TestTifScoreFromFeedbackHistory:
     def test_all_downvotes(self):
         score = TifScore.from_feedback_history(_make_history("downvote", "downvote"))
         assert score.truth == pytest.approx(0.0)
-        assert score.falsity == pytest.approx(1.0)
-        assert score.indeterminacy == pytest.approx(0.0)
+        assert score.falsity == pytest.approx(0.8)
+        assert score.indeterminacy == pytest.approx(0.2)
         assert score.feedback_count == 2
 
     def test_all_flags(self):
@@ -150,3 +150,92 @@ class TestTifScoreFromMetadata:
     def test_missing_feedback_count_defaults_to_zero(self):
         score = TifScore.from_metadata({"truth": 0.8, "indeterminacy": 0.1, "falsity": 0.1})
         assert score.feedback_count == 0
+
+
+class TestThinEvidence:
+    def test_single_upvote_is_not_confident(self):
+        score = TifScore.from_feedback_history(_make_history("upvote"))
+        assert score.truth + score.indeterminacy + score.falsity == pytest.approx(1.0)
+        assert score.indeterminacy > 0.0
+        assert score.truth < 0.70
+        assert score.classification == "verify_before_use"
+
+    def test_two_upvotes_reach_confident(self):
+        score = TifScore.from_feedback_history(_make_history("upvote", "upvote"))
+        assert score.truth == pytest.approx(0.8)
+        assert score.indeterminacy == pytest.approx(0.2)
+        assert score.classification == "confident_reuse"
+
+    def test_three_upvotes_no_base_indeterminacy(self):
+        score = TifScore.from_feedback_history(_make_history("upvote", "upvote", "upvote"))
+        assert score.truth == pytest.approx(1.0)
+        assert score.indeterminacy == pytest.approx(0.0)
+        assert score.classification == "confident_reuse"
+
+
+class TestGoldenVectors:
+    """Canonical T-I-F v1 contract — identical across MCP + Python + JS + Rust + Go."""
+
+    def test_no_feedback(self):
+        s = TifScore.from_feedback_history(_make_history())
+        assert s.truth == pytest.approx(0.0)
+        assert s.indeterminacy == pytest.approx(1.0)
+        assert s.falsity == pytest.approx(0.0)
+        assert s.classification == "ask_clarification"
+
+    def test_one_upvote(self):
+        s = TifScore.from_feedback_history(_make_history("upvote"))
+        assert s.truth == pytest.approx(2 / 3, abs=1e-4)
+        assert s.indeterminacy == pytest.approx(1 / 3, abs=1e-4)
+        assert s.falsity == pytest.approx(0.0)
+        assert s.classification == "verify_before_use"
+
+    def test_two_upvotes(self):
+        s = TifScore.from_feedback_history(_make_history("upvote", "upvote"))
+        assert s.truth == pytest.approx(0.8)
+        assert s.indeterminacy == pytest.approx(0.2)
+        assert s.falsity == pytest.approx(0.0)
+        assert s.classification == "confident_reuse"
+
+    def test_three_upvotes(self):
+        s = TifScore.from_feedback_history(_make_history("upvote", "upvote", "upvote"))
+        assert s.truth == pytest.approx(1.0)
+        assert s.indeterminacy == pytest.approx(0.0)
+        assert s.falsity == pytest.approx(0.0)
+        assert s.classification == "confident_reuse"
+
+    def test_two_downvotes(self):
+        s = TifScore.from_feedback_history(_make_history("downvote", "downvote"))
+        assert s.truth == pytest.approx(0.0)
+        assert s.indeterminacy == pytest.approx(0.2)
+        assert s.falsity == pytest.approx(0.8)
+        assert s.classification == "surface_contradiction"
+
+    def test_two_flags(self):
+        s = TifScore.from_feedback_history(_make_history("flag", "flag"))
+        assert s.truth == pytest.approx(0.0)
+        assert s.indeterminacy == pytest.approx(1.0)
+        assert s.falsity == pytest.approx(0.0)
+        assert s.classification == "ask_clarification"
+
+    def test_8up_1down_1flag(self):
+        s = TifScore.from_feedback_history(
+            _make_history(
+                "upvote", "upvote", "upvote", "upvote",
+                "upvote", "upvote", "upvote", "upvote",
+                "downvote", "flag",
+            )
+        )
+        assert s.truth == pytest.approx(0.8)
+        assert s.indeterminacy == pytest.approx(0.1)
+        assert s.falsity == pytest.approx(0.1)
+        assert s.classification == "confident_reuse"
+
+    def test_3down_3flag(self):
+        s = TifScore.from_feedback_history(
+            _make_history("downvote", "downvote", "downvote", "flag", "flag", "flag")
+        )
+        assert s.truth == pytest.approx(0.0)
+        assert s.indeterminacy == pytest.approx(0.5)
+        assert s.falsity == pytest.approx(0.5)
+        assert s.classification == "surface_contradiction"
