@@ -132,6 +132,7 @@ asyncio.run(main())
 - **Text Auto-Embedding** — server-side embedding generation (no local model needed)
 - **Namespaces** — isolated vector stores per project, tenant, or use case
 - **Feedback Loop** — upvote/downvote/flag memories to improve recall quality
+- **T-I-F Reliability** — `TifScore` and `evaluate_tif()` for Truth-Indeterminacy-Falsity scoring of memory reliability
 - **Entity Extraction** — GLiNER NER for automatic entity detection
 - **Streaming** — SSE event subscriptions for real-time memory updates
 - **Sync + Async** — full parity between `DakeraClient` and `AsyncDakeraClient`

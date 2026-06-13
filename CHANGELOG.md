@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`TifScore`** — new dataclass in `dakera.models` for Truth-Indeterminacy-Falsity
+  reliability scoring (T-I-F RFC Phase 3). Fields: `truth`, `indeterminacy`, `falsity`
+  (all `float`, 0–1), `feedback_count` (`int`). Read-only property `classification`
+  returns one of `"confident_reuse"`, `"ask_clarification"`, `"surface_contradiction"`,
+  or `"verify_before_use"` based on the dominant signal.
+  - `TifScore.from_feedback_history(history)` — compute T-I-F proportions from a
+    `FeedbackHistoryResponse` (upvotes, downvotes, flags counted from `entries`).
+    Zero-feedback history returns `TifScore(truth=0.0, indeterminacy=1.0, falsity=0.0)`.
+  - `TifScore.from_metadata(data)` — parse a `metadata.reliability` dict previously
+    stored via Phase 1/2 T-I-F validation scripts.
+- **`DakeraClient.evaluate_tif(memory_id)`** and **`AsyncDakeraClient.evaluate_tif(memory_id)`**
+  — convenience method that calls `get_memory_feedback_history()` and returns a
+  `TifScore` in one step.
+
 ## [0.11.89] - 2026-06-11
 
 ### Changed

@@ -138,6 +138,7 @@ from dakera.models import (
     StalenessConfig,
     StoreMemoryRequest,
     SummarizeResponse,
+    TifScore,
     Vector,
     VectorMutationOp,
     WakeUpResponse,
@@ -222,6 +223,8 @@ __all__ = [
     "MemoryEntitiesResponse",
     # Memory Feedback Loop (INT-1)
     "FeedbackSignal",
+    # T-I-F Reliability (T-I-F RFC Phase 3)
+    "TifScore",
     "FeedbackHistoryEntry",
     "FeedbackResponse",
     "FeedbackHistoryResponse",

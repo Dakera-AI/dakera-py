@@ -135,6 +135,7 @@ from dakera.models import (
     TextDocumentInput,
     TextQueryResponse,
     TextUpsertResponse,
+    TifScore,
     TtlStatsResponse,
     Vector,
     VectorInput,
@@ -1079,6 +1080,22 @@ class AsyncDakeraClient:
         """
         result = await self._request("GET", f"/v1/memories/{memory_id}/feedback")
         return FeedbackHistoryResponse.from_dict(result)
+
+    async def evaluate_tif(self, memory_id: str) -> TifScore:
+        """Compute a T-I-F reliability score for a memory (T-I-F RFC Phase 3).
+
+        Fetches the memory's full feedback history and reduces it to a
+        :class:`TifScore` with truth/indeterminacy/falsity proportions and a
+        human-readable :attr:`~TifScore.classification`.
+
+        Args:
+            memory_id: The memory to score.
+
+        Returns:
+            :class:`TifScore` derived from the memory's feedback history.
+        """
+        history = await self.get_memory_feedback_history(memory_id)
+        return TifScore.from_feedback_history(history)
 
     async def get_agent_feedback_summary(self, agent_id: str) -> AgentFeedbackSummary:
         """Get aggregate feedback counts and health score for an agent (INT-1).
