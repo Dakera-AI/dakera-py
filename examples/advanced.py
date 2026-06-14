@@ -24,9 +24,9 @@ def main() -> None:
 
     namespace = "example-advanced"
 
-    # Create namespace (3 dims for vector ops; text embedding auto-sizes)
+    # Create namespace; upsert_text uses server-side ONNX embeddings (1024-dim)
     with contextlib.suppress(Exception):
-        client.create_namespace(namespace, dimensions=3)
+        client.create_namespace(namespace, dimensions=1024)
 
     # -------------------------------------------------------------------------
     # Text auto-embedding (server generates vectors)
