@@ -171,56 +171,12 @@ client = DakeraClient(
 
 ---
 
-## Integrations
-
-### TealTiger Governance Middleware
-
-[TealTiger](https://github.com/agentguard-ai/tealtiger) is a governance middleware for AI agents that enforces cost limits, decision policies, and delegation rules.  Use Dakera as the persistent backend for all TealTiger artefacts:
-
-```bash
-pip install dakera[tealtiger] tealtiger
-```
-
-```python
-from dakera import DakeraClient
-from dakera.integrations.tealtiger import (
-    DakeraCostStorage,
-    DakeraDecisionStore,
-    DakeraDelegationHelper,
-)
-
-client = DakeraClient("http://localhost:3000", api_key="dk-mykey")
-
-# Drop-in CostStorage backend — passes directly to TealTiger middleware
-cost_storage = DakeraCostStorage(client)
-
-from tealtiger import TealTigerMiddleware
-middleware = TealTigerMiddleware(cost_storage=cost_storage)
-
-# Governance decision audit trail with idempotency checks
-decision_store = DakeraDecisionStore(client)
-receipt_id = decision_store.store_receipt("my-agent", receipt)
-is_duplicate = decision_store.is_terminal("my-agent", idempotency_key)
-
-# Multi-hop delegation chain traversal via memory knowledge graph
-delegation = DakeraDelegationHelper(client)
-delegation.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
-chain = delegation.get_delegation_chain("my-agent", root_id, max_depth=5)
-```
-
-All cost records, decision receipts, and delegation chains are stored in Dakera memory with importance-weighted retention (DENY receipts at 0.95 outlast ALLOW at 0.80) and full knowledge-graph traversal for audit purposes.
-
-See [`examples/tealtiger_governance.py`](examples/tealtiger_governance.py) for a complete walkthrough.  Join the [integration discussion](https://github.com/Dakera-AI/dakera-deploy/discussions/169) or visit the [TealTiger repo](https://github.com/agentguard-ai/tealtiger).
-
----
-
 ## Examples
 
 See the [`examples/`](examples/) directory:
 
 - [`basic_usage.py`](examples/basic_usage.py) — vectors, namespaces, queries, filters
 - [`hybrid_search.py`](examples/hybrid_search.py) — full-text, vector, and hybrid search
-- [`tealtiger_governance.py`](examples/tealtiger_governance.py) — TealTiger governance middleware
 
 ---
 
