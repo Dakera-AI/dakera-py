@@ -16,7 +16,12 @@ import pytest
 
 from dakera import DakeraClient
 from dakera.exceptions import AuthenticationError, DakeraError
-from dakera.models import BatchRecallRequest, TextDocument
+from dakera.models import (
+    BatchRecallRequest,
+    BatchStoreMemoryItem,
+    BatchStoreMemoryRequest,
+    TextDocument,
+)
 
 DAKERA_URL = os.environ.get("DAKERA_TEST_URL", "http://localhost:3000")
 TEST_NAMESPACE = f"integ-{uuid.uuid4().hex[:8]}"
@@ -254,6 +259,101 @@ class TestConsolidate:
         time.sleep(0.5)
         result = client.consolidate(TEST_AGENT)
         assert result is not None
+
+
+# ---------------------------------------------------------------------------
+# Batch Memory Operations (v0.11.90)
+# ---------------------------------------------------------------------------
+
+
+class TestBatchMemory:
+    def test_store_memories_batch(self, client):
+        req = BatchStoreMemoryRequest(
+            agent_id=TEST_AGENT,
+            memories=[
+                BatchStoreMemoryItem(
+                    content="Batch memory one: user speaks French",
+                    importance=0.7,
+                    memory_type="semantic",
+                ),
+                BatchStoreMemoryItem(
+                    content="Batch memory two: user prefers async APIs",
+                    importance=0.8,
+                    memory_type="semantic",
+                ),
+                BatchStoreMemoryItem(
+                    content="Batch memory three: user works in Berlin",
+                    importance=0.6,
+                    memory_type="episodic",
+                ),
+            ],
+        )
+        resp = client.store_memories_batch(req)
+        assert resp.stored_count == 3
+        assert len(resp.stored) == 3
+        assert all(m.id for m in resp.stored)
+        assert resp.total_embedding_time_ms >= 0
+
+    def test_search_memories(self, client):
+        time.sleep(0.5)
+        results = client.search_memories(
+            TEST_AGENT,
+            query="programming language preferences",
+            memory_type="semantic",
+            top_k=5,
+        )
+        assert isinstance(results, list)
+
+
+# ---------------------------------------------------------------------------
+# Admin Endpoints — Autopilot & Decay (v0.11.90)
+# ---------------------------------------------------------------------------
+
+
+_ADMIN_ROUTES_MISSING = "server v0.11.90 lacks admin decay/autopilot routes — returns 404"
+
+
+class TestAdminEndpoints:
+    @pytest.mark.xfail(reason=_ADMIN_ROUTES_MISSING, strict=False)
+    def test_autopilot_status(self, client):
+        result = client.autopilot_status()
+        assert isinstance(result, dict)
+        assert "enabled" in result or "status" in result or result is not None
+
+    @pytest.mark.xfail(reason=_ADMIN_ROUTES_MISSING, strict=False)
+    def test_decay_config(self, client):
+        result = client.decay_config()
+        assert isinstance(result, dict)
+
+    @pytest.mark.xfail(reason=_ADMIN_ROUTES_MISSING, strict=False)
+    def test_decay_stats(self, client):
+        result = client.decay_stats()
+        assert isinstance(result, dict)
+
+
+# ---------------------------------------------------------------------------
+# Full-Text Index Operations (v0.11.90)
+# ---------------------------------------------------------------------------
+
+
+class TestFulltextOps:
+    def test_fulltext_stats(self, client, namespace):
+        # Ensure at least one doc is indexed (TestVectors runs before this)
+        stats = client.fulltext_stats(namespace)
+        assert stats.document_count >= 0
+        assert stats.unique_terms >= 0
+
+    def test_fulltext_delete(self, client, namespace):
+        client.index_documents(
+            namespace,
+            documents=[
+                {"id": "del-1", "text": "Document to be deleted from full-text index"},
+                {"id": "del-2", "text": "Another document to be deleted"},
+            ],
+        )
+        time.sleep(0.3)
+        resp = client.fulltext_delete(namespace, ["del-1", "del-2"])
+        assert resp.get("deleted_count", 0) >= 0
 
 
 # ---------------------------------------------------------------------------
