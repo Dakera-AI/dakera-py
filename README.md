@@ -205,8 +205,8 @@ decision_store = DakeraDecisionStore(client)
 
 # Multi-hop delegation chain traversal via memory knowledge graph
 delegation = DakeraDelegationHelper(client)
-delegation.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
-chain = delegation.get_delegation_chain("my-agent", root_id, max_depth=5)
+await delegation.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
+chain = await delegation.get_delegation_chain("my-agent", root_id, max_depth=5)
 ```
 
 All cost records, decision receipts, and delegation chains are stored in Dakera memory with importance-weighted retention (DENY receipts at 0.95 outlast ALLOW at 0.80) and full knowledge-graph traversal for audit purposes.

@@ -393,9 +393,9 @@ class DakeraDecisionStore:
     Example::
 
         store = DakeraDecisionStore(client)
-        mem_id = store.store_receipt("my-agent", decision)
-        found = store.lookup_receipt("my-agent", decision.correlation_id)
-        duplicate = store.is_terminal("my-agent", decision.correlation_id)
+        mem_id = await store.store_receipt("my-agent", decision)
+        found = await store.lookup_receipt("my-agent", decision.correlation_id)
+        duplicate = await store.is_terminal("my-agent", decision.correlation_id)
     """
 
     def __init__(self, client: AsyncDakeraClient) -> None:
@@ -509,10 +509,10 @@ class DakeraDelegationHelper:
         helper = DakeraDelegationHelper(client)
 
         # Link child decision to parent
-        helper.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
+        await helper.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
 
         # Traverse the full chain
-        chain = helper.get_delegation_chain("my-agent", root_mem_id, max_depth=5)
+        chain = await helper.get_delegation_chain("my-agent", root_mem_id, max_depth=5)
         # ["root-mem-id", "parent-mem-id", "grandparent-mem-id"]
     """
 
