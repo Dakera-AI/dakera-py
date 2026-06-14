@@ -11,10 +11,10 @@ Usage::
 
     pip install dakera[tealtiger] tealtiger
 
-    from dakera import DakeraClient
+    from dakera.async_client import AsyncDakeraClient
     from dakera.integrations.tealtiger import DakeraCostStorage, DakeraDecisionStore
 
-    client = DakeraClient("http://localhost:3000", api_key="dk-mykey")
+    client = AsyncDakeraClient("http://localhost:3000", api_key="dk-mykey")
     storage = DakeraCostStorage(client)
 
     # Drop into a TealTiger client
@@ -28,7 +28,7 @@ import datetime
 import json
 from typing import Any
 
-from dakera.client import DakeraClient
+from dakera.async_client import AsyncDakeraClient
 from dakera.models import BatchForgetRequest, BatchMemoryFilter, BatchRecallRequest
 
 __all__ = [
@@ -121,7 +121,7 @@ class DakeraCostStorage:
 
     def __init__(
         self,
-        client: DakeraClient,
+        client: AsyncDakeraClient,
         dakera_agent_id: str = "governance",
     ) -> None:
         self._client = client
@@ -131,7 +131,7 @@ class DakeraCostStorage:
     # CostStorage ABC — all 8 methods
     # ------------------------------------------------------------------
 
-    def store(self, record: Any) -> None:
+    async def store(self, record: Any) -> None:
         """Persist a ``CostRecord`` as a tagged Dakera memory."""
         tags = [
             *_GOVERNANCE_TAGS,
@@ -141,16 +141,16 @@ class DakeraCostStorage:
             f"request_id:{record.request_id}",
             f"agent:{record.agent_id}",
         ]
-        self._client.store_memory(
+        await self._client.store_memory(
             agent_id=self._agent_id,
             content=_model_dump(record),
             importance=_COST_IMPORTANCE,
             tags=tags,
         )
 
-    def get(self, id: str) -> Any | None:
+    async def get(self, id: str) -> Any | None:
         """Retrieve a single ``CostRecord`` by its ID."""
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(tags=["cost", f"cost_id:{id}"]),
@@ -161,9 +161,9 @@ class DakeraCostStorage:
             return None
         return self._deserialize(resp.memories[0].content)
 
-    def get_by_request_id(self, request_id: str) -> list[Any]:
+    async def get_by_request_id(self, request_id: str) -> list[Any]:
         """Retrieve all ``CostRecord``\\s for a given request ID."""
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(tags=["cost", f"request_id:{request_id}"]),
@@ -172,14 +172,14 @@ class DakeraCostStorage:
         )
         return [r for r in (self._deserialize(m.content) for m in resp.memories) if r is not None]
 
-    def get_by_agent_id(
+    async def get_by_agent_id(
         self,
         agent_id: str,
         start_date: datetime.datetime | str | None = None,
         end_date: datetime.datetime | str | None = None,
     ) -> list[Any]:
         """Retrieve all ``CostRecord``\\s for a specific agent, with optional date bounds."""
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(
@@ -192,13 +192,13 @@ class DakeraCostStorage:
         )
         return [r for r in (self._deserialize(m.content) for m in resp.memories) if r is not None]
 
-    def get_by_date_range(
+    async def get_by_date_range(
         self,
         start_date: datetime.datetime | str,
         end_date: datetime.datetime | str,
     ) -> list[Any]:
         """Retrieve all ``CostRecord``\\s within a date range."""
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(
@@ -211,7 +211,7 @@ class DakeraCostStorage:
         )
         return [r for r in (self._deserialize(m.content) for m in resp.memories) if r is not None]
 
-    def get_summary(
+    async def get_summary(
         self,
         start_date: datetime.datetime | str,
         end_date: datetime.datetime | str,
@@ -224,7 +224,7 @@ class DakeraCostStorage:
         plain ``dict`` otherwise.
         """
         tags = ["cost", f"agent:{agent_id}"] if agent_id else _GOVERNANCE_TAGS
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(
@@ -240,9 +240,9 @@ class DakeraCostStorage:
         ]
         return self._aggregate_summary(records, start_date, end_date)
 
-    def delete_older_than(self, before_date: datetime.datetime | str) -> int:
+    async def delete_older_than(self, before_date: datetime.datetime | str) -> int:
         """Delete all ``CostRecord``\\s older than *before_date*. Returns deleted count."""
-        resp = self._client.batch_forget(
+        resp = await self._client.batch_forget(
             BatchForgetRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(
@@ -253,9 +253,9 @@ class DakeraCostStorage:
         )
         return resp.deleted_count
 
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Delete all ``CostRecord``\\s in this storage."""
-        self._client.batch_forget(
+        await self._client.batch_forget(
             BatchForgetRequest(
                 agent_id=self._agent_id,
                 filter=BatchMemoryFilter(tags=_GOVERNANCE_TAGS),
@@ -398,10 +398,10 @@ class DakeraDecisionStore:
         duplicate = store.is_terminal("my-agent", decision.correlation_id)
     """
 
-    def __init__(self, client: DakeraClient) -> None:
+    def __init__(self, client: AsyncDakeraClient) -> None:
         self._client = client
 
-    def store_receipt(self, agent_id: str, decision: Any) -> str:
+    async def store_receipt(self, agent_id: str, decision: Any) -> str:
         """Persist a TealTiger ``Decision`` in Dakera memory.
 
         Args:
@@ -424,7 +424,7 @@ class DakeraDecisionStore:
             f"correlation_id:{correlation_id}",
             f"policy_id:{policy_id}",
         ]
-        mem = self._client.store_memory(
+        mem = await self._client.store_memory(
             agent_id=agent_id,
             content=_model_dump(decision),
             importance=importance,
@@ -433,7 +433,7 @@ class DakeraDecisionStore:
         )
         return str(mem.get("id", ""))
 
-    def lookup_receipt(self, agent_id: str, correlation_id: str) -> Any | None:
+    async def lookup_receipt(self, agent_id: str, correlation_id: str) -> Any | None:
         """Look up a governance decision by correlation ID.
 
         Args:
@@ -444,7 +444,7 @@ class DakeraDecisionStore:
             A ``Decision`` (if TealTiger is installed) or raw dict,
             or ``None`` if not found.
         """
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=agent_id,
                 filter=BatchMemoryFilter(
@@ -468,7 +468,7 @@ class DakeraDecisionStore:
         except json.JSONDecodeError:
             return None
 
-    def is_terminal(self, agent_id: str, correlation_id: str) -> bool:
+    async def is_terminal(self, agent_id: str, correlation_id: str) -> bool:
         """Return ``True`` if a decision for *correlation_id* is already stored.
 
         Use this for idempotency checks before evaluating governance rules to
@@ -478,7 +478,7 @@ class DakeraDecisionStore:
             agent_id: Dakera namespace to search.
             correlation_id: The TealTiger ``Decision.correlation_id`` of the request.
         """
-        resp = self._client.batch_recall(
+        resp = await self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=agent_id,
                 filter=BatchMemoryFilter(
@@ -518,23 +518,23 @@ class DakeraDelegationHelper:
 
     _EDGE_TYPE = "delegated_from"
 
-    def __init__(self, client: DakeraClient) -> None:
+    def __init__(self, client: AsyncDakeraClient) -> None:
         self._client = client
 
-    def link_delegation(self, child_id: str, parent_id: str) -> None:
+    async def link_delegation(self, child_id: str, parent_id: str) -> None:
         """Create a ``delegated_from`` KG edge from *child_id* to *parent_id*.
 
         Args:
             child_id: Dakera memory ID of the child (delegated) decision.
             parent_id: Dakera memory ID of the parent (delegating) decision.
         """
-        self._client.memory_link(
+        await self._client.memory_link(
             source_id=child_id,
             target_id=parent_id,
             edge_type=self._EDGE_TYPE,
         )
 
-    def get_delegation_chain(
+    async def get_delegation_chain(
         self,
         agent_id: str,
         decision_id: str,
@@ -554,7 +554,7 @@ class DakeraDelegationHelper:
         Returns:
             Ordered list of memory IDs starting with *decision_id*.
         """
-        result = self._client.knowledge_query(
+        result = await self._client.knowledge_query(
             agent_id=agent_id,
             root_id=decision_id,
             edge_type=self._EDGE_TYPE,

@@ -182,25 +182,26 @@ pip install dakera[tealtiger] tealtiger
 ```
 
 ```python
-from dakera import DakeraClient
+import asyncio
+from dakera.async_client import AsyncDakeraClient
 from dakera.integrations.tealtiger import (
     DakeraCostStorage,
     DakeraDecisionStore,
     DakeraDelegationHelper,
 )
 
-client = DakeraClient("http://localhost:3000", api_key="dk-mykey")
+client = AsyncDakeraClient("http://localhost:3000", api_key="dk-mykey")
 
-# Drop-in CostStorage backend — passes directly to TealTiger middleware
+# Drop-in async CostStorage backend — passes directly to TealTiger client
 cost_storage = DakeraCostStorage(client)
 
-from tealtiger import TealTigerMiddleware
-middleware = TealTigerMiddleware(cost_storage=cost_storage)
+from tealtiger import TealOpenAI, TealOpenAIConfig
+teal_client = TealOpenAI(config=TealOpenAIConfig(cost_storage=cost_storage))
 
-# Governance decision audit trail with idempotency checks
+# Governance decision audit trail with idempotency checks (all methods are async)
 decision_store = DakeraDecisionStore(client)
-receipt_id = decision_store.store_receipt("my-agent", receipt)
-is_duplicate = decision_store.is_terminal("my-agent", idempotency_key)
+# receipt_id = await decision_store.store_receipt("my-agent", decision)
+# is_duplicate = await decision_store.is_terminal("my-agent", correlation_id)
 
 # Multi-hop delegation chain traversal via memory knowledge graph
 delegation = DakeraDelegationHelper(client)
