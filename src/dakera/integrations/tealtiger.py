@@ -4,7 +4,7 @@ Provides persistent, decay-weighted storage for TealTiger governance artefacts
 using Dakera's memory API.  Three classes are exported:
 
 - :class:`DakeraCostStorage` — TealTiger ``CostStorage`` ABC backend
-- :class:`DakeraDecisionStore` — audit receipt storage with KG-linked retrieval
+- :class:`DakeraDecisionStore` — audit decision storage with KG-linked retrieval
 - :class:`DakeraDelegationHelper` — delegation chain management via memory KG
 
 Usage::
@@ -17,9 +17,9 @@ Usage::
     client = DakeraClient("http://localhost:3000", api_key="dk-mykey")
     storage = DakeraCostStorage(client)
 
-    # Drop into TealTiger middleware
-    from tealtiger import TealTigerMiddleware
-    middleware = TealTigerMiddleware(cost_storage=storage)
+    # Drop into a TealTiger client
+    from tealtiger import TealOpenAI, TealOpenAIConfig
+    teal_client = TealOpenAI(config=TealOpenAIConfig(cost_storage=storage))
 """
 
 from __future__ import annotations
@@ -54,8 +54,10 @@ except ImportError:  # pragma: no cover
 _DECISION_IMPORTANCE: dict[str, float] = {
     "DENY": 0.95,
     "REQUIRE_APPROVAL": 0.90,
+    "REDACT": 0.90,
+    "TRANSFORM": 0.85,
+    "DEGRADE": 0.85,
     "ALLOW": 0.80,
-    "MODIFY": 0.80,
 }
 _COST_IMPORTANCE = 0.7
 _GOVERNANCE_TAGS = ["governance", "cost"]
@@ -113,8 +115,8 @@ class DakeraCostStorage:
         client = DakeraClient("http://localhost:3000", api_key="dk-key")
         storage = DakeraCostStorage(client)
 
-        from tealtiger import TealTigerMiddleware
-        middleware = TealTigerMiddleware(cost_storage=storage)
+        from tealtiger import TealOpenAI, TealOpenAIConfig
+        teal_client = TealOpenAI(config=TealOpenAIConfig(cost_storage=storage))
     """
 
     def __init__(
@@ -267,7 +269,7 @@ class DakeraCostStorage:
     def _deserialize(self, content: str) -> Any | None:
         if _HAS_TEALTIGER:
             try:
-                from tealtiger.cost.record import CostRecord  # noqa: PLC0415
+                from tealtiger.cost.types import CostRecord  # noqa: PLC0415
 
                 return CostRecord.model_validate_json(content)
             except Exception:
@@ -284,7 +286,9 @@ class DakeraCostStorage:
         end_date: Any,
     ) -> Any:
         total_cost = 0.0
-        total_tokens = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_token_count = 0
         by_model: dict[str, float] = {}
         by_provider: dict[str, float] = {}
         by_agent: dict[str, float] = {}
@@ -297,9 +301,14 @@ class DakeraCostStorage:
                 agent = rec.agent_id
                 if hasattr(rec, "actual_tokens") and rec.actual_tokens is not None:
                     tok = rec.actual_tokens
-                    total_tokens += (
-                        tok.get("total", 0) if isinstance(tok, dict) else getattr(tok, "total", 0)
-                    )
+                    if isinstance(tok, dict):
+                        total_token_count += tok.get("total_tokens", 0)
+                        total_input_tokens += tok.get("input_tokens", 0)
+                        total_output_tokens += tok.get("output_tokens", 0)
+                    else:
+                        total_token_count += getattr(tok, "total_tokens", 0)
+                        total_input_tokens += getattr(tok, "input_tokens", 0)
+                        total_output_tokens += getattr(tok, "output_tokens", 0)
             else:
                 cost = rec.get("actual_cost", 0.0)
                 model = rec.get("model", "unknown")
@@ -313,11 +322,16 @@ class DakeraCostStorage:
 
         total = len(records)
         avg = total_cost / total if total > 0 else 0.0
-        period = f"{start_date}/{end_date}"
+        period: dict[str, str] = {"start": str(start_date), "end": str(end_date)}
+        total_tokens: dict[str, int] = {
+            "total": total_token_count,
+            "input": total_input_tokens,
+            "output": total_output_tokens,
+        }
 
         if _HAS_TEALTIGER:
             try:
-                from tealtiger.cost.record import CostSummary  # noqa: PLC0415
+                from tealtiger.cost.types import CostSummary  # noqa: PLC0415
 
                 return CostSummary(
                     total_cost=total_cost,
@@ -360,17 +374,18 @@ except ImportError:  # pragma: no cover
 
 
 class DakeraDecisionStore:
-    """Stores and retrieves TealTiger governance decision receipts in Dakera memory.
+    """Stores and retrieves TealTiger governance decisions in Dakera memory.
 
-    Decision receipts are stored as episodic memories with importance weighted
-    by decision severity:
+    Decision records are stored as episodic memories with importance weighted
+    by the ``DecisionAction`` enum value:
 
     - ``DENY`` → 0.95 (highest importance, longest retention)
-    - ``REQUIRE_APPROVAL`` → 0.90
-    - ``ALLOW`` / ``MODIFY`` → 0.80
+    - ``REQUIRE_APPROVAL`` / ``REDACT`` → 0.90
+    - ``TRANSFORM`` / ``DEGRADE`` → 0.85
+    - ``ALLOW`` → 0.80
 
-    This ensures deny-decisions survive memory compaction longer, maintaining
-    a robust audit trail for compliance.
+    This ensures high-severity decisions survive memory compaction longer,
+    maintaining a robust audit trail for compliance.
 
     Args:
         client: An initialised :class:`~dakera.DakeraClient`.
@@ -378,62 +393,62 @@ class DakeraDecisionStore:
     Example::
 
         store = DakeraDecisionStore(client)
-        mem_id = store.store_receipt("my-agent", receipt)
-        found = store.lookup_receipt("my-agent", "dec-abc123")
-        duplicate = store.is_terminal("my-agent", "idem-key-xyz")
+        mem_id = store.store_receipt("my-agent", decision)
+        found = store.lookup_receipt("my-agent", decision.correlation_id)
+        duplicate = store.is_terminal("my-agent", decision.correlation_id)
     """
 
     def __init__(self, client: DakeraClient) -> None:
         self._client = client
 
-    def store_receipt(self, agent_id: str, receipt: Any) -> str:
-        """Persist a TealTiger governance receipt.
+    def store_receipt(self, agent_id: str, decision: Any) -> str:
+        """Persist a TealTiger ``Decision`` in Dakera memory.
 
         Args:
-            agent_id: Dakera namespace (agent) to store the receipt under.
-            receipt: A TealTiger ``GovernanceReceipt`` or compatible object.
+            agent_id: Dakera namespace (agent) to store the decision under.
+            decision: A TealTiger ``Decision`` object with ``.action``
+                (``DecisionAction`` enum) and ``.correlation_id``.
 
         Returns:
-            The Dakera memory ID of the stored receipt.
+            The Dakera memory ID of the stored decision.
         """
-        decision_raw = (
-            receipt.decision.value if hasattr(receipt.decision, "value") else str(receipt.decision)
-        )
-        importance = _DECISION_IMPORTANCE.get(decision_raw.upper(), _DECISION_IMPORTANCE["ALLOW"])
-        decision_id = str(getattr(receipt, "decision_id", ""))
-        idempotency_key = str(getattr(receipt, "idempotency_key", ""))
+        action = decision.action
+        action_str = action.value if hasattr(action, "value") else str(action)
+        importance = _DECISION_IMPORTANCE.get(action_str.upper(), _DECISION_IMPORTANCE["ALLOW"])
+        correlation_id = str(getattr(decision, "correlation_id", ""))
+        policy_id = str(getattr(decision, "policy_id", ""))
         tags = [
             "governance",
             "decision",
-            f"decision:{decision_raw.lower()}",
-            f"decision_id:{decision_id}",
-            f"idempotency:{idempotency_key}",
+            f"decision:{action_str.lower()}",
+            f"correlation_id:{correlation_id}",
+            f"policy_id:{policy_id}",
         ]
         mem = self._client.store_memory(
             agent_id=agent_id,
-            content=_model_dump(receipt),
+            content=_model_dump(decision),
             importance=importance,
             memory_type="episodic",
             tags=tags,
         )
         return str(mem.get("id", ""))
 
-    def lookup_receipt(self, agent_id: str, decision_id: str) -> Any | None:
-        """Look up a governance receipt by decision ID.
+    def lookup_receipt(self, agent_id: str, correlation_id: str) -> Any | None:
+        """Look up a governance decision by correlation ID.
 
         Args:
-            agent_id: Dakera namespace owning the receipt.
-            decision_id: The TealTiger decision ID to search for.
+            agent_id: Dakera namespace owning the decision.
+            correlation_id: The TealTiger ``Decision.correlation_id`` to search for.
 
         Returns:
-            A ``GovernanceReceipt`` (if TealTiger is installed) or raw dict,
+            A ``Decision`` (if TealTiger is installed) or raw dict,
             or ``None`` if not found.
         """
         resp = self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=agent_id,
                 filter=BatchMemoryFilter(
-                    tags=["governance", "decision", f"decision_id:{decision_id}"]
+                    tags=["governance", "decision", f"correlation_id:{correlation_id}"]
                 ),
                 limit=1,
             )
@@ -443,9 +458,9 @@ class DakeraDecisionStore:
         content = resp.memories[0].content
         if _HAS_TEALTIGER:
             try:
-                from tealtiger.governance.receipt import GovernanceReceipt  # noqa: PLC0415
+                from tealtiger import Decision  # noqa: PLC0415
 
-                return GovernanceReceipt.model_validate_json(content)
+                return Decision.model_validate_json(content)
             except Exception:
                 pass
         try:
@@ -453,21 +468,21 @@ class DakeraDecisionStore:
         except json.JSONDecodeError:
             return None
 
-    def is_terminal(self, agent_id: str, idempotency_key: str) -> bool:
-        """Return ``True`` if a decision for *idempotency_key* is already stored.
+    def is_terminal(self, agent_id: str, correlation_id: str) -> bool:
+        """Return ``True`` if a decision for *correlation_id* is already stored.
 
         Use this for idempotency checks before evaluating governance rules to
         avoid processing the same request twice.
 
         Args:
             agent_id: Dakera namespace to search.
-            idempotency_key: The idempotency key from the incoming request.
+            correlation_id: The TealTiger ``Decision.correlation_id`` of the request.
         """
         resp = self._client.batch_recall(
             BatchRecallRequest(
                 agent_id=agent_id,
                 filter=BatchMemoryFilter(
-                    tags=["governance", "decision", f"idempotency:{idempotency_key}"]
+                    tags=["governance", "decision", f"correlation_id:{correlation_id}"]
                 ),
                 limit=1,
             )
@@ -483,7 +498,7 @@ class DakeraDecisionStore:
 class DakeraDelegationHelper:
     """Manages agent delegation chains using the Dakera memory knowledge graph.
 
-    Creates typed ``delegated_from`` edges between decision receipt memory nodes,
+    Creates typed ``delegated_from`` edges between decision memory nodes,
     enabling audit-trail traversal across arbitrarily deep delegation hierarchies.
 
     Args:
@@ -493,7 +508,7 @@ class DakeraDelegationHelper:
 
         helper = DakeraDelegationHelper(client)
 
-        # Link child receipt to parent
+        # Link child decision to parent
         helper.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
 
         # Traverse the full chain
@@ -510,8 +525,8 @@ class DakeraDelegationHelper:
         """Create a ``delegated_from`` KG edge from *child_id* to *parent_id*.
 
         Args:
-            child_id: Dakera memory ID of the child (delegated) receipt.
-            parent_id: Dakera memory ID of the parent (delegating) receipt.
+            child_id: Dakera memory ID of the child (delegated) decision.
+            parent_id: Dakera memory ID of the parent (delegating) decision.
         """
         self._client.memory_link(
             source_id=child_id,
@@ -525,14 +540,14 @@ class DakeraDelegationHelper:
         decision_id: str,
         max_depth: int = 10,
     ) -> list[str]:
-        """Traverse the delegation chain from a root decision receipt.
+        """Traverse the delegation chain from a root decision memory.
 
         Performs a BFS traversal over ``delegated_from`` edges in the memory KG,
         returning an ordered list of memory IDs from root outward.
 
         Args:
-            agent_id: Dakera namespace containing the receipt memories.
-            decision_id: Dakera memory ID of the root decision receipt.
+            agent_id: Dakera namespace containing the decision memories.
+            decision_id: Dakera memory ID of the root decision.
             max_depth: Maximum hops to traverse (clamped to 5 by the KG API;
                 values above 5 will silently use 5).
 

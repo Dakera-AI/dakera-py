@@ -43,15 +43,20 @@ decision_store = DakeraDecisionStore(client)
 delegation_helper = DakeraDelegationHelper(client)
 
 # ---------------------------------------------------------------------------
-# 3. Register cost_storage with TealTiger middleware
+# 3. Register cost_storage with a TealTiger client
 # ---------------------------------------------------------------------------
 #
-# When TealTiger is installed, drop cost_storage into the middleware config:
+# When TealTiger is installed, drop cost_storage into the client config:
 #
-#   from tealtiger import TealTigerMiddleware
-#   middleware = TealTigerMiddleware(
-#       cost_storage=cost_storage,
-#       ...
+#   from tealtiger import TealOpenAI, TealOpenAIConfig
+#   teal_client = TealOpenAI(
+#       config=TealOpenAIConfig(cost_storage=cost_storage)
+#   )
+#
+#   # Or for Anthropic / Azure:
+#   from tealtiger import TealAnthropic, TealAnthropicConfig
+#   teal_client = TealAnthropic(
+#       config=TealAnthropicConfig(cost_storage=cost_storage)
 #   )
 #
 # Every LLM call tracked by TealTiger will then be persisted via Dakera.
@@ -107,36 +112,42 @@ if retrieved:
     print(f"Retrieved: cost=${cost_val:.4f}")
 
 # ---------------------------------------------------------------------------
-# 5. Decision receipt example
+# 5. Decision example (tealtiger.Decision API)
 # ---------------------------------------------------------------------------
+# When TealTiger IS installed, pass real Decision objects.  This mock mimics
+# the tealtiger.Decision interface (action, correlation_id, policy_id).
 
 
-class _MockDecision:
+class _MockDecisionAction:
     value = "DENY"
 
 
-class _MockReceipt:
-    decision = _MockDecision()
-    decision_id = "dec-demo-001"
-    idempotency_key = "idem-demo-001"
+class _MockDecision:
+    action = _MockDecisionAction()
+    correlation_id = "corr-demo-001"
+    policy_id = "policy-demo-001"
+    risk_score = 90
+    reason = "Blocked by PII policy"
 
     def model_dump_json(self) -> str:
         import json
 
         return json.dumps(
             {
-                "decision": self.decision.value,
-                "decision_id": self.decision_id,
-                "idempotency_key": self.idempotency_key,
+                "action": self.action.value,
+                "correlation_id": self.correlation_id,
+                "policy_id": self.policy_id,
+                "risk_score": self.risk_score,
+                "reason": self.reason,
             }
         )
 
 
-receipt = _MockReceipt()
-receipt_mem_id = decision_store.store_receipt("research-agent", receipt)
-print(f"Stored DENY receipt: memory_id={receipt_mem_id}")
+decision = _MockDecision()
+decision_mem_id = decision_store.store_receipt("research-agent", decision)
+print(f"Stored DENY decision: memory_id={decision_mem_id}")
 
-already_decided = decision_store.is_terminal("research-agent", "idem-demo-001")
+already_decided = decision_store.is_terminal("research-agent", "corr-demo-001")
 print(f"Idempotency check — already decided: {already_decided}")
 
 # ---------------------------------------------------------------------------
@@ -151,7 +162,7 @@ print(f"Idempotency check — already decided: {already_decided}")
 #   )
 #   chain = delegation_helper.get_delegation_chain(
 #       agent_id="research-agent",
-#       decision_id=parent_receipt_mem_id,
+#       decision_id=parent_decision_mem_id,
 #       max_depth=5,
 #   )
 #   print("Delegation chain:", chain)

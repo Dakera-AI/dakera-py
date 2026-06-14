@@ -1,6 +1,7 @@
 """Tests for TealTiger governance middleware integration.
 
 All tests use mocked DakeraClient — TealTiger does NOT need to be installed.
+Tests pass BOTH with and without tealtiger installed.
 """
 
 import json
@@ -24,6 +25,19 @@ from dakera.models import (
 # Test helpers
 # ---------------------------------------------------------------------------
 
+# Complete CostRecord JSON (all required fields per tealtiger v1.3.0 schema).
+_COMPLETE_COST_JSON = {
+    "id": "cost-1",
+    "request_id": "req-1",
+    "agent_id": "ag-1",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "actual_tokens": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
+    "actual_cost": 0.05,
+    "breakdown": {"input_cost": 0.03, "output_cost": 0.02},
+    "timestamp": "2026-06-14T12:00:00Z",
+}
+
 
 def _make_client() -> MagicMock:
     """Return a mock DakeraClient."""
@@ -45,7 +59,9 @@ def _make_cost_record(
     record.model = model
     record.provider.value = provider
     record.actual_cost = cost
-    record.actual_tokens = None
+    # Include all required CostRecord fields so model_validate_json succeeds
+    # when tealtiger IS installed.
+    record.actual_tokens = MagicMock(input_tokens=100, output_tokens=50, total_tokens=150)
     record.model_dump_json.return_value = json.dumps(
         {
             "id": cost_id,
@@ -53,7 +69,10 @@ def _make_cost_record(
             "agent_id": agent_id,
             "model": model,
             "provider": provider,
+            "actual_tokens": {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150},
             "actual_cost": cost,
+            "breakdown": {"input_cost": 0.03, "output_cost": 0.02},
+            "timestamp": "2026-06-14T12:00:00Z",
         }
     )
     return record
@@ -71,6 +90,13 @@ def _make_memory(content: str, memory_id: str = "mem-1") -> Memory:
         memory_type="episodic",
         importance=0.7,
     )
+
+
+def _complete_cost_payload(**overrides: object) -> str:
+    """Return a complete CostRecord JSON string (passes model_validate_json)."""
+    data = dict(_COMPLETE_COST_JSON)
+    data.update(overrides)  # type: ignore[arg-type]
+    return json.dumps(data)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +149,8 @@ class TestDakeraCostStorageGet:
         client.batch_recall.assert_called_once()
 
     def test_get_passes_correct_filter(self) -> None:
-        payload = json.dumps({"id": "cost-1", "actual_cost": 0.05})
+        # Use complete JSON so model_validate_json succeeds when tealtiger is installed.
+        payload = _complete_cost_payload(id="cost-1", actual_cost=0.05)
         client = _make_client()
         client.batch_recall.return_value = _make_batch_recall_response(
             [_make_memory(payload)]
@@ -138,17 +165,25 @@ class TestDakeraCostStorageGet:
         assert "cost_id:cost-1" in (req.filter.tags or [])
 
     def test_get_deserializes_json_when_tealtiger_absent(self) -> None:
-        payload = json.dumps({"id": "cost-1", "actual_cost": 0.05, "model": "gpt-4o"})
-        client = _make_client()
-        client.batch_recall.return_value = _make_batch_recall_response(
-            [_make_memory(payload)]
-        )
-        storage = DakeraCostStorage(client)
+        # Patch _HAS_TEALTIGER to False for this test to verify dict fallback.
+        import dakera.integrations.tealtiger as tt_mod
 
-        result = storage.get("cost-1")
+        original = tt_mod._HAS_TEALTIGER
+        tt_mod._HAS_TEALTIGER = False
+        try:
+            payload = json.dumps({"id": "cost-1", "actual_cost": 0.05, "model": "gpt-4o"})
+            client = _make_client()
+            client.batch_recall.return_value = _make_batch_recall_response(
+                [_make_memory(payload)]
+            )
+            storage = DakeraCostStorage(client)
 
-        assert isinstance(result, dict)
-        assert result["model"] == "gpt-4o"
+            result = storage.get("cost-1")
+
+            assert isinstance(result, dict)
+            assert result["model"] == "gpt-4o"
+        finally:
+            tt_mod._HAS_TEALTIGER = original
 
 
 class TestDakeraCostStorageGetByRequestId:
@@ -214,21 +249,33 @@ class TestDakeraCostStorageGetByDateRange:
 
 class TestDakeraCostStorageGetSummary:
     def test_returns_dict_when_tealtiger_absent(self) -> None:
-        payload = json.dumps(
-            {"actual_cost": 0.10, "model": "gpt-4o", "provider": "openai", "agent_id": "ag-1"}
-        )
-        client = _make_client()
-        client.batch_recall.return_value = _make_batch_recall_response(
-            [_make_memory(payload), _make_memory(payload, "mem-2")]
-        )
-        storage = DakeraCostStorage(client)
+        import dakera.integrations.tealtiger as tt_mod
 
-        result = storage.get_summary("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z")
+        original = tt_mod._HAS_TEALTIGER
+        tt_mod._HAS_TEALTIGER = False
+        try:
+            payload = json.dumps(
+                {
+                    "actual_cost": 0.10,
+                    "model": "gpt-4o",
+                    "provider": "openai",
+                    "agent_id": "ag-1",
+                }
+            )
+            client = _make_client()
+            client.batch_recall.return_value = _make_batch_recall_response(
+                [_make_memory(payload), _make_memory(payload, "mem-2")]
+            )
+            storage = DakeraCostStorage(client)
 
-        assert isinstance(result, dict)
-        assert abs(result["total_cost"] - 0.20) < 1e-9
-        assert result["total_requests"] == 2
-        assert "gpt-4o" in result["by_model"]
+            result = storage.get_summary("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z")
+
+            assert isinstance(result, dict)
+            assert abs(result["total_cost"] - 0.20) < 1e-9
+            assert result["total_requests"] == 2
+            assert "gpt-4o" in result["by_model"]
+        finally:
+            tt_mod._HAS_TEALTIGER = original
 
     def test_agent_id_filter_applied_when_given(self) -> None:
         client = _make_client()
@@ -239,6 +286,41 @@ class TestDakeraCostStorageGetSummary:
 
         req = client.batch_recall.call_args.args[0]
         assert "agent:ag-X" in (req.filter.tags or [])
+
+    def test_period_is_dict(self) -> None:
+        import dakera.integrations.tealtiger as tt_mod
+
+        original = tt_mod._HAS_TEALTIGER
+        tt_mod._HAS_TEALTIGER = False
+        try:
+            client = _make_client()
+            client.batch_recall.return_value = _make_batch_recall_response()
+            storage = DakeraCostStorage(client)
+
+            result = storage.get_summary("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z")
+
+            assert isinstance(result["period"], dict)
+            assert "start" in result["period"]
+            assert "end" in result["period"]
+        finally:
+            tt_mod._HAS_TEALTIGER = original
+
+    def test_total_tokens_is_dict(self) -> None:
+        import dakera.integrations.tealtiger as tt_mod
+
+        original = tt_mod._HAS_TEALTIGER
+        tt_mod._HAS_TEALTIGER = False
+        try:
+            client = _make_client()
+            client.batch_recall.return_value = _make_batch_recall_response()
+            storage = DakeraCostStorage(client)
+
+            result = storage.get_summary("2026-01-01T00:00:00Z", "2026-12-31T23:59:59Z")
+
+            assert isinstance(result["total_tokens"], dict)
+            assert "total" in result["total_tokens"]
+        finally:
+            tt_mod._HAS_TEALTIGER = original
 
 
 class TestDakeraCostStorageDeleteOlderThan:
@@ -274,17 +356,26 @@ class TestDakeraCostStorageClear:
 # ---------------------------------------------------------------------------
 
 
-def _make_receipt(
-    decision: str = "DENY", decision_id: str = "dec-1", idem: str = "idem-1"
+def _make_decision(
+    action: str = "DENY",
+    correlation_id: str = "corr-1",
+    policy_id: str = "policy-1",
 ) -> MagicMock:
-    receipt = MagicMock()
-    receipt.decision.value = decision
-    receipt.decision_id = decision_id
-    receipt.idempotency_key = idem
-    receipt.model_dump_json.return_value = json.dumps(
-        {"decision": decision, "decision_id": decision_id, "idempotency_key": idem}
+    """Return a mock tealtiger Decision object."""
+    decision = MagicMock()
+    decision.action.value = action
+    decision.correlation_id = correlation_id
+    decision.policy_id = policy_id
+    decision.model_dump_json.return_value = json.dumps(
+        {
+            "action": action,
+            "correlation_id": correlation_id,
+            "policy_id": policy_id,
+            "risk_score": 50,
+            "reason": "test",
+        }
     )
-    return receipt
+    return decision
 
 
 class TestDakeraDecisionStoreStoreReceipt:
@@ -293,7 +384,7 @@ class TestDakeraDecisionStoreStoreReceipt:
         client.store_memory.return_value = {"id": "mem-deny-1"}
         ds = DakeraDecisionStore(client)
 
-        ds.store_receipt("ag-1", _make_receipt("DENY"))
+        ds.store_receipt("ag-1", _make_decision("DENY"))
 
         kwargs = client.store_memory.call_args.kwargs
         assert kwargs["importance"] == 0.95
@@ -303,16 +394,43 @@ class TestDakeraDecisionStoreStoreReceipt:
         client.store_memory.return_value = {"id": "mem-ra-1"}
         ds = DakeraDecisionStore(client)
 
-        ds.store_receipt("ag-1", _make_receipt("REQUIRE_APPROVAL"))
+        ds.store_receipt("ag-1", _make_decision("REQUIRE_APPROVAL"))
 
         assert client.store_memory.call_args.kwargs["importance"] == 0.90
+
+    def test_redact_importance(self) -> None:
+        client = _make_client()
+        client.store_memory.return_value = {"id": "mem-redact-1"}
+        ds = DakeraDecisionStore(client)
+
+        ds.store_receipt("ag-1", _make_decision("REDACT"))
+
+        assert client.store_memory.call_args.kwargs["importance"] == 0.90
+
+    def test_transform_importance(self) -> None:
+        client = _make_client()
+        client.store_memory.return_value = {"id": "mem-transform-1"}
+        ds = DakeraDecisionStore(client)
+
+        ds.store_receipt("ag-1", _make_decision("TRANSFORM"))
+
+        assert client.store_memory.call_args.kwargs["importance"] == 0.85
+
+    def test_degrade_importance(self) -> None:
+        client = _make_client()
+        client.store_memory.return_value = {"id": "mem-degrade-1"}
+        ds = DakeraDecisionStore(client)
+
+        ds.store_receipt("ag-1", _make_decision("DEGRADE"))
+
+        assert client.store_memory.call_args.kwargs["importance"] == 0.85
 
     def test_allow_importance(self) -> None:
         client = _make_client()
         client.store_memory.return_value = {"id": "mem-allow-1"}
         ds = DakeraDecisionStore(client)
 
-        ds.store_receipt("ag-1", _make_receipt("ALLOW"))
+        ds.store_receipt("ag-1", _make_decision("ALLOW"))
 
         assert client.store_memory.call_args.kwargs["importance"] == 0.80
 
@@ -321,21 +439,21 @@ class TestDakeraDecisionStoreStoreReceipt:
         client.store_memory.return_value = {"id": "mem-1"}
         ds = DakeraDecisionStore(client)
 
-        ds.store_receipt("ag-1", _make_receipt("DENY", "dec-99", "idem-99"))
+        ds.store_receipt("ag-1", _make_decision("DENY", "corr-99", "policy-99"))
 
         tags = client.store_memory.call_args.kwargs["tags"]
         assert "governance" in tags
         assert "decision" in tags
         assert "decision:deny" in tags
-        assert "decision_id:dec-99" in tags
-        assert "idempotency:idem-99" in tags
+        assert "correlation_id:corr-99" in tags
+        assert "policy_id:policy-99" in tags
 
     def test_returns_memory_id(self) -> None:
         client = _make_client()
         client.store_memory.return_value = {"id": "mem-abc"}
         ds = DakeraDecisionStore(client)
 
-        mem_id = ds.store_receipt("ag-1", _make_receipt())
+        mem_id = ds.store_receipt("ag-1", _make_decision())
 
         assert mem_id == "mem-abc"
 
@@ -346,23 +464,25 @@ class TestDakeraDecisionStoreLookupReceipt:
         client.batch_recall.return_value = _make_batch_recall_response()
         ds = DakeraDecisionStore(client)
 
-        result = ds.lookup_receipt("ag-1", "dec-missing")
+        result = ds.lookup_receipt("ag-1", "corr-missing")
 
         assert result is None
 
-    def test_filter_includes_decision_id(self) -> None:
-        payload = json.dumps({"decision": "ALLOW", "decision_id": "dec-42"})
+    def test_filter_includes_correlation_id(self) -> None:
+        payload = json.dumps(
+            {"action": "ALLOW", "correlation_id": "corr-42", "policy_id": "p-1"}
+        )
         client = _make_client()
         client.batch_recall.return_value = _make_batch_recall_response(
             [_make_memory(payload)]
         )
         ds = DakeraDecisionStore(client)
 
-        result = ds.lookup_receipt("ag-1", "dec-42")
+        result = ds.lookup_receipt("ag-1", "corr-42")
 
         assert result is not None
         req = client.batch_recall.call_args.args[0]
-        assert "decision_id:dec-42" in (req.filter.tags or [])
+        assert "correlation_id:corr-42" in (req.filter.tags or [])
 
 
 class TestDakeraDecisionStoreIsTerminal:
@@ -371,27 +491,27 @@ class TestDakeraDecisionStoreIsTerminal:
         client.batch_recall.return_value = _make_batch_recall_response()
         ds = DakeraDecisionStore(client)
 
-        assert ds.is_terminal("ag-1", "idem-new") is False
+        assert ds.is_terminal("ag-1", "corr-new") is False
 
     def test_returns_true_when_receipt_exists(self) -> None:
-        payload = json.dumps({"idempotency_key": "idem-exists"})
+        payload = json.dumps({"correlation_id": "corr-exists"})
         client = _make_client()
         client.batch_recall.return_value = _make_batch_recall_response(
             [_make_memory(payload)]
         )
         ds = DakeraDecisionStore(client)
 
-        assert ds.is_terminal("ag-1", "idem-exists") is True
+        assert ds.is_terminal("ag-1", "corr-exists") is True
 
-    def test_filter_includes_idempotency_tag(self) -> None:
+    def test_filter_includes_correlation_id_tag(self) -> None:
         client = _make_client()
         client.batch_recall.return_value = _make_batch_recall_response()
         ds = DakeraDecisionStore(client)
 
-        ds.is_terminal("ag-1", "key-xyz")
+        ds.is_terminal("ag-1", "corr-xyz")
 
         req = client.batch_recall.call_args.args[0]
-        assert "idempotency:key-xyz" in (req.filter.tags or [])
+        assert "correlation_id:corr-xyz" in (req.filter.tags or [])
 
 
 # ---------------------------------------------------------------------------
