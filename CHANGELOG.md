@@ -23,6 +23,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   — convenience method that calls `get_memory_feedback_history()` and returns a
   `TifScore` in one step.
 
+## [0.11.91] - 2026-06-14
+
+### Added
+
+- **`AsyncDakeraClient`**: 7 new async methods achieving full parity with `DakeraClient` —
+  `hybrid_search()`, `batch_recall()`, `store_memories_batch()`, `autopilot_status()`,
+  `autopilot_update_config()`, `autopilot_trigger()`, and `decay_stats()`. All accept the
+  same arguments as their synchronous counterparts and return identical response types.
+- **3 new example scripts** under `examples/`:
+  - `advanced.py` — `upsert_text`, `query_text`, `fulltext_search`, `hybrid_search`,
+    `memory_link` / `graph_path`, `feedback_memory`, `analytics_overview`.
+  - `fulltext_search.py` — `index_documents`, `fulltext_search`, `FullTextIndexStats`,
+    `fulltext_delete`.
+  - `memory.py` — `store_memory`, `recall`, `search_memories`, `BatchRecallRequest`,
+    `start_session`, `agent_stats`.
+  - Examples CI now runs all three on every push. Note: `upsert_text` requires the
+    namespace to be created with `dimensions=1024` to match the server ONNX model output.
+
+## [0.11.90] - 2026-06-14
+
+### Added
+
+- **`batch_recall(request: BatchRecallRequest) -> BatchRecallResponse`** — filter-based
+  memory listing by agent, tags, importance range, time window, or session id. Returns
+  paginated results without a query string. Useful for listing all memories for an agent
+  or inspecting session contents. Also available as `AsyncDakeraClient.batch_recall()`.
+  (API: `POST /recall/batch`)
+- **`hybrid_search(namespace, query, *, vector, alpha, limit) -> list[HybridSearchResult]`**
+  — BM25 full-text + HNSW vector similarity search in a single call. Omit `vector` to
+  let the server generate an ONNX embedding from `query`; supply it for manual re-ranking.
+  `alpha` (0–1) controls BM25/vector weight blend. Also available as
+  `AsyncDakeraClient.hybrid_search()`. (API: `POST /namespaces/{ns}/search/hybrid`)
+- **`store_memories_batch(request: BatchStoreMemoryRequest) -> BatchStoreMemoryResponse`**
+  — batch ingest of multiple memory records in one HTTP request. Response contains
+  `stored`, `failed`, and per-item `errors`. Also available as
+  `AsyncDakeraClient.store_memories_batch()`. (API: `POST /memories/batch`)
+- **`autopilot_status() -> dict`**, **`autopilot_update_config(request) -> dict`**,
+  **`autopilot_trigger(action: str) -> dict`** — read and control the server's Autopilot
+  dedup/consolidation engine. `autopilot_trigger()` accepts `"dedup"` or `"consolidate"`.
+  Also available as `AsyncDakeraClient` counterparts.
+  (API: `GET /admin/autopilot/status`, `POST /admin/autopilot/config`,
+  `POST /admin/autopilot/trigger`)
+- **`decay_config() -> dict`**, **`decay_update_config(request) -> dict`**,
+  **`decay_stats() -> dict`** — introspect and tune the decay engine at runtime.
+  `decay_stats()` reports `memories_decayed`, `total_deleted`, `last_run_at`, and
+  `cycles_completed`. Also available as `AsyncDakeraClient` counterparts.
+  (API: `GET /admin/decay/config`, `POST /admin/decay/config`, `GET /admin/decay/stats`)
+
+### Documentation
+
+- **Quickstart README overhaul** — added a minimal 3-line quickstart at the top of the
+  README so new users can reach their first `store_memory` / `recall` in under 60 seconds.
+
 ## [0.11.89] - 2026-06-11
 
 ### Changed
