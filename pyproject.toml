@@ -43,6 +43,9 @@ dev = [
 async = [
     "httpx>=0.24.0",
 ]
+tealtiger = [
+    "tealtiger>=0.1.0",
+]
 
 [project.urls]
 Homepage = "https://dakera.ai"

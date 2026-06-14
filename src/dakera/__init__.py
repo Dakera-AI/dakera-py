@@ -148,6 +148,15 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
+try:
+    from dakera.integrations.tealtiger import (
+        DakeraCostStorage,
+        DakeraDecisionStore,
+        DakeraDelegationHelper,
+    )
+except Exception:  # noqa: BLE001
+    pass
+
 __version__ = "0.11.91"
 __all__ = [
     # Clients
@@ -297,4 +306,8 @@ __all__ = [
     # CE-79: filter builder helpers
     "F",
     "FilterDict",
+    # Integrations (optional — requires extra deps)
+    "DakeraCostStorage",
+    "DakeraDecisionStore",
+    "DakeraDelegationHelper",
 ]
