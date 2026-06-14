@@ -141,3 +141,6 @@ jobs:
         run: |
           python examples/basic_usage.py
           python examples/hybrid_search.py
+          python examples/fulltext_search.py
+          python examples/memory.py
+          python examples/advanced.py
