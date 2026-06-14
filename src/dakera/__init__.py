@@ -12,6 +12,8 @@ Example usage:
     >>> results = client.query("my-namespace", vector=[0.1, 0.2, 0.3], top_k=10)
 """
 
+import contextlib
+
 from dakera.client import DakeraClient
 
 try:
@@ -148,14 +150,12 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-try:
+with contextlib.suppress(Exception):
     from dakera.integrations.tealtiger import (
         DakeraCostStorage,
         DakeraDecisionStore,
         DakeraDelegationHelper,
     )
-except Exception:  # noqa: BLE001
-    pass
 
 __version__ = "0.11.91"
 __all__ = [
