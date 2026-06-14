@@ -77,6 +77,14 @@ Works with **LangChain**, **LlamaIndex**, **CrewAI**, **AutoGen**, and any Pytho
 
 ```python
 from dakera import DakeraClient
+client = DakeraClient(base_url="http://localhost:3000", api_key="dk-mykey")
+client.store_memory(agent_id="my-agent", content="User prefers brevity", importance=0.9)
+```
+
+Full example — store, recall, upsert, and hybrid search:
+
+```python
+from dakera import DakeraClient
 
 client = DakeraClient(base_url="http://localhost:3000", api_key="dk-mykey")
 
