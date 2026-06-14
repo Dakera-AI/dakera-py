@@ -9,6 +9,7 @@ Run:
     python examples/advanced.py
 """
 
+import contextlib
 import os
 import sys
 
@@ -24,10 +25,8 @@ def main() -> None:
     namespace = "example-advanced"
 
     # Create namespace (3 dims for vector ops; text embedding auto-sizes)
-    try:
+    with contextlib.suppress(Exception):
         client.create_namespace(namespace, dimensions=3)
-    except Exception:
-        pass  # already exists
 
     # -------------------------------------------------------------------------
     # Text auto-embedding (server generates vectors)
@@ -59,7 +58,10 @@ def main() -> None:
         documents=[
             {"id": "ft1", "text": "Vector databases enable semantic search over embeddings."},
             {"id": "ft2", "text": "BM25 ranking uses term frequency and document length."},
-            {"id": "ft3", "text": "Hybrid search combines vector similarity with keyword matching."},
+            {
+                "id": "ft3",
+                "text": "Hybrid search combines vector similarity with keyword matching.",
+            },
         ],
     )
 

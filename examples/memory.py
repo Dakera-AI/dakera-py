@@ -6,6 +6,7 @@ Run:
     python examples/memory.py
 """
 
+import contextlib
 import os
 import sys
 
@@ -122,10 +123,8 @@ def main() -> None:
     # -------------------------------------------------------------------------
     for mid in [mem1_id, mem2_id]:
         if mid:
-            try:
+            with contextlib.suppress(Exception):
                 client.forget(agent_id, mid)
-            except Exception:
-                pass
     print("\nCleaned up memories")
 
 

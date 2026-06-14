@@ -6,6 +6,7 @@ Run:
     python examples/fulltext_search.py
 """
 
+import contextlib
 import os
 import sys
 
@@ -24,21 +25,39 @@ def main() -> None:
     namespace = "example-fulltext"
 
     # Create namespace for full-text indexing
-    try:
+    with contextlib.suppress(Exception):
         client.create_namespace(namespace, dimensions=3)
-    except Exception:
-        pass  # already exists
 
     # --- Index Documents ---
     print("\n--- Indexing Documents ---")
     index_resp = client.index_documents(
         namespace,
         documents=[
-            {"id": "doc1", "text": "The quick brown fox jumps over the lazy dog", "metadata": {"topic": "animals"}},
-            {"id": "doc2", "text": "Machine learning enables computers to learn from data", "metadata": {"topic": "tech"}},
-            {"id": "doc3", "text": "Neural networks are inspired by biological neurons", "metadata": {"topic": "tech"}},
-            {"id": "doc4", "text": "The fox ran swiftly through the dense forest", "metadata": {"topic": "animals"}},
-            {"id": "doc5", "text": "Deep learning is a subset of machine learning algorithms", "metadata": {"topic": "tech"}},
+            {
+                "id": "doc1",
+                "text": "The quick brown fox jumps over the lazy dog",
+                "metadata": {"topic": "animals"},
+            },
+            {
+                "id": "doc2",
+                "text": "Machine learning enables computers to learn from data",
+                "metadata": {"topic": "tech"},
+            },
+            {
+                "id": "doc3",
+                "text": "Neural networks are inspired by biological neurons",
+                "metadata": {"topic": "tech"},
+            },
+            {
+                "id": "doc4",
+                "text": "The fox ran swiftly through the dense forest",
+                "metadata": {"topic": "animals"},
+            },
+            {
+                "id": "doc5",
+                "text": "Deep learning is a subset of machine learning algorithms",
+                "metadata": {"topic": "tech"},
+            },
         ],
     )
     if not index_resp or index_resp.get("indexed_count") != 5:
