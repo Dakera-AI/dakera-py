@@ -210,7 +210,7 @@ chain = delegation.get_delegation_chain("my-agent", root_id, max_depth=5)
 
 All cost records, decision receipts, and delegation chains are stored in Dakera memory with importance-weighted retention (DENY receipts at 0.95 outlast ALLOW at 0.80) and full knowledge-graph traversal for audit purposes.
 
-See [`examples/tealtiger_governance.py`](examples/tealtiger_governance.py) for a complete walkthrough.
+See [`examples/tealtiger_governance.py`](examples/tealtiger_governance.py) for a complete walkthrough.  Join the [integration discussion](https://github.com/Dakera-AI/dakera-deploy/discussions/169) or visit the [TealTiger repo](https://github.com/agentguard-ai/tealtiger).
 
 ---
 

@@ -100,7 +100,10 @@ print(f"Stored cost record: {record.id} (agent={record.agent_id}, cost=${record.
 
 retrieved = cost_storage.get("cost-demo-001")
 if retrieved:
-    cost_val = retrieved.get("actual_cost") if isinstance(retrieved, dict) else retrieved.actual_cost
+    if isinstance(retrieved, dict):
+        cost_val = retrieved.get("actual_cost")
+    else:
+        cost_val = retrieved.actual_cost
     print(f"Retrieved: cost=${cost_val:.4f}")
 
 # ---------------------------------------------------------------------------
