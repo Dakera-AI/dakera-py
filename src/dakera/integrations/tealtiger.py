@@ -469,7 +469,11 @@ class DakeraDecisionStore:
             return None
 
     async def is_terminal(self, agent_id: str, correlation_id: str) -> bool:
-        """Return ``True`` if a decision for *correlation_id* is already stored.
+        """Return ``True`` if a *terminal* decision for *correlation_id* is stored.
+
+        Terminal actions are ``ALLOW``, ``DENY``, and ``TIMED_OUT``.
+        ``REQUIRE_APPROVAL`` is **not** terminal — it is a pending state and will
+        return ``False`` so the request continues to be evaluated.
 
         Use this for idempotency checks before evaluating governance rules to
         avoid processing the same request twice.
@@ -487,7 +491,14 @@ class DakeraDecisionStore:
                 limit=1,
             )
         )
-        return len(resp.memories) > 0
+        if not resp.memories:
+            return False
+        try:
+            content = json.loads(resp.memories[0].content)
+            action = content.get("action", "").upper()
+        except (json.JSONDecodeError, AttributeError):
+            return False
+        return action in ("ALLOW", "DENY", "TIMED_OUT")
 
 
 # ---------------------------------------------------------------------------

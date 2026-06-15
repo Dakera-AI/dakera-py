@@ -8,6 +8,8 @@ asyncio_mode = "auto" is set in pyproject.toml — no @pytest.mark.asyncio neede
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from dakera.integrations.tealtiger import (
     DakeraCostStorage,
     DakeraDecisionStore,
@@ -509,8 +511,9 @@ class TestDakeraDecisionStoreIsTerminal:
 
         assert await ds.is_terminal("ag-1", "corr-new") is False
 
-    async def test_returns_true_when_receipt_exists(self) -> None:
-        payload = json.dumps({"correlation_id": "corr-exists"})
+    @pytest.mark.parametrize("action", ["ALLOW", "DENY", "TIMED_OUT"])
+    async def test_returns_true_for_terminal_actions(self, action: str) -> None:
+        payload = json.dumps({"action": action, "correlation_id": "corr-exists"})
         client = _make_client()
         client.batch_recall = AsyncMock(
             return_value=_make_batch_recall_response([_make_memory(payload)])
@@ -518,6 +521,27 @@ class TestDakeraDecisionStoreIsTerminal:
         ds = DakeraDecisionStore(client)
 
         assert await ds.is_terminal("ag-1", "corr-exists") is True
+
+    async def test_returns_false_for_require_approval(self) -> None:
+        """REQUIRE_APPROVAL is pending, not terminal — must return False."""
+        payload = json.dumps({"action": "REQUIRE_APPROVAL", "correlation_id": "corr-pending"})
+        client = _make_client()
+        client.batch_recall = AsyncMock(
+            return_value=_make_batch_recall_response([_make_memory(payload)])
+        )
+        ds = DakeraDecisionStore(client)
+
+        assert await ds.is_terminal("ag-1", "corr-pending") is False
+
+    async def test_returns_false_when_action_field_missing(self) -> None:
+        payload = json.dumps({"correlation_id": "corr-exists"})
+        client = _make_client()
+        client.batch_recall = AsyncMock(
+            return_value=_make_batch_recall_response([_make_memory(payload)])
+        )
+        ds = DakeraDecisionStore(client)
+
+        assert await ds.is_terminal("ag-1", "corr-exists") is False
 
     async def test_filter_includes_correlation_id_tag(self) -> None:
         client = _make_client()

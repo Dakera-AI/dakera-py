@@ -150,7 +150,7 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
-with contextlib.suppress(Exception):
+with contextlib.suppress(ImportError):
     from dakera.integrations.tealtiger import (
         DakeraCostStorage,
         DakeraDecisionStore,
