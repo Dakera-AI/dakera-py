@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-06-15
+
+### Fixed
+
+- `dakera.__version__` now correctly returns `"0.12.1"` (was `"0.11.91"` in the
+  initial `0.12.0` tag due to a version bump ordering issue).
+- CHANGELOG: corrected `DakeraCostStorage` method names — `store()`, `get()`,
+  `get_by_agent_id()`, `get_by_date_range()`, `get_by_request_id()`, `get_summary()`,
+  `delete_older_than()`, `clear()` (previously listed as `store_cost()`, `get_cost()`, etc.).
+
 ## [0.12.0] - 2026-06-15
 
 ### Added
