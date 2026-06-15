@@ -7,8 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-15
+
 ### Added
 
+- **TealTiger governance integration** (`pip install dakera[tealtiger]`) — optional adapter
+  layer for the [TealTiger](https://github.com/tealtigerlabs/tealtiger) governance framework.
+  Three new classes in `dakera.integrations.tealtiger`:
+  - **`DakeraCostStorage`** — implements TealTiger's `CostStorage` ABC (8 async methods).
+    Persists `CostRecord` entries as Dakera memories under a dedicated agent namespace,
+    enabling full cost lifecycle tracking across LLM calls with importance-based retention.
+    Supports `store_cost()`, `get_cost()`, `list_costs()`, `delete_cost()`,
+    `summarize_costs()`, `get_cost_by_trace()`, `list_cost_summaries()`, and
+    `cleanup_old_costs()`.
+  - **`DakeraDecisionStore`** — receipt persistence for TealTiger governance decisions.
+    Maps `Decision` objects to Dakera memories with importance derived from action type
+    (DENY/TIMED_OUT=0.9, ALLOW=0.7, REQUIRE_APPROVAL=0.8). `is_terminal()` correctly
+    distinguishes pending decisions (REQUIRE_APPROVAL) from resolved ones (ALLOW/DENY/
+    TIMED_OUT). Methods: `store_receipt()`, `lookup_receipt()`, `list_receipts()`,
+    `is_terminal()`.
+  - **`DakeraDelegationHelper`** — knowledge-graph-backed delegation chain tracker.
+    Stores delegation relationships as linked Dakera memories, enabling full graph
+    traversal of agent delegation hierarchies. Methods: `link_delegation()`,
+    `get_delegation_chain()`, `remove_delegation()`, `list_delegates()`.
+  - New example: `examples/tealtiger_governance.py` — end-to-end governance workflow
+    demonstrating cost tracking, decision receipts, and delegation chains.
+  - 34 new tests in `tests/test_tealtiger.py` covering all three adapters with and
+    without TealTiger installed (graceful `ImportError` handling).
+  - Install with: `pip install dakera[tealtiger]` (requires `tealtiger>=1.3.0`).
 - **`TifScore`** — new dataclass in `dakera.models` for Truth-Indeterminacy-Falsity
   reliability scoring (T-I-F RFC Phase 3). Fields: `truth`, `indeterminacy`, `falsity`
   (all `float`, 0–1), `feedback_count` (`int`). Read-only property `classification`
