@@ -14,12 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TealTiger governance integration** (`pip install dakera[tealtiger]`) — optional adapter
   layer for the [TealTiger](https://github.com/tealtigerlabs/tealtiger) governance framework.
   Three new classes in `dakera.integrations.tealtiger`:
-  - **`DakeraCostStorage`** — implements TealTiger's `CostStorage` ABC (8 async methods).
-    Persists `CostRecord` entries as Dakera memories under a dedicated agent namespace,
-    enabling full cost lifecycle tracking across LLM calls with importance-based retention.
-    Supports `store_cost()`, `get_cost()`, `list_costs()`, `delete_cost()`,
-    `summarize_costs()`, `get_cost_by_trace()`, `list_cost_summaries()`, and
-    `cleanup_old_costs()`.
+  - **`DakeraCostStorage`** — cost record adapter (8 async methods). Persists cost
+    records as Dakera memories under a dedicated agent namespace, enabling full cost
+    lifecycle tracking across LLM calls with importance-based retention.
+    Methods: `store()`, `get()`, `get_by_request_id()`, `get_by_agent_id()`,
+    `get_by_date_range()`, `get_summary()`, `delete_older_than()`, `clear()`.
   - **`DakeraDecisionStore`** — receipt persistence for TealTiger governance decisions.
     Maps `Decision` objects to Dakera memories with importance derived from action type
     (DENY/TIMED_OUT=0.9, ALLOW=0.7, REQUIRE_APPROVAL=0.8). `is_terminal()` correctly
@@ -29,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`DakeraDelegationHelper`** — knowledge-graph-backed delegation chain tracker.
     Stores delegation relationships as linked Dakera memories, enabling full graph
     traversal of agent delegation hierarchies. Methods: `link_delegation()`,
-    `get_delegation_chain()`, `remove_delegation()`, `list_delegates()`.
+    `get_delegation_chain()`.
   - New example: `examples/tealtiger_governance.py` — end-to-end governance workflow
     demonstrating cost tracking, decision receipts, and delegation chains.
   - 34 new tests in `tests/test_tealtiger.py` covering all three adapters with and
