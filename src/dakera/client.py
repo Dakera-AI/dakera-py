@@ -2371,13 +2371,16 @@ class DakeraClient:
         """Optimize a namespace."""
         return self._request("POST", f"/v1/admin/namespaces/{namespace}/optimize")
 
-    def index_stats(self, namespace: str) -> dict[str, Any]:
-        """Get index stats for a namespace."""
-        return self._request("GET", f"/v1/admin/namespaces/{namespace}/index/stats")
+    def index_stats(self) -> dict[str, Any]:
+        """Get index statistics across all namespaces."""
+        return self._request("GET", "/v1/admin/indexes/stats")
 
-    def rebuild_indexes(self, namespace: str) -> dict[str, Any]:
-        """Rebuild indexes for a namespace."""
-        return self._request("POST", f"/v1/admin/namespaces/{namespace}/index/rebuild")
+    def rebuild_indexes(self, namespace: str | None = None) -> dict[str, Any]:
+        """Rebuild indexes, optionally for a specific namespace."""
+        data: dict[str, Any] = {}
+        if namespace is not None:
+            data["namespace"] = namespace
+        return self._request("POST", "/v1/admin/indexes/rebuild", data=data or None)
 
     def cache_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
@@ -2428,8 +2431,8 @@ class DakeraClient:
         return self._request("GET", "/v1/admin/backups")
 
     def restore_backup(self, backup_id: str) -> dict[str, Any]:
-        """Restore a backup."""
-        return self._request("POST", f"/v1/admin/backups/{backup_id}/restore")
+        """Restore a backup. See also admin_restore_backup for full restore options."""
+        return self._request("POST", "/v1/admin/backups/restore", data={"backup_id": backup_id})
 
     def delete_backup(self, backup_id: str) -> dict[str, Any]:
         """Delete a backup."""

@@ -264,11 +264,11 @@ class TestNamespaceOps:
         """Test getting index stats."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/v1/admin/namespaces/test-ns/index/stats",
+            "http://localhost:3000/v1/admin/indexes/stats",
             json={"segments": 5, "total_vectors": 10000, "index_size_bytes": 2000000},
             status=200,
         )
-        result = client.index_stats("test-ns")
+        result = client.index_stats()
         assert result["segments"] == 5
         assert result["total_vectors"] == 10000
 
@@ -276,7 +276,7 @@ class TestNamespaceOps:
         """Test rebuilding indexes."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/admin/namespaces/test-ns/index/rebuild",
+            "http://localhost:3000/v1/admin/indexes/rebuild",
             json={"status": "started", "job_id": "rebuild-1"},
             status=200,
         )
