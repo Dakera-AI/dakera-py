@@ -75,7 +75,6 @@ from dakera.models import (
     Document,
     DocumentInput,
     DrainReembedResponse,
-    StaticCountResponse,
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
@@ -133,6 +132,7 @@ from dakera.models import (
     RoutingMode,
     SearchResult,
     StalenessConfig,
+    StaticCountResponse,
     StorageTierOverview,
     TextDocument,
     TextDocumentInput,
@@ -3075,7 +3075,7 @@ class AsyncDakeraClient:
         return DrainReembedResponse.from_dict(resp)
 
     async def admin_reembed_static_count(self) -> StaticCountResponse:
-        """``GET /admin/reembed/static-count`` — count of static vectors pending re-embedding (v0.11.91+).
+        """``GET /admin/reembed/static-count`` — static vectors pending re-embedding.
 
         Async variant of :meth:`DakeraClient.admin_reembed_static_count`.
         Requires Admin scope.

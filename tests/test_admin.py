@@ -994,7 +994,7 @@ class TestAsyncDrainReembed:
 
 
 class TestAdminReembedStaticCount:
-    """Tests for admin_reembed_static_count() — GET /admin/reembed/static-count (v0.11.91+, DAK-6781)."""
+    """Tests for admin_reembed_static_count() (DAK-6781)."""
 
     def test_static_count_returns_count(self, client, mock_responses):
         """Happy-path: response is parsed into StaticCountResponse."""
