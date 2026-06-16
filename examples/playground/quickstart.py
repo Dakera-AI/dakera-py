@@ -9,6 +9,7 @@ Run:
 """
 
 import os
+import secrets
 import sys
 
 from dakera import DakeraClient
@@ -20,7 +21,14 @@ AGENT_ID = "playground-agent"
 
 
 def main() -> None:
-    client = DakeraClient(PLAYGROUND_URL, api_key=PLAYGROUND_KEY)
+    # Generate a unique session ID so the sandbox proxy can isolate this run's
+    # memories from other concurrent playground sessions (DAK-6806).
+    session_id = f"pg_{secrets.token_hex(12)}"
+    client = DakeraClient(
+        PLAYGROUND_URL,
+        api_key=PLAYGROUND_KEY,
+        headers={"X-Playground-Session": session_id},
+    )
 
     health = client.health()
     print(f"Playground: {health}")
