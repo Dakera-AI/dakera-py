@@ -84,7 +84,7 @@ def main() -> None:
     )
     print(f"Filtered search ({len(filtered)} results):")
     for m in filtered:
-        content = m.get("content") or m.get("memory", {}).get("content", "")
+        content = (m.get("memory") or {}).get("content", "") or m.get("content", "")
         print(f"  [{m.get('score', 0.0):.3f}] {content[:80]}")
 
     # -------------------------------------------------------------------------
