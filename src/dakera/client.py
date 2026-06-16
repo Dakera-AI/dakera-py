@@ -1600,6 +1600,13 @@ class DakeraClient:
         edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
         data: dict[str, Any] = {"target_id": target_id, "edge_type": edge_type_str}
         result = self._request("POST", f"/v1/memories/{source_id}/links", data=data)
+        if isinstance(result, dict) and "error" in result:
+            raise AuthorizationError(
+                message=result.get("message") or result.get("error", "Forbidden"),
+                status_code=403,
+                response_body=result,
+                code=ErrorCode.UNKNOWN,
+            )
         return GraphLinkResponse.from_dict(result)
 
     def agent_graph_export(
