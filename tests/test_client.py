@@ -767,7 +767,8 @@ class TestSearchMemoriesEnvelope:
         results = client.search_memories("agent-1", "dark mode")
         assert len(results) == 1
         m = results[0]
-        assert m["content"] == "User prefers dark mode", "content must be populated from nested envelope"
+        assert m["content"] == "User prefers dark mode", \
+            "content must be populated from nested envelope"
         assert m["id"] == "mem_abc"
         assert m["score"] == 0.92
         assert m["memory_type"] == "semantic"
@@ -805,7 +806,9 @@ class TestSearchMemoriesEnvelope:
             json={"memories": []},
             status=200,
         )
-        client.search_memories("agent-1", "my query", top_k=5, memory_type="episodic", min_importance=0.7)
+        client.search_memories(
+            "agent-1", "my query", top_k=5, memory_type="episodic", min_importance=0.7,
+        )
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["agent_id"] == "agent-1"
         assert req_body["query"] == "my query"
@@ -846,7 +849,8 @@ class TestAsyncSearchMemoriesEnvelope:
 
         assert len(results) == 1
         m = results[0]
-        assert m["content"] == "Async test content", "content must be populated from nested envelope"
+        assert m["content"] == "Async test content", \
+            "content must be populated from nested envelope"
         assert m["id"] == "mem_abc"
         assert m["score"] == 0.88
 
