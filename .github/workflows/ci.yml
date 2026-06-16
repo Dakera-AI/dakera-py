@@ -34,8 +34,8 @@ jobs:
 
       - name: Check __version__ matches pyproject.toml
         run: |
-          PYPROJECT_VER=$(python3 -c "import tomllib, pathlib; d=tomllib.loads(pathlib.Path('pyproject.toml').read_text()); print(d['project']['version'])")
-          INIT_VER=$(python3 -c "import ast, pathlib; src=ast.parse(pathlib.Path('src/dakera/__init__.py').read_text()); nodes=[n for n in ast.walk(src) if isinstance(n,ast.Assign) and any(getattr(t,'id',None)=='__version__' for t in n.targets)]; print(nodes[0].value.s)")
+          PYPROJECT_VER=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          INIT_VER=$(grep -m1 '^__version__ = ' src/dakera/__init__.py | sed 's/__version__ = "\(.*\)"/\1/')
           echo "pyproject.toml: $PYPROJECT_VER  __init__.py: $INIT_VER"
           [ "$PYPROJECT_VER" = "$INIT_VER" ] || { echo "ERROR: __version__ drift detected"; exit 1; }
 
