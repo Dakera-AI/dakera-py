@@ -1770,7 +1770,10 @@ class TestMemoryGraphSyncClient:
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/memories/mem-abc/links",
-            json={"error": "forbidden_endpoint", "message": "This endpoint is not available in the public sandbox."},
+            json={
+                "error": "forbidden_endpoint",
+                "message": "This endpoint is not available in the public sandbox.",
+            },
             status=403,
         )
         with pytest.raises(AuthorizationError) as exc_info:
@@ -1937,9 +1940,9 @@ class TestMemoryGraphAsyncClient:
         async def fake_request(method, path, data=None, **kwargs):
             return error_body
 
-        with patch.object(client, "_request", side_effect=fake_request):
-            with pytest.raises(AuthorizationError) as exc_info:
-                await client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+        with patch.object(client, "_request", side_effect=fake_request), \
+                pytest.raises(AuthorizationError) as exc_info:
+            await client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
         assert "forbidden_endpoint" in str(exc_info.value) or "not available" in str(exc_info.value)
 
     async def test_memory_link_raises_authorization_error_no_message(self):
@@ -1950,9 +1953,9 @@ class TestMemoryGraphAsyncClient:
         async def fake_request(method, path, data=None, **kwargs):
             return {"error": "forbidden_endpoint"}
 
-        with patch.object(client, "_request", side_effect=fake_request):
-            with pytest.raises(AuthorizationError) as exc_info:
-                await client.memory_link("mem-abc", "mem-xyz")
+        with patch.object(client, "_request", side_effect=fake_request), \
+                pytest.raises(AuthorizationError) as exc_info:
+            await client.memory_link("mem-abc", "mem-xyz")
         assert "forbidden_endpoint" in str(exc_info.value)
 
     async def test_agent_graph_export(self):
