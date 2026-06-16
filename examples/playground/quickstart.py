@@ -13,7 +13,7 @@ import sys
 
 from dakera import DakeraClient
 
-PLAYGROUND_URL = os.environ.get("DAKERA_API_URL", "http://5.75.177.31")
+PLAYGROUND_URL = os.environ.get("DAKERA_API_URL", "https://5-75-177-31.sslip.io")
 PLAYGROUND_KEY = os.environ.get("DAKERA_API_KEY", "playground-demo")
 
 AGENT_ID = "playground-agent"
