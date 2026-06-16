@@ -731,6 +731,146 @@ class TestCog2AssociativeRecall:
         assert req_body["associated_memories_cap"] == 3
 
 
+class TestSearchMemoriesEnvelope:
+    """search_memories() flattens the nested server envelope {memory: {...}, score}.
+
+    DAK-6780: The /v1/memory/search endpoint returns items in the form
+    {"memory": {"id": ..., "content": ...}, "score": N}.  The client must
+    flatten these so callers see {"id": ..., "content": ..., "score": N}.
+    """
+
+    def test_search_memories_flattens_nested_envelope(self, client, mock_responses):
+        """search_memories() unwraps nested {memory: {...}, score} into flat dicts."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/memory/search",
+            json={
+                "memories": [
+                    {
+                        "memory": {
+                            "id": "mem_abc",
+                            "content": "User prefers dark mode",
+                            "memory_type": "semantic",
+                            "importance": 0.8,
+                            "agent_id": "agent-1",
+                            "created_at": "2026-01-01T00:00:00Z",
+                            "tags": ["prefs"],
+                        },
+                        "score": 0.92,
+                    }
+                ]
+            },
+            status=200,
+        )
+        results = client.search_memories("agent-1", "dark mode")
+        assert len(results) == 1
+        m = results[0]
+        assert m["content"] == "User prefers dark mode", \
+            "content must be populated from nested envelope"
+        assert m["id"] == "mem_abc"
+        assert m["score"] == 0.92
+        assert m["memory_type"] == "semantic"
+
+    def test_search_memories_backward_compat_flat_format(self, client, mock_responses):
+        """search_memories() passes through flat items (backward compat with older servers)."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/memory/search",
+            json={
+                "memories": [
+                    {
+                        "id": "mem_xyz",
+                        "content": "Flat format memory",
+                        "score": 0.75,
+                    }
+                ]
+            },
+            status=200,
+        )
+        results = client.search_memories("agent-1", "flat query")
+        assert len(results) == 1
+        assert results[0]["content"] == "Flat format memory"
+        assert results[0]["score"] == 0.75
+
+    def test_search_memories_sends_correct_request(self, client, mock_responses):
+        """search_memories() sends agent_id, query, top_k, and optional filters."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/memory/search",
+            json={"memories": []},
+            status=200,
+        )
+        client.search_memories(
+            "agent-1", "my query", top_k=5, memory_type="episodic", min_importance=0.7,
+        )
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body["agent_id"] == "agent-1"
+        assert req_body["query"] == "my query"
+        assert req_body["top_k"] == 5
+        assert req_body["memory_type"] == "episodic"
+        assert req_body["min_importance"] == 0.7
+
+
+class TestAsyncSearchMemoriesEnvelope:
+    """AsyncDakeraClient.search_memories() flattens the nested server envelope."""
+
+    async def test_search_memories_flattens_nested_envelope(self):
+        """async search_memories() unwraps nested {memory: {...}, score} into flat dicts."""
+        from unittest.mock import patch
+
+        client = AsyncDakeraClient("http://localhost:3000")
+
+        async def fake_request(method, path, data=None, **kwargs):
+            return {
+                "memories": [
+                    {
+                        "memory": {
+                            "id": "mem_abc",
+                            "content": "Async test content",
+                            "memory_type": "episodic",
+                            "importance": 0.9,
+                            "agent_id": "agent-1",
+                            "created_at": "2026-01-01T00:00:00Z",
+                            "tags": [],
+                        },
+                        "score": 0.88,
+                    }
+                ]
+            }
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            results = await client.search_memories("agent-1", "async query")
+
+        assert len(results) == 1
+        m = results[0]
+        assert m["content"] == "Async test content", \
+            "content must be populated from nested envelope"
+        assert m["id"] == "mem_abc"
+        assert m["score"] == 0.88
+
+    async def test_search_memories_backward_compat_flat_format(self):
+        """async search_memories() passes through flat items without mutation."""
+        from unittest.mock import patch
+
+        client = AsyncDakeraClient("http://localhost:3000")
+
+        async def fake_request(method, path, data=None, **kwargs):
+            return {"memories": [{"id": "flat_1", "content": "flat content", "score": 0.5}]}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            results = await client.search_memories("agent-1", "flat query")
+
+        assert results[0]["content"] == "flat content"
+        assert results[0]["score"] == 0.5
+
+
+
 class TestBatchMemoryOperations:
     """Tests for CE-2 batch recall/forget (v0.7.0)."""
 
