@@ -132,6 +132,7 @@ from dakera.models import (
     RoutingMode,
     SearchResult,
     StalenessConfig,
+    StaticCountResponse,
     StorageTierOverview,
     TextDocument,
     TextDocumentInput,
@@ -3080,6 +3081,18 @@ class AsyncDakeraClient:
             body["min_importance"] = min_importance
         resp = await self._request("POST", "/admin/reembed/drain", data=body if body else None)
         return DrainReembedResponse.from_dict(resp)
+
+    async def admin_reembed_static_count(self) -> StaticCountResponse:
+        """``GET /admin/reembed/static-count`` — static vectors pending re-embedding.
+
+        Async variant of :meth:`DakeraClient.admin_reembed_static_count`.
+        Requires Admin scope.
+
+        Returns:
+            :class:`StaticCountResponse` with ``static_count`` field.
+        """
+        resp = await self._request("GET", "/admin/reembed/static-count")
+        return StaticCountResponse.from_dict(resp)
 
     # =========================================================================
     # Context Manager Support

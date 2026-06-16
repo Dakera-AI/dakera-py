@@ -3181,3 +3181,20 @@ class DrainReembedResponse:
             cycles=int(data["cycles"]),
             timed_out=bool(data["timed_out"]),
         )
+
+
+@dataclass
+class StaticCountResponse:
+    """Response from ``GET /admin/reembed/static-count`` (v0.11.91+).
+
+    Returns the count of static vectors pending re-embedding. Operators
+    can poll this during a drain to monitor progress. A ``static_count``
+    of 0 means steady state — no vectors awaiting ONNX upgrade.
+    """
+
+    static_count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StaticCountResponse":
+        """Construct from API response dict."""
+        return cls(static_count=int(data["static_count"]))

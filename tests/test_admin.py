@@ -991,3 +991,78 @@ class TestAsyncDrainReembed:
         assert result.processed == 10
         assert result.remaining == 0
         assert result.timed_out is False
+
+
+class TestAdminReembedStaticCount:
+    """Tests for admin_reembed_static_count() (DAK-6781)."""
+
+    def test_static_count_returns_count(self, client, mock_responses):
+        """Happy-path: response is parsed into StaticCountResponse."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/admin/reembed/static-count",
+            json={"static_count": 42},
+            status=200,
+        )
+        result = client.admin_reembed_static_count()
+        assert result.static_count == 42
+
+    def test_static_count_zero_means_steady_state(self, client, mock_responses):
+        """A static_count of 0 is returned cleanly."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/admin/reembed/static-count",
+            json={"static_count": 0},
+            status=200,
+        )
+        result = client.admin_reembed_static_count()
+        assert result.static_count == 0
+
+    def test_static_count_requires_admin_scope(self, client, mock_responses):
+        """403 response surfaces as AuthorizationError."""
+        from dakera import AuthorizationError
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/admin/reembed/static-count",
+            json={"error": "admin scope required"},
+            status=403,
+        )
+        with pytest.raises(AuthorizationError):
+            client.admin_reembed_static_count()
+
+    def test_static_count_server_error(self, client, mock_responses):
+        """500 response surfaces as ServerError."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/admin/reembed/static-count",
+            json={"error": "internal failure"},
+            status=500,
+        )
+        with pytest.raises(ServerError):
+            client.admin_reembed_static_count()
+
+
+class TestAsyncAdminReembedStaticCount:
+    """AsyncDakeraClient.admin_reembed_static_count() parity (DAK-6781)."""
+
+    async def test_async_static_count_parses_response(self):
+        """Async variant issues GET and returns StaticCountResponse."""
+        from unittest.mock import patch
+
+        from dakera import AsyncDakeraClient
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            return {"static_count": 17}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.admin_reembed_static_count()
+
+        assert captured["method"] == "GET"
+        assert captured["path"] == "/admin/reembed/static-count"
+        assert result.static_count == 17
