@@ -15,6 +15,7 @@ Example usage:
 import contextlib
 
 from dakera.client import DakeraClient
+from dakera.session import ChatMemorySession
 
 try:
     from dakera.async_client import AsyncDakeraClient
@@ -157,11 +158,13 @@ with contextlib.suppress(ImportError):
         DakeraDelegationHelper,
     )
 
-__version__ = "0.12.2"
+__version__ = "0.12.4"
 __all__ = [
     # Clients
     "DakeraClient",
     "AsyncDakeraClient",
+    # Session helpers
+    "ChatMemorySession",
     # Models
     "Vector",
     "QueryResult",

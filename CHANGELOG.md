@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4] - 2026-06-16
+
+### Added
+
+- **`ChatMemorySession`** — new convenience helper class for the LLM chat
+  comparison pattern used by the playground (DAK-6846,
+  [#158](https://github.com/Dakera-AI/dakera-py/pull/158)). Wraps
+  `start_session` / `store_memory` / `recall` / `end_session` into a
+  clean context-manager API:
+
+  ```python
+  from dakera import DakeraClient
+  from dakera.session import ChatMemorySession  # or: from dakera import ChatMemorySession
+
+  client = DakeraClient(url, api_key=key)
+
+  with ChatMemorySession.create(client, agent_id="my-agent") as session:
+      session.store("user", "My name is Alice.")
+      context = session.recall("who am I", top_k=5)
+      # pass context to your LLM call
+  # session auto-closed on exit
+  ```
+
+  Key methods: `ChatMemorySession.create()`, `.store()`, `.recall()`,
+  `.close()`. Also available as a plain class (no `with` required) for
+  async or long-lived use-cases.
+
+- **Playground chat comparison example** —
+  `examples/playground/chat_comparison.py` shows the full side-by-side
+  pattern: seed turns, open a comparison session, recall context, call an
+  LLM with and without memory, and display a diff.
+
 ## [0.12.3] - 2026-06-16
 
 ### Added
