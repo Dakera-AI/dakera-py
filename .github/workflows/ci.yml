@@ -32,6 +32,13 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev,async]"
 
+      - name: Check __version__ matches pyproject.toml
+        run: |
+          PYPROJECT_VER=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          INIT_VER=$(grep -m1 '^__version__ = ' src/dakera/__init__.py | sed 's/__version__ = "\(.*\)"/\1/')
+          echo "pyproject.toml: $PYPROJECT_VER  __init__.py: $INIT_VER"
+          [ "$PYPROJECT_VER" = "$INIT_VER" ] || { echo "ERROR: __version__ drift detected"; exit 1; }
+
       - name: Lint with ruff
         run: ruff check .
 
