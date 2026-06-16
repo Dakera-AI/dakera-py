@@ -1,12 +1,11 @@
 """Tests for ChatMemorySession helper."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import responses
 
 from dakera import DakeraClient
-from dakera.models import RecallResponse, RecalledMemory
 from dakera.session import ChatMemorySession
 
 
@@ -160,7 +159,7 @@ class TestChatMemorySessionClose:
         )
 
         session = ChatMemorySession(client, "agent-1", "sess_abc")
-        result = session.close(summary="Test conversation ended")
+        session.close(summary="Test conversation ended")
 
         assert len(mock_responses.calls) == 1
         import json
@@ -205,9 +204,8 @@ class TestChatMemorySessionContextManager:
         )
 
         session = ChatMemorySession(client, "agent-1", "sess_ex")
-        with pytest.raises(ValueError):
-            with session:
-                raise ValueError("test error")
+        with pytest.raises(ValueError), session:
+            raise ValueError("test error")
 
         assert len(mock_responses.calls) == 1
 
@@ -215,6 +213,5 @@ class TestChatMemorySessionContextManager:
         """close() errors must not propagate out of __exit__."""
         session = ChatMemorySession(client, "agent-1", "sess_err")
 
-        with patch.object(session, "close", side_effect=RuntimeError("network error")):
-            with session:
-                pass  # should not raise
+        with patch.object(session, "close", side_effect=RuntimeError("network error")), session:
+            pass  # should not raise

@@ -78,7 +78,10 @@ def main() -> None:
         metadata={"source": "playground-seed"},
     ) as seed_session:
         seed_session.store("user", "I'm building a chatbot in Python using LangChain.")
-        seed_session.store("assistant", "Great choice — LangChain has excellent memory integrations.")
+        seed_session.store(
+            "assistant",
+            "Great choice — LangChain has excellent memory integrations.",
+        )
         seed_session.store("user", "My team prefers async code so we use FastAPI on the backend.")
         print(f"  Session {seed_session.session_id}: stored 3 turns\n")
 

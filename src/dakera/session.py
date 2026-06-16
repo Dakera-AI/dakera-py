@@ -25,6 +25,7 @@ Example::
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ class ChatMemorySession:
 
     def __init__(
         self,
-        client: "DakeraClient",
+        client: DakeraClient,
         agent_id: str,
         session_id: str,
     ) -> None:
@@ -65,10 +66,10 @@ class ChatMemorySession:
     @classmethod
     def create(
         cls,
-        client: "DakeraClient",
+        client: DakeraClient,
         agent_id: str,
         metadata: dict[str, Any] | None = None,
-    ) -> "ChatMemorySession":
+    ) -> ChatMemorySession:
         """Create a new Dakera session and return a ``ChatMemorySession``.
 
         Args:
@@ -133,7 +134,7 @@ class ChatMemorySession:
         self,
         query: str,
         top_k: int = 5,
-    ) -> list["RecalledMemory"]:
+    ) -> list[RecalledMemory]:
         """Recall memories relevant to *query* for this agent.
 
         Searches the agent's full memory (not just the current session) so
@@ -184,11 +185,9 @@ class ChatMemorySession:
     # Context manager
     # ------------------------------------------------------------------
 
-    def __enter__(self) -> "ChatMemorySession":
+    def __enter__(self) -> ChatMemorySession:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:
-            pass
