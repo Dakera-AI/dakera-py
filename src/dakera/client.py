@@ -51,6 +51,7 @@ from dakera.models import (
     Document,
     DocumentInput,
     DrainReembedResponse,
+    StaticCountResponse,
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
@@ -3595,6 +3596,20 @@ class DakeraClient:
             body["min_importance"] = min_importance
         resp = self._request("POST", "/admin/reembed/drain", data=body if body else None)
         return DrainReembedResponse.from_dict(resp)
+
+    def admin_reembed_static_count(self) -> StaticCountResponse:
+        """``GET /admin/reembed/static-count`` — count of static vectors pending re-embedding (v0.11.91+).
+
+        Returns the number of ``_embedding_kind=static`` vectors that have not yet
+        been upgraded to full ONNX quality. Operators can poll this alongside
+        :meth:`drain_reembed` to monitor drain progress. A ``static_count`` of 0
+        means steady state — no vectors awaiting upgrade. Requires Admin scope.
+
+        Returns:
+            :class:`StaticCountResponse` with ``static_count`` field.
+        """
+        resp = self._request("GET", "/admin/reembed/static-count")
+        return StaticCountResponse.from_dict(resp)
 
     # =========================================================================
     # Context Manager Support
