@@ -84,16 +84,22 @@ def main() -> None:
     )
     print(f"Filtered search ({len(filtered)} results):")
     for m in filtered:
-        print(f"  [{m.get('score', 0.0):.3f}] {m.get('content', '')[:80]}")
+        content = m.get("content") or m.get("memory", {}).get("content", "")
+        print(f"  [{m.get('score', 0.0):.3f}] {content[:80]}")
 
     # -------------------------------------------------------------------------
     # 4. Knowledge graph link
+    # Note: requires a full Dakera account; not available on the public sandbox.
     # -------------------------------------------------------------------------
     print("\n--- 4. Knowledge Graph Link ---")
 
     if mem1_id and mem2_id:
-        link = client.memory_link(mem1_id, mem2_id, edge_type="related_to")
-        print(f"Linked {mem1_id} → {mem2_id}: edge_type={link.edge.edge_type}")
+        try:
+            link = client.memory_link(mem1_id, mem2_id, edge_type="related_to")
+            print(f"Linked {mem1_id} → {mem2_id}: edge_type={link.edge.edge_type}")
+        except Exception as kg_err:
+            print(f"KG link not available in sandbox: {kg_err}")
+            print("  Sign up at https://dakera.ai for full knowledge graph access.")
     else:
         print("Skipped KG link (memory IDs unavailable)")
 
