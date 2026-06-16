@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`memory_link()` no longer crashes with `KeyError: 'edge'` on forbidden endpoint responses** (DAK-6785).
+  When a server returns an error body (e.g. `{"error": "forbidden_endpoint", "message": "..."}`)
+  — either as HTTP 403 or as an application-level error in a 200 response — `memory_link()` now
+  raises `AuthorizationError` with the server's message instead of crashing inside
+  `GraphLinkResponse.from_dict()`.
+
 ### Added
 
 - **`admin_reembed_static_count()`** — new `DakeraClient` and `AsyncDakeraClient` method

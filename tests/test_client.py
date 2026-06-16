@@ -1764,6 +1764,39 @@ class TestMemoryGraphSyncClient:
         result = client.memory_link("mem-abc", "mem-xyz", edge_type="linked_by")
         assert result.edge.id == "edge-new"
 
+    def test_memory_link_raises_authorization_error_on_403(self, client, mock_responses):
+        """memory_link() raises AuthorizationError when server returns HTTP 403."""
+        from dakera import AuthorizationError
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/links",
+            json={
+                "error": "forbidden_endpoint",
+                "message": "This endpoint is not available in the public sandbox.",
+            },
+            status=403,
+        )
+        with pytest.raises(AuthorizationError) as exc_info:
+            client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+        assert "forbidden_endpoint" in str(exc_info.value)
+
+    def test_memory_link_raises_authorization_error_on_200_error_body(self, client, mock_responses):
+        """memory_link() raises AuthorizationError on 200 + error body (DAK-6785).
+
+        Servers that return application-level errors as HTTP 200 with an error
+        field must not cause a KeyError crash inside GraphLinkResponse.from_dict().
+        """
+        from dakera import AuthorizationError
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/links",
+            json={"error": "forbidden_endpoint", "message": "This endpoint is not available."},
+            status=200,
+        )
+        with pytest.raises(AuthorizationError) as exc_info:
+            client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+        assert "forbidden_endpoint" in str(exc_info.value) or "not available" in str(exc_info.value)
+
     def test_agent_graph_export_json(self, client, mock_responses):
         """agent_graph_export() defaults to json format."""
         mock_responses.add(
@@ -1893,6 +1926,37 @@ class TestMemoryGraphAsyncClient:
             await client.memory_link("mem-abc", "mem-xyz", edge_type=EdgeType.LINKED_BY)
 
         assert calls[0][2]["edge_type"] == "linked_by"
+
+    async def test_memory_link_raises_authorization_error_on_error_body(self):
+        """memory_link() raises AuthorizationError on error body (DAK-6785).
+
+        Server returns 200 + {"error": "forbidden_endpoint"} — must not crash
+        with KeyError inside GraphLinkResponse.from_dict().
+        """
+        from dakera import AuthorizationError
+        client = AsyncDakeraClient("http://localhost:3000")
+        error_body = {"error": "forbidden_endpoint", "message": "This endpoint is not available."}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            return error_body
+
+        with patch.object(client, "_request", side_effect=fake_request), \
+                pytest.raises(AuthorizationError) as exc_info:
+            await client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+        assert "forbidden_endpoint" in str(exc_info.value) or "not available" in str(exc_info.value)
+
+    async def test_memory_link_raises_authorization_error_no_message(self):
+        """memory_link() uses error field as message when message key is absent."""
+        from dakera import AuthorizationError
+        client = AsyncDakeraClient("http://localhost:3000")
+
+        async def fake_request(method, path, data=None, **kwargs):
+            return {"error": "forbidden_endpoint"}
+
+        with patch.object(client, "_request", side_effect=fake_request), \
+                pytest.raises(AuthorizationError) as exc_info:
+            await client.memory_link("mem-abc", "mem-xyz")
+        assert "forbidden_endpoint" in str(exc_info.value)
 
     async def test_agent_graph_export(self):
         """agent_graph_export() calls GET /v1/agents/{id}/graph/export."""
