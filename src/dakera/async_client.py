@@ -976,7 +976,15 @@ class AsyncDakeraClient:
             data["rerank"] = rerank
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/search", data=data)
-        return result.get("memories", result) if isinstance(result, dict) else result
+        items = result.get("memories", result) if isinstance(result, dict) else result
+        if isinstance(items, list):
+            return [
+                {**item["memory"], "score": item.get("score")}
+                if isinstance(item, dict) and isinstance(item.get("memory"), dict)
+                else item
+                for item in items
+            ]
+        return items
 
     async def compress_agent(self, agent_id: str) -> CompressResponse:
         """Compress the memory namespace for an agent (CE-12)."""
