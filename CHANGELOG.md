@@ -7,21 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **`memory_link()` no longer crashes with `KeyError: 'edge'` on forbidden endpoint responses** (DAK-6785).
-  When a server returns an error body (e.g. `{"error": "forbidden_endpoint", "message": "..."}`)
-  — either as HTTP 403 or as an application-level error in a 200 response — `memory_link()` now
-  raises `AuthorizationError` with the server's message instead of crashing inside
-  `GraphLinkResponse.from_dict()`.
+## [0.12.3] - 2026-06-16
 
 ### Added
 
 - **`admin_reembed_static_count()`** — new `DakeraClient` and `AsyncDakeraClient` method
-  for `GET /v1/admin/reembed/static-count` (v0.11.91+, DAK-6781). Returns a
+  for `GET /v1/admin/reembed/static-count` (v0.11.91+, DAK-6781,
+  [#152](https://github.com/Dakera-AI/dakera-py/pull/152)). Returns a
   `StaticCountResponse` with the count of `_embedding_kind=static` vectors pending
-  ONNX upgrade. Useful for monitoring drain progress. A `static_count` of 0 means
-  steady state.
+  ONNX upgrade. A `static_count` of 0 means steady state.
+
+- **Playground quickstart** — `examples/playground/quickstart.py` demonstrates store,
+  recall, search, and knowledge-graph link against the public sandbox. (DAK-6737,
+  [#145](https://github.com/Dakera-AI/dakera-py/pull/145))
+
+### Fixed
+
+- **`memory_link()` `KeyError: 'edge'` on forbidden endpoint** (DAK-6785,
+  [#154](https://github.com/Dakera-AI/dakera-py/pull/154)) — when the server
+  returns an application-level error body (`{"error": "forbidden_endpoint"}`) in a
+  200 response, `memory_link()` now raises `AuthorizationError` instead of crashing
+  in `GraphLinkResponse.from_dict()`.
+
+- **`search_memories()` content always empty** — flattens the server's nested
+  `{"memory": {"content": "..."}, "score": N}` envelope so callers receive populated
+  content, ID, and metadata. Previously content was always `""`. (DAK-6780,
+  [#151](https://github.com/Dakera-AI/dakera-py/pull/151))
+
+- **Admin URL corrections** — `admin_index_stats()`, `rebuild_indexes()`, and
+  `restore_backup()` used incorrect URL patterns causing 404s. (DAK-6775,
+  [#150](https://github.com/Dakera-AI/dakera-py/pull/150))
+
+- **Playground HTTPS endpoint** — quickstart now uses
+  `https://5-75-177-31.sslip.io` (valid TLS) instead of bare HTTP IP. (DAK-6743,
+  [#146](https://github.com/Dakera-AI/dakera-py/pull/146))
+
+- **Sandbox KG-link restriction** — playground examples now handle the sandbox 403
+  on `/v1/memories/{id}/links` gracefully instead of raising. (DAK-6749,
+  [#148](https://github.com/Dakera-AI/dakera-py/pull/148))
+
+- **Quickstart search step nested envelope** — search results in the quickstart example
+  now correctly access `result["memory"]["content"]`. (DAK-6784,
+  [#153](https://github.com/Dakera-AI/dakera-py/pull/153))
+
+### Testing
+
+- **Remove `xfail` from admin endpoint tests** — `TestAdminEndpoints` xfail markers
+  removed after server v0.11.91 confirmed all admin routes live under `/v1/admin/`.
+  ([#147](https://github.com/Dakera-AI/dakera-py/pull/147))
+
+- **Playground integration tests** — `tests/test_playground_integration.py` added;
+  covers store, recall, search, and KG-link (graceful). Tests skip automatically
+  when `DAKERA_TEST_URL` is absent.
+  ([#149](https://github.com/Dakera-AI/dakera-py/pull/149))
 
 ## [0.12.2] - 2026-06-14
 
