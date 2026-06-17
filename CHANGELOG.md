@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.5] - 2026-06-17
+
+### Added
+
+- **`AsyncChatMemorySession`** — async counterpart to `ChatMemorySession` for use with
+  `AsyncDakeraClient`. Supports `async with` context manager, async factory
+  `await AsyncChatMemorySession.create(client, agent_id)`, and the same
+  `store`/`recall`/`close` API as the sync class. Exported as
+  `dakera.AsyncChatMemorySession`. (DAK-6895, [#160](https://github.com/Dakera-AI/dakera-py/pull/160))
+
+### Internal
+
+- **CI version-drift gate** — `__version__` in `src/dakera/__init__.py` is now
+  asserted to match `pyproject.toml` on every CI run to prevent version skew.
+  (DAK-6850, [#159](https://github.com/Dakera-AI/dakera-py/pull/159))
+
 ## [0.12.4] - 2026-06-16
 
 ### Added
