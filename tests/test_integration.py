@@ -380,3 +380,60 @@ class TestAuthentication:
     def test_accepts_valid_api_key(self, client):
         namespaces = client.list_namespaces()
         assert isinstance(namespaces, list)
+
+
+# ---------------------------------------------------------------------------
+# AsyncChatMemorySession (requires AsyncDakeraClient)
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncChatMemorySession:
+    @pytest.mark.asyncio
+    async def test_create_store_recall_close(self):
+        """AsyncChatMemorySession: live store → recall → close round-trip."""
+        from dakera import AsyncDakeraClient
+        from dakera.session import AsyncChatMemorySession
+
+        api_key = os.environ.get("DAKERA_API_KEY", "test-key")
+        async_client = AsyncDakeraClient(base_url=DAKERA_URL, api_key=api_key)
+        agent_id = f"async-integ-{uuid.uuid4().hex[:8]}"
+
+        session = await AsyncChatMemorySession.create(async_client, agent_id)
+        assert session.session_id
+        assert session.agent_id == agent_id
+
+        # Store two turns
+        r1 = await session.store("user", "My async favourite colour is indigo.")
+        assert r1.get("id") or r1  # server returns memory dict
+
+        r2 = await session.store(
+            "assistant", "Noted — indigo is a deep violet-blue.", importance=0.5
+        )
+        assert r2.get("id") or r2
+
+        time.sleep(0.5)  # allow indexing
+
+        # Recall should surface relevant memories
+        memories = await session.recall("favourite colour", top_k=5)
+        assert isinstance(memories, list)
+        assert len(memories) > 0
+
+        # Close session cleanly
+        result = await session.close()
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self):
+        """AsyncChatMemorySession: async with block ends session automatically."""
+        from dakera import AsyncDakeraClient
+        from dakera.session import AsyncChatMemorySession
+
+        api_key = os.environ.get("DAKERA_API_KEY", "test-key")
+        async_client = AsyncDakeraClient(base_url=DAKERA_URL, api_key=api_key)
+        agent_id = f"async-ctx-{uuid.uuid4().hex[:8]}"
+
+        async with await AsyncChatMemorySession.create(async_client, agent_id) as session:
+            await session.store("user", "Context manager test message.")
+            memories = await session.recall("context manager")
+            assert isinstance(memories, list)
+        # If we reach here without exception the context manager worked
