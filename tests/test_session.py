@@ -1,12 +1,13 @@
 """Tests for ChatMemorySession helper."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import responses
 
 from dakera import DakeraClient
-from dakera.session import ChatMemorySession
+from dakera.async_client import AsyncDakeraClient
+from dakera.session import AsyncChatMemorySession, ChatMemorySession
 
 
 @pytest.fixture
@@ -215,3 +216,99 @@ class TestChatMemorySessionContextManager:
 
         with patch.object(session, "close", side_effect=RuntimeError("network error")), session:
             pass  # should not raise
+
+
+# ===========================================================================
+# AsyncChatMemorySession tests
+# ===========================================================================
+
+
+
+
+class TestAsyncChatMemorySession:
+    """Unit tests for AsyncChatMemorySession using mocked AsyncDakeraClient."""
+
+    def _make_async_client(self) -> AsyncDakeraClient:
+        return AsyncDakeraClient("http://localhost:3000", api_key="test-key")
+
+    def test_async_session_properties(self):
+        client = self._make_async_client()
+        session = AsyncChatMemorySession(client, "agent-async", "sess-async-001")
+        assert session.session_id == "sess-async-001"
+        assert session.agent_id == "agent-async"
+
+    @pytest.mark.asyncio
+    async def test_async_create(self):
+        client = self._make_async_client()
+        with patch.object(
+            client,
+            "start_session",
+            new=AsyncMock(return_value={"id": "sess-new", "agent_id": "ag"}),
+        ):
+            session = await AsyncChatMemorySession.create(client, "ag")
+        assert session.session_id == "sess-new"
+        assert session.agent_id == "ag"
+
+    @pytest.mark.asyncio
+    async def test_async_store_appends_role_tag(self):
+        client = self._make_async_client()
+        store_mock = AsyncMock(return_value={"id": "mem-1"})
+        session = AsyncChatMemorySession(client, "agent-1", "sess-1")
+        with patch.object(client, "store_memory", store_mock):
+            await session.store("user", "Hello async world")
+        call_kwargs = store_mock.call_args.kwargs
+        assert "user" in call_kwargs["tags"]
+        assert call_kwargs["session_id"] == "sess-1"
+        assert call_kwargs["importance"] == 0.6
+
+    @pytest.mark.asyncio
+    async def test_async_store_deduplicates_role_in_tags(self):
+        client = self._make_async_client()
+        store_mock = AsyncMock(return_value={"id": "mem-2"})
+        session = AsyncChatMemorySession(client, "agent-1", "sess-1")
+        with patch.object(client, "store_memory", store_mock):
+            await session.store("assistant", "Response", tags=["assistant", "extra"])
+        tags = store_mock.call_args.kwargs["tags"]
+        assert tags.count("assistant") == 1
+
+    @pytest.mark.asyncio
+    async def test_async_recall_returns_memories(self):
+        from dakera.models import RecallResponse
+        client = self._make_async_client()
+        fake_response = RecallResponse.from_dict({
+            "memories": [{"id": "m1", "content": "test", "memory_type": "episodic",
+                          "importance": 0.8, "score": 0.9}]
+        })
+        with patch.object(client, "recall", new=AsyncMock(return_value=fake_response)):
+            session = AsyncChatMemorySession(client, "agent-1", "sess-1")
+            memories = await session.recall("test query", top_k=3)
+        assert len(memories) == 1
+        assert memories[0].content == "test"
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_closes(self):
+        client = self._make_async_client()
+        session = AsyncChatMemorySession(client, "agent-1", "sess-cm")
+        close_mock = AsyncMock(return_value={})
+        with patch.object(session, "close", close_mock):
+            async with session:
+                pass
+        close_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_closes_on_exception(self):
+        client = self._make_async_client()
+        session = AsyncChatMemorySession(client, "agent-1", "sess-ex")
+        close_mock = AsyncMock(return_value={})
+        with patch.object(session, "close", close_mock), pytest.raises(ValueError):
+            async with session:
+                raise ValueError("test error")
+        close_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager_swallows_close_error(self):
+        client = self._make_async_client()
+        session = AsyncChatMemorySession(client, "agent-1", "sess-swallow")
+        with patch.object(session, "close", AsyncMock(side_effect=RuntimeError("oops"))):
+            async with session:
+                pass  # should not raise
