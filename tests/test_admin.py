@@ -67,7 +67,7 @@ class TestClusterAdmin:
         """Test getting cluster replication status."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/cluster/replication",
+            "http://localhost:3000/v1/admin/cluster/replication",
             json={"replication_factor": 3, "healthy_replicas": 3, "lag_ms": 12},
             status=200,
         )
@@ -79,7 +79,7 @@ class TestClusterAdmin:
         """Test listing shards."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/cluster/shards",
+            "http://localhost:3000/v1/admin/cluster/shards",
             json={"shards": [{"id": "shard-0", "size_bytes": 1024000}]},
             status=200,
         )
@@ -90,7 +90,7 @@ class TestClusterAdmin:
         """Test rebalancing shards."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/cluster/shards/rebalance",
+            "http://localhost:3000/v1/admin/cluster/shards/rebalance",
             json={"moved": 2, "total_shards": 8},
             status=200,
         )
@@ -104,7 +104,7 @@ class TestClusterAdmin:
         """Test rebalance with server error."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/cluster/shards/rebalance",
+            "http://localhost:3000/v1/admin/cluster/shards/rebalance",
             json={"error": "rebalance in progress"},
             status=500,
         )
@@ -119,7 +119,7 @@ class TestMaintenanceMode:
         """Test getting maintenance status."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/cluster/maintenance",
+            "http://localhost:3000/v1/admin/cluster/maintenance",
             json={"enabled": False, "reason": None, "since": None},
             status=200,
         )
@@ -130,7 +130,7 @@ class TestMaintenanceMode:
         """Test enabling maintenance mode."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/cluster/maintenance/enable",
+            "http://localhost:3000/v1/admin/cluster/maintenance/enable",
             json={"enabled": True, "reason": "planned upgrade"},
             status=200,
         )
@@ -151,7 +151,7 @@ class TestMaintenanceMode:
         """Test disabling maintenance mode."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/cluster/maintenance/disable",
+            "http://localhost:3000/v1/admin/cluster/maintenance/disable",
             json={"enabled": False},
             status=200,
         )
@@ -168,7 +168,7 @@ class TestQuotaAdmin:
         """Test listing all quotas."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/quotas",
+            "http://localhost:3000/v1/admin/quotas",
             json={"quotas": [{"namespace": "ns-1", "max_vectors": 100000}]},
             status=200,
         )
@@ -179,7 +179,7 @@ class TestQuotaAdmin:
         """Test getting default quota."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/quotas/default",
+            "http://localhost:3000/v1/admin/quotas/default",
             json={"max_vectors": 1000000, "max_namespaces": 100},
             status=200,
         )
@@ -190,7 +190,7 @@ class TestQuotaAdmin:
         """Test setting default quota."""
         mock_responses.add(
             responses.PUT,
-            "http://localhost:3000/admin/quotas/default",
+            "http://localhost:3000/v1/admin/quotas/default",
             json={"max_vectors": 500000},
             status=200,
         )
@@ -201,7 +201,7 @@ class TestQuotaAdmin:
         """Test getting namespace quota."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/quotas/test-ns",
+            "http://localhost:3000/v1/admin/quotas/test-ns",
             json={"namespace": "test-ns", "max_vectors": 50000},
             status=200,
         )
@@ -212,7 +212,7 @@ class TestQuotaAdmin:
         """Test setting namespace quota."""
         mock_responses.add(
             responses.PUT,
-            "http://localhost:3000/admin/quotas/test-ns",
+            "http://localhost:3000/v1/admin/quotas/test-ns",
             json={"namespace": "test-ns", "max_vectors": 75000},
             status=200,
         )
@@ -223,7 +223,7 @@ class TestQuotaAdmin:
         """Test deleting namespace quota."""
         mock_responses.add(
             responses.DELETE,
-            "http://localhost:3000/admin/quotas/test-ns",
+            "http://localhost:3000/v1/admin/quotas/test-ns",
             json={"deleted": True},
             status=200,
         )
@@ -234,7 +234,7 @@ class TestQuotaAdmin:
         """Test checking if operation exceeds quota."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/quotas/test-ns/check",
+            "http://localhost:3000/v1/admin/quotas/test-ns/check",
             json={"allowed": True, "remaining_vectors": 49000},
             status=200,
         )
@@ -254,7 +254,7 @@ class TestSlowQueryAdmin:
         """Test listing slow queries."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/slow-queries",
+            "http://localhost:3000/v1/admin/slow-queries",
             json=[
                 {"query_id": "q1", "duration_ms": 250, "namespace": "ns-1"},
                 {"query_id": "q2", "duration_ms": 500, "namespace": "ns-2"},
@@ -269,7 +269,7 @@ class TestSlowQueryAdmin:
         """Test getting slow query summary."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/slow-queries/summary",
+            "http://localhost:3000/v1/admin/slow-queries/summary",
             json={"total": 15, "avg_duration_ms": 350, "p99_duration_ms": 800},
             status=200,
         )
@@ -281,7 +281,7 @@ class TestSlowQueryAdmin:
         """Test clearing slow query log."""
         mock_responses.add(
             responses.DELETE,
-            "http://localhost:3000/admin/slow-queries",
+            "http://localhost:3000/v1/admin/slow-queries",
             json={"cleared": 15},
             status=200,
         )
@@ -292,7 +292,7 @@ class TestSlowQueryAdmin:
         """Test updating slow query configuration."""
         mock_responses.add(
             responses.PATCH,
-            "http://localhost:3000/admin/slow-queries/config",
+            "http://localhost:3000/v1/admin/slow-queries/config",
             json={"threshold_ms": 200, "max_entries": 500},
             status=200,
         )
@@ -307,7 +307,7 @@ class TestBackupAdmin:
         """Test listing backups."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/backups",
+            "http://localhost:3000/v1/admin/backups",
             json={
                 "backups": [
                     {"id": "bak-1", "name": "daily-2026-05-17", "size_bytes": 5000000}
@@ -322,7 +322,7 @@ class TestBackupAdmin:
         """Test creating a backup."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/backups",
+            "http://localhost:3000/v1/admin/backups",
             json={"id": "bak-2", "name": "manual-backup", "status": "creating"},
             status=200,
         )
@@ -343,7 +343,7 @@ class TestBackupAdmin:
         """Test getting backup details."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/backups/bak-1",
+            "http://localhost:3000/v1/admin/backups/bak-1",
             json={"id": "bak-1", "name": "daily", "status": "complete", "size_bytes": 5000000},
             status=200,
         )
@@ -354,7 +354,7 @@ class TestBackupAdmin:
         """Test deleting a backup."""
         mock_responses.add(
             responses.DELETE,
-            "http://localhost:3000/admin/backups/bak-1",
+            "http://localhost:3000/v1/admin/backups/bak-1",
             json={"deleted": True},
             status=200,
         )
@@ -365,7 +365,7 @@ class TestBackupAdmin:
         """Test getting backup schedule."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/backups/schedule",
+            "http://localhost:3000/v1/admin/backups/schedule",
             json={"cron": "0 2 * * *", "retention_days": 30, "enabled": True},
             status=200,
         )
@@ -376,7 +376,7 @@ class TestBackupAdmin:
         """Test updating backup schedule."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/backups/schedule",
+            "http://localhost:3000/v1/admin/backups/schedule",
             json={"cron": "0 3 * * *", "retention_days": 14, "enabled": True},
             status=200,
         )
@@ -389,7 +389,7 @@ class TestBackupAdmin:
         """Test restoring from backup."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/backups/restore",
+            "http://localhost:3000/v1/admin/backups/restore",
             json={"restore_id": "rst-1", "status": "in_progress"},
             status=200,
         )
@@ -405,7 +405,7 @@ class TestBackupAdmin:
         """Test getting restore operation status."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/backups/restore/rst-1",
+            "http://localhost:3000/v1/admin/backups/restore/rst-1",
             json={"restore_id": "rst-1", "status": "complete", "elapsed_ms": 5000},
             status=200,
         )
@@ -420,7 +420,7 @@ class TestStorageAndTiers:
         """Test getting storage tier overview."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/storage/tiers",
+            "http://localhost:3000/v1/admin/storage/tiers",
             json={
                 "tiers_enabled": True,
                 "architecture": [
@@ -476,7 +476,7 @@ class TestStorageAndTiers:
         """Test storage tier overview with server error."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/storage/tiers",
+            "http://localhost:3000/v1/admin/storage/tiers",
             json={"error": "storage unavailable"},
             status=500,
         )
@@ -487,7 +487,7 @@ class TestStorageAndTiers:
         """Test getting memory type distribution stats."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/memory-type-stats",
+            "http://localhost:3000/v1/admin/memory-type-stats",
             json={
                 "total": 2550,
                 "working": 50,
@@ -506,7 +506,7 @@ class TestStorageAndTiers:
         """Test getting background activity."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/background-activity",
+            "http://localhost:3000/v1/admin/background-activity",
             json={
                 "tasks": [
                     {"name": "compaction", "status": "running", "progress": 0.5},
@@ -526,7 +526,7 @@ class TestDimensionMigration:
         """Test migrating namespace dimensions."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/namespaces/migrate-dimensions",
+            "http://localhost:3000/v1/admin/namespaces/migrate-dimensions",
             json={
                 "migrated": 2,
                 "failed": 0,
@@ -563,7 +563,7 @@ class TestDimensionMigration:
         """Test dimension migration with server error."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/namespaces/migrate-dimensions",
+            "http://localhost:3000/v1/admin/namespaces/migrate-dimensions",
             json={"error": "migration already in progress"},
             status=500,
         )
@@ -592,7 +592,7 @@ class TestTTLAdmin:
         """Test getting TTL stats."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/ttl/stats",
+            "http://localhost:3000/v1/admin/ttl/stats",
             json={
                 "namespaces": [
                     {
@@ -854,7 +854,7 @@ class TestFulltextReindex:
         """Test triggering fulltext reindex."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/fulltext/reindex",
+            "http://localhost:3000/v1/admin/fulltext/reindex",
             json={
                 "total_indexed": 100,
                 "total_skipped": 50,
@@ -873,7 +873,7 @@ class TestFulltextReindex:
         """Test triggering fulltext reindex for all namespaces."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/fulltext/reindex",
+            "http://localhost:3000/v1/admin/fulltext/reindex",
             json={"total_indexed": 200, "total_skipped": 100, "namespaces": []},
             status=200,
         )
@@ -888,7 +888,7 @@ class TestDrainReembed:
         """A full drain returns remaining=0 and parsed counters."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/reembed/drain",
+            "http://localhost:3000/v1/admin/reembed/drain",
             json={
                 "processed": 1280,
                 "remaining": 0,
@@ -912,7 +912,7 @@ class TestDrainReembed:
         """timeout_secs / batch_size / min_importance are forwarded in the body."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/reembed/drain",
+            "http://localhost:3000/v1/admin/reembed/drain",
             json={
                 "processed": 500,
                 "remaining": 120,
@@ -938,7 +938,7 @@ class TestDrainReembed:
 
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/reembed/drain",
+            "http://localhost:3000/v1/admin/reembed/drain",
             json={"error": "admin scope required"},
             status=403,
         )
@@ -949,7 +949,7 @@ class TestDrainReembed:
         """A 500 surfaces as ServerError."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/admin/reembed/drain",
+            "http://localhost:3000/v1/admin/reembed/drain",
             json={"error": "internal failure"},
             status=500,
         )
@@ -1000,7 +1000,7 @@ class TestAdminReembedStaticCount:
         """Happy-path: response is parsed into StaticCountResponse."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/reembed/static-count",
+            "http://localhost:3000/v1/admin/reembed/static-count",
             json={"static_count": 42},
             status=200,
         )
@@ -1011,7 +1011,7 @@ class TestAdminReembedStaticCount:
         """A static_count of 0 is returned cleanly."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/reembed/static-count",
+            "http://localhost:3000/v1/admin/reembed/static-count",
             json={"static_count": 0},
             status=200,
         )
@@ -1024,7 +1024,7 @@ class TestAdminReembedStaticCount:
 
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/reembed/static-count",
+            "http://localhost:3000/v1/admin/reembed/static-count",
             json={"error": "admin scope required"},
             status=403,
         )
@@ -1035,7 +1035,7 @@ class TestAdminReembedStaticCount:
         """500 response surfaces as ServerError."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/admin/reembed/static-count",
+            "http://localhost:3000/v1/admin/reembed/static-count",
             json={"error": "internal failure"},
             status=500,
         )
