@@ -2744,7 +2744,7 @@ class AsyncDakeraClient:
         data: dict[str, Any] = {}
         if namespace is not None:
             data["namespace"] = namespace
-        result = await self._request("POST", "/admin/fulltext/reindex", data=data)
+        result = await self._request("POST", "/v1/admin/fulltext/reindex", data=data)
         return FulltextReindexResponse.from_dict(result)
 
     # =========================================================================
@@ -2753,11 +2753,11 @@ class AsyncDakeraClient:
 
     async def admin_cluster_replication(self) -> dict[str, Any]:
         """GET /admin/cluster/replication — cluster replication status."""
-        return await self._request("GET", "/admin/cluster/replication")
+        return await self._request("GET", "/v1/admin/cluster/replication")
 
     async def admin_list_shards(self) -> dict[str, Any]:
         """GET /admin/cluster/shards — list shards."""
-        return await self._request("GET", "/admin/cluster/shards")
+        return await self._request("GET", "/v1/admin/cluster/shards")
 
     async def admin_rebalance_shards(
         self,
@@ -2768,11 +2768,11 @@ class AsyncDakeraClient:
         data: dict[str, Any] = {"dry_run": dry_run}
         if shard_ids is not None:
             data["shard_ids"] = shard_ids
-        return await self._request("POST", "/admin/cluster/shards/rebalance", data=data)
+        return await self._request("POST", "/v1/admin/cluster/shards/rebalance", data=data)
 
     async def admin_maintenance_status(self) -> dict[str, Any]:
         """GET /admin/cluster/maintenance — maintenance mode status."""
-        return await self._request("GET", "/admin/cluster/maintenance")
+        return await self._request("GET", "/v1/admin/cluster/maintenance")
 
     async def admin_enable_maintenance(
         self,
@@ -2787,14 +2787,14 @@ class AsyncDakeraClient:
             data["node_ids"] = node_ids
         if duration_minutes is not None:
             data["duration_minutes"] = duration_minutes
-        return await self._request("POST", "/admin/cluster/maintenance/enable", data=data)
+        return await self._request("POST", "/v1/admin/cluster/maintenance/enable", data=data)
 
     async def admin_disable_maintenance(self, force: bool | None = None) -> dict[str, Any]:
         """POST /admin/cluster/maintenance/disable — disable maintenance mode."""
         data: dict[str, Any] = {}
         if force is not None:
             data["force"] = force
-        return await self._request("POST", "/admin/cluster/maintenance/disable", data=data)
+        return await self._request("POST", "/v1/admin/cluster/maintenance/disable", data=data)
 
     # =========================================================================
     # Admin — Quotas
@@ -2802,27 +2802,27 @@ class AsyncDakeraClient:
 
     async def admin_list_quotas(self) -> dict[str, Any]:
         """GET /admin/quotas — list all namespace quotas."""
-        return await self._request("GET", "/admin/quotas")
+        return await self._request("GET", "/v1/admin/quotas")
 
     async def admin_get_default_quota(self) -> dict[str, Any]:
         """GET /admin/quotas/default — get default quota configuration."""
-        return await self._request("GET", "/admin/quotas/default")
+        return await self._request("GET", "/v1/admin/quotas/default")
 
     async def admin_set_default_quota(self, config: dict[str, Any] | None) -> dict[str, Any]:
         """PUT /admin/quotas/default — set default quota configuration."""
-        return await self._request("PUT", "/admin/quotas/default", data={"config": config})
+        return await self._request("PUT", "/v1/admin/quotas/default", data={"config": config})
 
     async def admin_get_quota(self, namespace: str) -> dict[str, Any]:
         """GET /admin/quotas/{namespace} — get namespace quota."""
-        return await self._request("GET", f"/admin/quotas/{namespace}")
+        return await self._request("GET", f"/v1/admin/quotas/{namespace}")
 
     async def admin_set_quota(self, namespace: str, config: dict[str, Any]) -> dict[str, Any]:
         """PUT /admin/quotas/{namespace} — set namespace quota."""
-        return await self._request("PUT", f"/admin/quotas/{namespace}", data={"config": config})
+        return await self._request("PUT", f"/v1/admin/quotas/{namespace}", data={"config": config})
 
     async def admin_delete_quota(self, namespace: str) -> dict[str, Any]:
         """DELETE /admin/quotas/{namespace} — remove namespace quota."""
-        return await self._request("DELETE", f"/admin/quotas/{namespace}")
+        return await self._request("DELETE", f"/v1/admin/quotas/{namespace}")
 
     async def admin_check_quota(
         self,
@@ -2837,7 +2837,7 @@ class AsyncDakeraClient:
             data["dimensions"] = dimensions
         if metadata_bytes is not None:
             data["metadata_bytes"] = metadata_bytes
-        return await self._request("POST", f"/admin/quotas/{namespace}/check", data=data)
+        return await self._request("POST", f"/v1/admin/quotas/{namespace}/check", data=data)
 
     # =========================================================================
     # Admin — Slow Queries
@@ -2857,22 +2857,22 @@ class AsyncDakeraClient:
             params["query_type"] = query_type
         if limit is not None:
             params["limit"] = limit
-        return await self._request("GET", "/admin/slow-queries", params=params)
+        return await self._request("GET", "/v1/admin/slow-queries", params=params)
 
     async def admin_slow_query_summary(self) -> dict[str, Any]:
         """GET /admin/slow-queries/summary — slow query summary."""
-        return await self._request("GET", "/admin/slow-queries/summary")
+        return await self._request("GET", "/v1/admin/slow-queries/summary")
 
     async def admin_clear_slow_queries(self, namespace: str | None = None) -> dict[str, Any]:
         """DELETE /admin/slow-queries — clear slow query log."""
         params: dict[str, Any] = {}
         if namespace is not None:
             params["namespace"] = namespace
-        return await self._request("DELETE", "/admin/slow-queries", params=params)
+        return await self._request("DELETE", "/v1/admin/slow-queries", params=params)
 
     async def admin_update_slow_query_config(self, **kwargs: Any) -> dict[str, Any]:
         """PATCH /admin/slow-queries/config — update slow query configuration."""
-        return await self._request("PATCH", "/admin/slow-queries/config", data=kwargs)
+        return await self._request("PATCH", "/v1/admin/slow-queries/config", data=kwargs)
 
     # =========================================================================
     # Admin — Backups
@@ -2880,7 +2880,7 @@ class AsyncDakeraClient:
 
     async def admin_list_backups(self) -> dict[str, Any]:
         """GET /admin/backups — list all backups."""
-        return await self._request("GET", "/admin/backups")
+        return await self._request("GET", "/v1/admin/backups")
 
     async def admin_create_backup(
         self,
@@ -2900,23 +2900,23 @@ class AsyncDakeraClient:
             data["encrypt"] = encrypt
         if compression is not None:
             data["compression"] = compression
-        return await self._request("POST", "/admin/backups", data=data)
+        return await self._request("POST", "/v1/admin/backups", data=data)
 
     async def admin_get_backup(self, backup_id: str) -> dict[str, Any]:
         """GET /admin/backups/{id} — get backup details."""
-        return await self._request("GET", f"/admin/backups/{backup_id}")
+        return await self._request("GET", f"/v1/admin/backups/{backup_id}")
 
     async def admin_delete_backup(self, backup_id: str) -> dict[str, Any]:
         """DELETE /admin/backups/{id} — delete a backup."""
-        return await self._request("DELETE", f"/admin/backups/{backup_id}")
+        return await self._request("DELETE", f"/v1/admin/backups/{backup_id}")
 
     async def admin_get_backup_schedule(self) -> dict[str, Any]:
         """GET /admin/backups/schedule — get backup schedule."""
-        return await self._request("GET", "/admin/backups/schedule")
+        return await self._request("GET", "/v1/admin/backups/schedule")
 
     async def admin_update_backup_schedule(self, **kwargs: Any) -> dict[str, Any]:
         """POST /admin/backups/schedule — update backup schedule."""
-        return await self._request("POST", "/admin/backups/schedule", data=kwargs)
+        return await self._request("POST", "/v1/admin/backups/schedule", data=kwargs)
 
     async def admin_restore_backup(
         self,
@@ -2933,11 +2933,11 @@ class AsyncDakeraClient:
             data["overwrite"] = overwrite
         if point_in_time is not None:
             data["point_in_time"] = point_in_time
-        return await self._request("POST", "/admin/backups/restore", data=data)
+        return await self._request("POST", "/v1/admin/backups/restore", data=data)
 
     async def admin_get_restore_status(self, restore_id: str) -> dict[str, Any]:
         """GET /admin/backups/restore/{id} — restore operation status."""
-        return await self._request("GET", f"/admin/backups/restore/{restore_id}")
+        return await self._request("GET", f"/v1/admin/backups/restore/{restore_id}")
 
     # =========================================================================
     # Ops — Diagnostics & Jobs
@@ -2990,7 +2990,7 @@ class AsyncDakeraClient:
 
     async def ttl_stats(self) -> TtlStatsResponse:
         """GET /admin/ttl/stats — TTL expiration statistics across namespaces."""
-        data = await self._request("GET", "/admin/ttl/stats")
+        data = await self._request("GET", "/v1/admin/ttl/stats")
         return TtlStatsResponse.from_dict(data)
 
     async def route_query(
@@ -3018,14 +3018,14 @@ class AsyncDakeraClient:
 
     async def download_backup(self, backup_id: str) -> bytes:
         """GET /admin/backups/{id}/download — download a backup as gzip bytes."""
-        url = self._url(f"/admin/backups/{backup_id}/download")
+        url = self._url(f"/v1/admin/backups/{backup_id}/download")
         response = await self._client.get(url)
         response.raise_for_status()
         return response.content
 
     async def upload_backup(self, data: bytes) -> dict[str, Any]:
         """POST /admin/backups/upload — upload a gzip backup."""
-        url = self._url("/admin/backups/upload")
+        url = self._url("/v1/admin/backups/upload")
         response = await self._client.post(
             url,
             content=data,
@@ -3036,16 +3036,16 @@ class AsyncDakeraClient:
 
     async def storage_tier_overview(self) -> StorageTierOverview:
         """GET /admin/storage/tiers — storage tier architecture overview."""
-        data = await self._request("GET", "/admin/storage/tiers")
+        data = await self._request("GET", "/v1/admin/storage/tiers")
         return StorageTierOverview.from_dict(data)
 
     async def background_activity(self) -> dict[str, Any]:
         """GET /admin/background-activity — current background tasks and jobs."""
-        return await self._request("GET", "/admin/background-activity")
+        return await self._request("GET", "/v1/admin/background-activity")
 
     async def memory_type_stats(self) -> MemoryTypeStatsResponse:
         """GET /admin/memory-type-stats — memory type distribution statistics."""
-        data = await self._request("GET", "/admin/memory-type-stats")
+        data = await self._request("GET", "/v1/admin/memory-type-stats")
         return MemoryTypeStatsResponse.from_dict(data)
 
     async def migrate_namespace_dimensions(
@@ -3057,7 +3057,7 @@ class AsyncDakeraClient:
         data: dict[str, Any] = {"target_dimension": target_dimension}
         if namespaces is not None:
             data["namespaces"] = namespaces
-        resp = await self._request("POST", "/admin/namespaces/migrate-dimensions", data=data)
+        resp = await self._request("POST", "/v1/admin/namespaces/migrate-dimensions", data=data)
         return MigrateDimensionsResponse.from_dict(resp)
 
     async def drain_reembed(
@@ -3086,7 +3086,7 @@ class AsyncDakeraClient:
             body["batch_size"] = batch_size
         if min_importance is not None:
             body["min_importance"] = min_importance
-        resp = await self._request("POST", "/admin/reembed/drain", data=body if body else None)
+        resp = await self._request("POST", "/v1/admin/reembed/drain", data=body if body else None)
         return DrainReembedResponse.from_dict(resp)
 
     async def admin_reembed_static_count(self) -> StaticCountResponse:
@@ -3098,7 +3098,7 @@ class AsyncDakeraClient:
         Returns:
             :class:`StaticCountResponse` with ``static_count`` field.
         """
-        resp = await self._request("GET", "/admin/reembed/static-count")
+        resp = await self._request("GET", "/v1/admin/reembed/static-count")
         return StaticCountResponse.from_dict(resp)
 
     # =========================================================================

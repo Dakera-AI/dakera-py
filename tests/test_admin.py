@@ -985,7 +985,7 @@ class TestAsyncDrainReembed:
             result = await client.drain_reembed(timeout_secs=30, batch_size=100)
 
         assert captured["method"] == "POST"
-        assert captured["path"] == "/admin/reembed/drain"
+        assert captured["path"] == "/v1/admin/reembed/drain"
         assert captured["data"]["timeout_secs"] == 30
         assert captured["data"]["batch_size"] == 100
         assert result.processed == 10
@@ -1064,5 +1064,5 @@ class TestAsyncAdminReembedStaticCount:
             result = await client.admin_reembed_static_count()
 
         assert captured["method"] == "GET"
-        assert captured["path"] == "/admin/reembed/static-count"
+        assert captured["path"] == "/v1/admin/reembed/static-count"
         assert result.static_count == 17
