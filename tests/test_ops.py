@@ -511,3 +511,73 @@ class TestImportJobStatus:
         assert result.job_id == "job-123"
         assert result.status == "complete"
         assert result.imported == 100
+
+
+class TestGetKey:
+    """Tests for the get_key ops method."""
+
+    def test_get_key_happy_path(self, client, mock_responses):
+        """get_key fetches a single API key by ID."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/keys/key-abc123",
+            json={
+                "id": "key-abc123",
+                "name": "prod-key",
+                "status": "active",
+                "created_at": "2026-01-01T00:00:00Z",
+            },
+            status=200,
+        )
+        result = client.get_key("key-abc123")
+        assert result["id"] == "key-abc123"
+        assert result["name"] == "prod-key"
+        assert result["status"] == "active"
+        assert len(mock_responses.calls) == 1
+
+    def test_get_key_not_found_raises(self, client, mock_responses):
+        """get_key raises NotFoundError for unknown key IDs."""
+        from dakera.exceptions import NotFoundError
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/keys/no-such-key",
+            json={"error": "key not found"},
+            status=404,
+        )
+        with pytest.raises(NotFoundError):
+            client.get_key("no-such-key")
+
+
+class TestGetNamespaceExtractor:
+    """Tests for the get_namespace_extractor method."""
+
+    def test_get_namespace_extractor_returns_config(self, client, mock_responses):
+        """get_namespace_extractor returns provider/model/base_url config dict."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/namespaces/my-ns/extractor",
+            json={
+                "provider": "gliner",
+                "model": "urchade/gliner_medium-v2.1",
+                "base_url": None,
+            },
+            status=200,
+        )
+        result = client.get_namespace_extractor("my-ns")
+        assert result["provider"] == "gliner"
+        assert result["model"] == "urchade/gliner_medium-v2.1"
+        assert len(mock_responses.calls) == 1
+
+    def test_get_namespace_extractor_not_found_raises(self, client, mock_responses):
+        """get_namespace_extractor raises NotFoundError for unknown namespaces."""
+        from dakera.exceptions import NotFoundError
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/namespaces/bad-ns/extractor",
+            json={"error": "namespace not found"},
+            status=404,
+        )
+        with pytest.raises(NotFoundError):
+            client.get_namespace_extractor("bad-ns")
