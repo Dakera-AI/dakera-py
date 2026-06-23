@@ -5,7 +5,7 @@ import json
 import pytest
 import responses
 
-from dakera import DakeraClient, ServerError
+from dakera import DakeraClient, NotFoundError, ServerError
 
 
 @pytest.fixture
@@ -1129,7 +1129,7 @@ class TestBackupOps:
             json={"error": "not found"},
             status=404,
         )
-        with pytest.raises(Exception):
+        with pytest.raises(NotFoundError):
             client.download_backup("missing")
 
     def test_upload_backup_happy_path(self, client, mock_responses):
@@ -1155,5 +1155,5 @@ class TestBackupOps:
             json={"error": "storage full"},
             status=500,
         )
-        with pytest.raises(Exception):
+        with pytest.raises(ServerError):
             client.upload_backup(b"data")
