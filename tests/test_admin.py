@@ -612,6 +612,42 @@ class TestTTLAdmin:
         assert result.total_expired == 10
         assert result.total_with_ttl == 100
 
+    def test_ttl_cleanup(self, client, mock_responses):
+        """Test running TTL cleanup."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/ttl/cleanup",
+            json={
+                "success": True,
+                "vectors_removed": 42,
+                "namespaces_cleaned": ["ns-1", "ns-2"],
+                "message": "Cleanup complete",
+            },
+            status=200,
+        )
+        result = client.ttl_cleanup(namespace="ns-1")
+        assert result.success is True
+        assert result.vectors_removed == 42
+        assert "ns-1" in result.namespaces_cleaned
+
+    def test_ttl_cleanup_global(self, client, mock_responses):
+        """Test TTL cleanup without namespace scope (global)."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/ttl/cleanup",
+            json={
+                "success": True,
+                "vectors_removed": 100,
+                "namespaces_cleaned": ["ns-1", "ns-2", "ns-3"],
+                "message": "Global cleanup complete",
+            },
+            status=200,
+        )
+        result = client.ttl_cleanup()
+        assert result.success is True
+        assert result.vectors_removed == 100
+        assert len(result.namespaces_cleaned) == 3
+
 
 class TestEncryptionAdmin:
     """Tests for encryption key rotation."""

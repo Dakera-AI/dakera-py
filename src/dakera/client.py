@@ -115,6 +115,7 @@ from dakera.models import (
     TextQueryResponse,
     TextUpsertResponse,
     TifScore,
+    TtlCleanupResponse,
     TtlStatsResponse,
     Vector,
     VectorInput,
@@ -3514,6 +3515,14 @@ class DakeraClient:
         """GET /admin/ttl/stats — TTL expiration statistics across namespaces."""
         data = self._request("GET", "/v1/admin/ttl/stats")
         return TtlStatsResponse.from_dict(data)
+
+    def ttl_cleanup(self, namespace: str | None = None) -> TtlCleanupResponse:
+        """POST /admin/ttl/cleanup — remove expired vectors, optionally scoped to a namespace."""
+        body: dict[str, Any] = {}
+        if namespace is not None:
+            body["namespace"] = namespace
+        data = self._request("POST", "/v1/admin/ttl/cleanup", data=body if body else None)
+        return TtlCleanupResponse.from_dict(data)
 
     def route_query(
         self,

@@ -2923,6 +2923,26 @@ class TtlStatsResponse:
 
 
 @dataclass
+class TtlCleanupResponse:
+    """Response from POST /admin/ttl/cleanup."""
+
+    success: bool
+    vectors_removed: int
+    namespaces_cleaned: list[str]
+    message: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TtlCleanupResponse":
+        """Construct from API response dict."""
+        return cls(
+            success=bool(data["success"]),
+            vectors_removed=int(data["vectors_removed"]),
+            namespaces_cleaned=list(data.get("namespaces_cleaned", [])),
+            message=str(data["message"]),
+        )
+
+
+@dataclass
 class RouteMatch:
     """A single route match from semantic routing."""
 
