@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.6] - 2026-06-23
+
+### Fixed
+
+- **`ttl_cleanup()`** — add missing binding for `POST /v1/admin/ttl/cleanup`; previous
+  callers received a 404 silently. (DAK-7069, [#170](https://github.com/Dakera-AI/dakera-py/pull/170))
+- **Key management routes** — fix `create_key`, `list_keys`, `get_key`, `delete_key`,
+  `deactivate_key`, `rotate_key`, `get_key_usage` to use `/admin/keys` instead of the
+  incorrect `/v1/keys` path. (DAK-7066, [#171](https://github.com/Dakera-AI/dakera-py/pull/171))
+
+### Internal
+
+- Add 11 tests for 5 previously untested admin methods.
+  ([#166](https://github.com/Dakera-AI/dakera-py/pull/166))
+
 ## [0.12.5] - 2026-06-17
 
 ### Added
