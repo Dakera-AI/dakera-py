@@ -520,7 +520,7 @@ class TestGetKey:
         """get_key fetches a single API key by ID."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/v1/keys/key-abc123",
+            "http://localhost:3000/admin/keys/key-abc123",
             json={
                 "id": "key-abc123",
                 "name": "prod-key",
@@ -541,7 +541,7 @@ class TestGetKey:
 
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/v1/keys/no-such-key",
+            "http://localhost:3000/admin/keys/no-such-key",
             json={"error": "key not found"},
             status=404,
         )
