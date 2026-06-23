@@ -2142,31 +2142,31 @@ class AsyncDakeraClient:
             data["permissions"] = permissions
         if expires_at is not None:
             data["expires_at"] = expires_at
-        return await self._request("POST", "/v1/keys", data=data)
+        return await self._request("POST", "/admin/keys", data=data)
 
     async def list_keys(self) -> list[dict[str, Any]]:
         """List API keys."""
-        return await self._request("GET", "/v1/keys")
+        return await self._request("GET", "/admin/keys")
 
     async def get_key(self, key_id: str) -> dict[str, Any]:
         """Get an API key."""
-        return await self._request("GET", f"/v1/keys/{key_id}")
+        return await self._request("GET", f"/admin/keys/{key_id}")
 
     async def delete_key(self, key_id: str) -> dict[str, Any]:
         """Delete an API key."""
-        return await self._request("DELETE", f"/v1/keys/{key_id}")
+        return await self._request("DELETE", f"/admin/keys/{key_id}")
 
     async def deactivate_key(self, key_id: str) -> dict[str, Any]:
         """Deactivate an API key."""
-        return await self._request("POST", f"/v1/keys/{key_id}/deactivate")
+        return await self._request("POST", f"/admin/keys/{key_id}/deactivate")
 
     async def rotate_key(self, key_id: str) -> dict[str, Any]:
         """Rotate an API key."""
-        return await self._request("POST", f"/v1/keys/{key_id}/rotate")
+        return await self._request("POST", f"/admin/keys/{key_id}/rotate")
 
     async def key_usage(self, key_id: str) -> dict[str, Any]:
         """Get usage statistics for an API key."""
-        return await self._request("GET", f"/v1/keys/{key_id}/usage")
+        return await self._request("GET", f"/admin/keys/{key_id}/usage")
 
     # =========================================================================
     # SSE Streaming (CE-1)

@@ -2603,31 +2603,31 @@ class DakeraClient:
             data["permissions"] = permissions
         if expires_at is not None:
             data["expires_at"] = expires_at
-        return self._request("POST", "/v1/keys", data=data)
+        return self._request("POST", "/admin/keys", data=data)
 
     def list_keys(self) -> list[dict[str, Any]]:
         """List all API keys."""
-        return self._request("GET", "/v1/keys")
+        return self._request("GET", "/admin/keys")
 
     def get_key(self, key_id: str) -> dict[str, Any]:
         """Get an API key by ID."""
-        return self._request("GET", f"/v1/keys/{key_id}")
+        return self._request("GET", f"/admin/keys/{key_id}")
 
     def delete_key(self, key_id: str) -> dict[str, Any]:
         """Delete an API key."""
-        return self._request("DELETE", f"/v1/keys/{key_id}")
+        return self._request("DELETE", f"/admin/keys/{key_id}")
 
     def deactivate_key(self, key_id: str) -> dict[str, Any]:
         """Deactivate an API key."""
-        return self._request("POST", f"/v1/keys/{key_id}/deactivate")
+        return self._request("POST", f"/admin/keys/{key_id}/deactivate")
 
     def rotate_key(self, key_id: str) -> dict[str, Any]:
         """Rotate an API key."""
-        return self._request("POST", f"/v1/keys/{key_id}/rotate")
+        return self._request("POST", f"/admin/keys/{key_id}/rotate")
 
     def key_usage(self, key_id: str) -> dict[str, Any]:
         """Get usage statistics for an API key."""
-        return self._request("GET", f"/v1/keys/{key_id}/usage")
+        return self._request("GET", f"/admin/keys/{key_id}/usage")
 
     # =========================================================================
     # SSE Streaming (CE-1)
