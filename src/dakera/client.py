@@ -3551,7 +3551,8 @@ class DakeraClient:
         """GET /admin/backups/{id}/download — download a backup as gzip bytes."""
         url = self._url(f"/v1/admin/backups/{backup_id}/download")
         response = self._session.get(url, timeout=(self.connect_timeout, self.timeout))
-        response.raise_for_status()
+        if not response.ok:
+            self._handle_response(response)
         return response.content
 
     def upload_backup(self, data: bytes) -> dict[str, Any]:
@@ -3563,7 +3564,8 @@ class DakeraClient:
             headers={"Content-Type": "application/gzip"},
             timeout=(self.connect_timeout, self.timeout),
         )
-        response.raise_for_status()
+        if not response.ok:
+            self._handle_response(response)
         return response.json()
 
     def storage_tier_overview(self) -> StorageTierOverview:

@@ -5,7 +5,7 @@ import json
 import pytest
 import responses
 
-from dakera import DakeraClient, ServerError
+from dakera import DakeraClient, NotFoundError, ServerError
 
 
 @pytest.fixture
@@ -1102,3 +1102,58 @@ class TestAsyncAdminReembedStaticCount:
         assert captured["method"] == "GET"
         assert captured["path"] == "/v1/admin/reembed/static-count"
         assert result.static_count == 17
+
+
+class TestBackupOps:
+    """Tests for download_backup and upload_backup admin methods."""
+
+    def test_download_backup_returns_bytes(self, client, mock_responses):
+        """download_backup returns raw bytes content from the server."""
+        backup_bytes = b"\x1f\x8b\x08\x00backup_data"
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/admin/backups/bkp-001/download",
+            body=backup_bytes,
+            status=200,
+            content_type="application/gzip",
+        )
+        result = client.download_backup("bkp-001")
+        assert result == backup_bytes
+        assert len(mock_responses.calls) == 1
+
+    def test_download_backup_server_error(self, client, mock_responses):
+        """download_backup raises on non-2xx responses."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/admin/backups/missing/download",
+            json={"error": "not found"},
+            status=404,
+        )
+        with pytest.raises(NotFoundError):
+            client.download_backup("missing")
+
+    def test_upload_backup_happy_path(self, client, mock_responses):
+        """upload_backup POSTs gzip bytes and returns the parsed JSON body."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/backups/upload",
+            json={"backup_id": "bkp-002", "status": "accepted"},
+            status=200,
+        )
+        payload = b"\x1f\x8b\x08\x00some_backup"
+        result = client.upload_backup(payload)
+        assert result["backup_id"] == "bkp-002"
+        assert result["status"] == "accepted"
+        assert len(mock_responses.calls) == 1
+        assert mock_responses.calls[0].request.headers["Content-Type"] == "application/gzip"
+
+    def test_upload_backup_server_error(self, client, mock_responses):
+        """upload_backup raises on server errors."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/admin/backups/upload",
+            json={"error": "storage full"},
+            status=500,
+        )
+        with pytest.raises(ServerError):
+            client.upload_backup(b"data")

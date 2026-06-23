@@ -239,3 +239,76 @@ class TestGoldenVectors:
         assert s.indeterminacy == pytest.approx(0.5)
         assert s.falsity == pytest.approx(0.5)
         assert s.classification == "surface_contradiction"
+
+
+class TestEvaluateTif:
+    """Integration tests for DakeraClient.evaluate_tif()."""
+
+    def test_evaluate_tif_happy_path(self):
+        """evaluate_tif fetches feedback history and returns a TifScore."""
+        import responses as rsps_lib
+
+        from dakera import DakeraClient
+
+        client = DakeraClient("http://localhost:3000")
+        with rsps_lib.RequestsMock() as rsps:
+            rsps.add(
+                rsps_lib.GET,
+                "http://localhost:3000/v1/memories/mem-abc/feedback",
+                json={
+                    "memory_id": "mem-abc",
+                    "entries": [
+                        {"signal": "upvote", "timestamp": 1,
+                         "old_importance": 0.5, "new_importance": 0.6},
+                        {"signal": "upvote", "timestamp": 2,
+                         "old_importance": 0.6, "new_importance": 0.7},
+                    ],
+                },
+                status=200,
+            )
+            score = client.evaluate_tif("mem-abc")
+            assert len(rsps.calls) == 1
+
+        assert isinstance(score, TifScore)
+        # 2 upvotes: TIF smoothing yields truth=0.8, not 1.0
+        assert score.truth == pytest.approx(0.8)
+        assert score.falsity == pytest.approx(0.0)
+        assert score.feedback_count == 2
+
+    def test_evaluate_tif_no_feedback_returns_indeterminate(self):
+        """evaluate_tif with no feedback signals returns indeterminacy=1.0."""
+        import responses as rsps_lib
+
+        from dakera import DakeraClient
+
+        client = DakeraClient("http://localhost:3000")
+        with rsps_lib.RequestsMock() as rsps:
+            rsps.add(
+                rsps_lib.GET,
+                "http://localhost:3000/v1/memories/mem-xyz/feedback",
+                json={"memory_id": "mem-xyz", "entries": []},
+                status=200,
+            )
+            score = client.evaluate_tif("mem-xyz")
+
+        assert score.indeterminacy == pytest.approx(1.0)
+        assert score.truth == pytest.approx(0.0)
+        assert score.falsity == pytest.approx(0.0)
+
+    def test_evaluate_tif_server_error_propagates(self):
+        """evaluate_tif propagates DakeraError from the feedback history fetch."""
+        import responses as rsps_lib
+
+        from dakera import DakeraClient
+        from dakera.exceptions import DakeraError
+
+        client = DakeraClient("http://localhost:3000")
+        with rsps_lib.RequestsMock() as rsps:
+            rsps.add(
+                rsps_lib.GET,
+                "http://localhost:3000/v1/memories/mem-bad/feedback",
+                json={"error": "internal server error"},
+                status=500,
+            )
+            with pytest.raises(DakeraError):
+                client.evaluate_tif("mem-bad")

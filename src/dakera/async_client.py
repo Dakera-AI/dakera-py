@@ -3029,7 +3029,8 @@ class AsyncDakeraClient:
         """GET /admin/backups/{id}/download — download a backup as gzip bytes."""
         url = self._url(f"/v1/admin/backups/{backup_id}/download")
         response = await self._client.get(url)
-        response.raise_for_status()
+        if not response.is_success:
+            self._handle_response(response)
         return response.content
 
     async def upload_backup(self, data: bytes) -> dict[str, Any]:
@@ -3040,7 +3041,8 @@ class AsyncDakeraClient:
             content=data,
             headers={"Content-Type": "application/gzip"},
         )
-        response.raise_for_status()
+        if not response.is_success:
+            self._handle_response(response)
         return response.json()
 
     async def storage_tier_overview(self) -> StorageTierOverview:
