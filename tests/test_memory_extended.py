@@ -1002,7 +1002,7 @@ class TestAPIKeys:
         """Test creating an API key."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/keys",
+            "http://localhost:3000/admin/keys",
             json={"id": "key-1", "name": "test-key", "key": "dk_abc123"},
             status=200,
         )
@@ -1013,7 +1013,7 @@ class TestAPIKeys:
         """Test listing API keys."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/v1/keys",
+            "http://localhost:3000/admin/keys",
             json=[
                 {"id": "key-1", "name": "admin", "active": True},
                 {"id": "key-2", "name": "reader", "active": True},
@@ -1027,7 +1027,7 @@ class TestAPIKeys:
         """Test deleting an API key."""
         mock_responses.add(
             responses.DELETE,
-            "http://localhost:3000/v1/keys/key-1",
+            "http://localhost:3000/admin/keys/key-1",
             json={"deleted": True},
             status=200,
         )
@@ -1038,7 +1038,7 @@ class TestAPIKeys:
         """Test deactivating an API key."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/keys/key-1/deactivate",
+            "http://localhost:3000/admin/keys/key-1/deactivate",
             json={"id": "key-1", "active": False},
             status=200,
         )
@@ -1049,7 +1049,7 @@ class TestAPIKeys:
         """Test rotating an API key."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/keys/key-1/rotate",
+            "http://localhost:3000/admin/keys/key-1/rotate",
             json={"id": "key-1", "new_key": "dk_new_xyz"},
             status=200,
         )
@@ -1060,7 +1060,7 @@ class TestAPIKeys:
         """Test getting key usage."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/v1/keys/key-1/usage",
+            "http://localhost:3000/admin/keys/key-1/usage",
             json={"key_id": "key-1", "total_requests": 10000, "last_used": "2026-05-17"},
             status=200,
         )
