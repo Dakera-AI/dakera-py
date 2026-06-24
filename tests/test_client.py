@@ -3306,3 +3306,79 @@ class TestAsyncClientDecayParity:
         assert captured["method"] == "GET"
         assert captured["path"] == "/v1/admin/decay/stats"
         assert result["cycles_run"] == 42
+
+
+class TestEmbeddingModelModernBERT:
+    """Verify serialization + deserialization of ModernBERT EmbeddingModel variants."""
+
+    def test_modernbert_embed_base_wire_value(self):
+        from dakera.models import EmbeddingModel
+        assert EmbeddingModel.MODERNBERT_EMBED_BASE.value == "modernbert-embed-base"
+
+    def test_gte_modernbert_base_wire_value(self):
+        from dakera.models import EmbeddingModel
+        assert EmbeddingModel.GTE_MODERNBERT_BASE.value == "gte-modernbert-base"
+
+    def test_upsert_text_sends_modernbert_model(self, client, mock_responses):
+        from dakera.models import EmbeddingModel
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/test-ns/upsert-text",
+            json={
+                "upserted_count": 1,
+                "tokens_processed": 42,
+                "model": "modernbert-embed-base",
+                "embedding_time_ms": 12,
+            },
+            status=200,
+        )
+        from dakera.models import TextDocument
+        result = client.upsert_text(
+            "test-ns",
+            [TextDocument(id="d1", text="Hello")],
+            model=EmbeddingModel.MODERNBERT_EMBED_BASE,
+        )
+        assert result.model == EmbeddingModel.MODERNBERT_EMBED_BASE
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body.get("model") == "modernbert-embed-base"
+
+    def test_upsert_text_sends_gte_modernbert_model(self, client, mock_responses):
+        from dakera.models import EmbeddingModel
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/test-ns/upsert-text",
+            json={
+                "upserted_count": 1,
+                "tokens_processed": 55,
+                "model": "gte-modernbert-base",
+                "embedding_time_ms": 10,
+            },
+            status=200,
+        )
+        from dakera.models import TextDocument
+        result = client.upsert_text(
+            "test-ns",
+            [TextDocument(id="d2", text="World")],
+            model=EmbeddingModel.GTE_MODERNBERT_BASE,
+        )
+        assert result.model == EmbeddingModel.GTE_MODERNBERT_BASE
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body.get("model") == "gte-modernbert-base"
+
+    def test_query_text_deserializes_modernbert_model_in_response(self, client, mock_responses):
+        from dakera.models import EmbeddingModel
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/test-ns/query-text",
+            json={
+                "results": [{"id": "d1", "score": 0.95, "text": "Hello"}],
+                "model": "modernbert-embed-base",
+                "embedding_time_ms": 8,
+                "search_time_ms": 2,
+            },
+            status=200,
+        )
+        result = client.query_text("test-ns", "hello", top_k=1)
+        assert result.model == EmbeddingModel.MODERNBERT_EMBED_BASE
