@@ -475,12 +475,16 @@ class EmbeddingModel(str, Enum):
     - MINILM: MiniLM-L6 - Fast, good quality (384 dimensions)
     - BGE_SMALL: BGE-small - Balanced performance (384 dimensions)
     - E5_SMALL: E5-small - High quality (384 dimensions)
+    - MODERNBERT_EMBED_BASE: ModernBERT-embed-base - 768 dimensions, MRL, 8192 tokens
+    - GTE_MODERNBERT_BASE: GTE-ModernBERT-base - 768 dimensions, MTEB retrieval 64.38
     """
 
     BGE_LARGE = "bge-large"
     MINILM = "minilm"
     BGE_SMALL = "bge-small"
     E5_SMALL = "e5-small"
+    MODERNBERT_EMBED_BASE = "modernbert-embed-base"
+    GTE_MODERNBERT_BASE = "gte-modernbert-base"
 
 
 @dataclass
