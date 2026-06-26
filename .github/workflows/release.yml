@@ -18,6 +18,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Verify manifest version matches release tag
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          TAG_VERSION="${TAG_VERSION#v}"
+          MANIFEST_VERSION=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
+          if [ "$MANIFEST_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch: pyproject.toml='$MANIFEST_VERSION' release tag='$TAG_VERSION'"
+            echo ""
+            echo "Fix: bump pyproject.toml and src/dakera/__init__.py to '$TAG_VERSION',"
+            echo "commit on the target SHA, delete this release, then recreate it on the bumped commit."
+            echo ""
+            echo "Root cause of DAK-7230 — this gate prevents registry rejects on version conflict."
+            exit 1
+          fi
+          echo "✅ Version verified: pyproject.toml=$MANIFEST_VERSION matches release tag ${{ github.ref_name }}"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
