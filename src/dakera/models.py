@@ -699,6 +699,11 @@ class RecalledMemory:
     memory_type: str
     importance: float
     score: float
+    """Ranking score — equals smart_score when present, then weighted_score, then raw score."""
+    smart_score: float | None = None
+    """Raw smart_score from the server (the primary ranking key)."""
+    weighted_score: float | None = None
+    """Raw weighted_score from the server."""
     metadata: dict[str, Any] | None = None
     created_at: str | None = None
     depth: int | None = None
@@ -706,12 +711,22 @@ class RecalledMemory:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
+        smart_score = data.get("smart_score")
+        weighted_score = data.get("weighted_score")
+        if smart_score is not None:
+            score = smart_score
+        elif weighted_score is not None:
+            score = weighted_score
+        else:
+            score = data.get("score", 0.0)
         return cls(
             id=data["id"],
             content=data["content"],
             memory_type=data.get("memory_type", "episodic"),
             importance=data.get("importance", 0.5),
-            score=data.get("score", 0.0),
+            score=score,
+            smart_score=smart_score,
+            weighted_score=weighted_score,
             metadata=data.get("metadata"),
             created_at=data.get("created_at"),
             depth=data.get("depth"),
@@ -733,9 +748,13 @@ class RecallResponse:
 
     @classmethod
     def _normalize_memory(cls, m: dict[str, Any]) -> dict[str, Any]:
-        """Flatten nested {memory: {...}, score: ...} into a single dict."""
+        """Flatten nested {memory: {...}, score, weighted_score, smart_score} into a single dict."""
         if "memory" in m and isinstance(m["memory"], dict):
             flat = {**m["memory"], "score": m.get("score", 0.0)}
+            if "smart_score" in m:
+                flat["smart_score"] = m["smart_score"]
+            if "weighted_score" in m:
+                flat["weighted_score"] = m["weighted_score"]
             return flat
         return m
 
