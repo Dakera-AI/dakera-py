@@ -222,6 +222,8 @@ See the [`examples/`](examples/) directory:
 
 - [`basic_usage.py`](examples/basic_usage.py) — vectors, namespaces, queries, filters
 - [`hybrid_search.py`](examples/hybrid_search.py) — full-text, vector, and hybrid search
+- [`ollama_memory_chat.py`](examples/ollama_memory_chat.py) — persistent memory for a local Ollama chat loop
+- [`ollama_memory_proxy.py`](examples/ollama_memory_proxy.py) — transparent memory proxy in front of Ollama (`/api/chat`)
 - [`tealtiger_governance.py`](examples/tealtiger_governance.py) — TealTiger governance middleware
 
 ---
