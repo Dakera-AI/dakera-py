@@ -713,7 +713,12 @@ class RecalledMemory:
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
         smart_score = data.get("smart_score")
         weighted_score = data.get("weighted_score")
-        score = smart_score if smart_score is not None else (weighted_score if weighted_score is not None else data.get("score", 0.0))
+        if smart_score is not None:
+            score = smart_score
+        elif weighted_score is not None:
+            score = weighted_score
+        else:
+            score = data.get("score", 0.0)
         return cls(
             id=data["id"],
             content=data["content"],

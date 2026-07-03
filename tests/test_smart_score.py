@@ -1,5 +1,7 @@
 """Tests for RecalledMemory.score priority: smart_score > weighted_score > raw score."""
 
+import pytest
+
 from dakera.models import RecalledMemory, RecallResponse
 
 
@@ -31,7 +33,9 @@ def test_raw_score_fallback():
         "score": 0.55,
     }
     m = RecalledMemory.from_dict(data)
-    assert m.score == pytest.approx(0.55), ".score must equal raw score when neither smart_score nor weighted_score"
+    assert m.score == pytest.approx(0.55), (
+        ".score must equal raw score when neither smart_score nor weighted_score"
+    )
     assert m.smart_score is None
     assert m.weighted_score is None
 
@@ -40,8 +44,14 @@ def test_recall_response_normalize_forwards_smart_score():
     raw = {
         "memories": [
             {
-                "memory": {"id": "m4", "content": "nested", "memory_type": "episodic", "importance": 0.9,
-                           "created_at": "2026-01-01T00:00:00Z", "tags": []},
+                "memory": {
+                    "id": "m4",
+                    "content": "nested",
+                    "memory_type": "episodic",
+                    "importance": 0.9,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "tags": [],
+                },
                 "score": 0.4,
                 "weighted_score": 0.6,
                 "smart_score": 0.85,
@@ -60,8 +70,14 @@ def test_recall_response_normalize_without_smart_score():
     raw = {
         "memories": [
             {
-                "memory": {"id": "m5", "content": "nested2", "memory_type": "semantic", "importance": 0.7,
-                           "created_at": "2026-01-01T00:00:00Z", "tags": []},
+                "memory": {
+                    "id": "m5",
+                    "content": "nested2",
+                    "memory_type": "semantic",
+                    "importance": 0.7,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "tags": [],
+                },
                 "score": 0.3,
                 "weighted_score": 0.55,
             }
@@ -71,6 +87,3 @@ def test_recall_response_normalize_without_smart_score():
     m = resp.memories[0]
     assert m.score == pytest.approx(0.55)
     assert m.smart_score is None
-
-
-import pytest
