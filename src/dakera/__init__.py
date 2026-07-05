@@ -158,7 +158,7 @@ with contextlib.suppress(ImportError):
         DakeraDelegationHelper,
     )
 
-__version__ = "0.12.9"
+__version__ = "0.12.10"
 __all__ = [
     # Clients
     "DakeraClient",
