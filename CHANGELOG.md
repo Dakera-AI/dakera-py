@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.10] - 2026-07-05
+
+### Fixed
+
+- **`RecalledMemory.score` now returns server-rank ordering** — `.score` previously exposed the
+  raw `score` field, which did not match the server's actual ranking key (`smart_score` →
+  `weighted_score` → `score` fallback). `.score` now resolves `smart_score` when present, then
+  `weighted_score`, then raw `score`. New optional fields `smart_score` and `weighted_score` are
+  exposed on `RecalledMemory` for consumers that need the raw components.
+  ([#181](https://github.com/Dakera-AI/dakera-py/pull/181))
+
+### Changed
+
+- **Server sync v0.11.97** — no additional SDK API surface changes; bundled with server v0.11.97
+  security dep pins (quick-xml/memmap2), CI improvements (DAK-7362).
+
 ## [0.12.9] - 2026-07-02
 
 ### Changed
