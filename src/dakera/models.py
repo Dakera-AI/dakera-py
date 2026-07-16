@@ -754,7 +754,7 @@ class RecallResponse:
 
     @classmethod
     def _normalize_memory(cls, m: dict[str, Any]) -> dict[str, Any]:
-        """Flatten nested {memory: {...}, score, weighted_score, smart_score, vector_score, text_score}."""
+        """Flatten nested envelope with score, weighted_score, smart_score, vector_score, text_score."""
         if "memory" in m and isinstance(m["memory"], dict):
             flat = {**m["memory"], "score": m.get("score", 0.0)}
             for key in ("smart_score", "weighted_score", "vector_score", "text_score"):
