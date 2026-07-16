@@ -708,6 +708,10 @@ class RecalledMemory:
     created_at: str | None = None
     depth: int | None = None
     """KG-3: hop depth at which this memory was found (only set on associated memories)."""
+    vector_score: float | None = None
+    """Hybrid sub-score: vector similarity component (server v0.11.98+, absent when BM25-only)."""
+    text_score: float | None = None
+    """Hybrid sub-score: BM25 text component (server v0.11.98+, absent when vector-only)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
@@ -730,6 +734,8 @@ class RecalledMemory:
             metadata=data.get("metadata"),
             created_at=data.get("created_at"),
             depth=data.get("depth"),
+            vector_score=data.get("vector_score"),
+            text_score=data.get("text_score"),
         )
 
 
@@ -748,13 +754,12 @@ class RecallResponse:
 
     @classmethod
     def _normalize_memory(cls, m: dict[str, Any]) -> dict[str, Any]:
-        """Flatten nested {memory: {...}, score, weighted_score, smart_score} into a single dict."""
+        """Flatten nested memory envelope; promote sub-score fields to top level."""
         if "memory" in m and isinstance(m["memory"], dict):
             flat = {**m["memory"], "score": m.get("score", 0.0)}
-            if "smart_score" in m:
-                flat["smart_score"] = m["smart_score"]
-            if "weighted_score" in m:
-                flat["weighted_score"] = m["weighted_score"]
+            for key in ("smart_score", "weighted_score", "vector_score", "text_score"):
+                if key in m:
+                    flat[key] = m[key]
             return flat
         return m
 
