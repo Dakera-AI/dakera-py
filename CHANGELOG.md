@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.11] - 2026-07-16
+
+### Added
+
+- **`RecalledMemory` gains optional `vector_score` and `text_score` fields** — Server v0.11.98
+  now surfaces hybrid sub-scores (vector similarity component and BM25 text component) alongside
+  `smart_score` on every recall result. Both fields are `float | None` and absent when the server
+  did not emit them. `RecallResponse._normalize_memory` now propagates these fields from the
+  top-level envelope. Additive — no ranking change.
+  ([server PR#767](https://github.com/Dakera-AI/dakera/pull/767))
+
+### Changed
+
+- **Server sync v0.11.98** — syncs to server v0.11.98: WAL durability fix (data-loss off-by-one
+  LSN guard), unified-query pagination cursor now correct, bi-temporal `valid_from` field now
+  persisted, candle 0.10→0.11 upgrade, adaptive w_vec boost (CE-147), RocksDB opt-in persistent
+  hot tier, Phase-1 speed wave (7 latency fixes), graph handlers on `spawn_blocking`.
+
 ## [0.12.10] - 2026-07-05
 
 ### Fixed
