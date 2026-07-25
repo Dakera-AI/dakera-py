@@ -581,3 +581,39 @@ class TestGetNamespaceExtractor:
         )
         with pytest.raises(NotFoundError):
             client.get_namespace_extractor("bad-ns")
+
+
+class TestDebugConfig:
+    """Tests for GET /debug/config (DAK-7477)."""
+
+    def test_debug_config_returns_env_map(self, client, mock_responses):
+        """debug_config GETs /debug/config and returns env var dict."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/debug/config",
+            json={
+                "DAKERA_ENABLE_BM25": "true",
+                "DAKERA_RERANKER_ENABLED": "true",
+                "_version": "0.11.102",
+                "_build_sha": "abc1234",
+            },
+            status=200,
+        )
+        result = client.debug_config()
+        assert result["_version"] == "0.11.102"
+        assert "DAKERA_ENABLE_BM25" in result
+        assert len(mock_responses.calls) == 1
+        assert mock_responses.calls[0].request.url == "http://localhost:3000/debug/config"
+
+    def test_debug_config_forbidden_raises(self, client, mock_responses):
+        """debug_config raises AuthorizationError when called without Admin scope."""
+        from dakera.exceptions import AuthorizationError
+
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/debug/config",
+            json={"error": "Forbidden: Admin scope required"},
+            status=403,
+        )
+        with pytest.raises(AuthorizationError):
+            client.debug_config()
