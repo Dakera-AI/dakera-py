@@ -735,6 +735,7 @@ class AsyncDakeraClient:
         tags: list[str] | None = None,
         ttl_seconds: int | None = None,
         expires_at: int | None = None,
+        valid_from: int | None = None,
     ) -> dict[str, Any]:
         """Store a memory for an agent.
 
@@ -751,6 +752,10 @@ class AsyncDakeraClient:
                 after this many seconds from creation.
             expires_at: Optional explicit expiry as a Unix timestamp (seconds).
                 Takes precedence over ``ttl_seconds`` when both are provided.
+            valid_from: Optional bi-temporal validity start as a Unix timestamp
+                (seconds). Indicates when this memory becomes temporally valid,
+                independent of ingest time. Defaults to ingest time when omitted.
+                Requires server v0.11.98+ (DAK-7424).
         """
         data: dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
@@ -765,6 +770,8 @@ class AsyncDakeraClient:
             data["ttl_seconds"] = ttl_seconds
         if expires_at is not None:
             data["expires_at"] = expires_at
+        if valid_from is not None:
+            data["valid_from"] = valid_from
         data["agent_id"] = agent_id
         response = await self._request("POST", "/v1/memory/store", data=data)
         # Server wraps the memory in {"memory": {...}, "embedding_time_ms": ...}
