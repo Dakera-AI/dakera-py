@@ -1930,6 +1930,19 @@ class AsyncDakeraClient:
         """
         return await self._request("GET", "/v1/ops/metrics")
 
+    async def debug_config(self) -> dict[str, Any]:
+        """Return all active DAKERA_* env vars (non-secret) from the running server (DAK-7477).
+
+        Requires Admin scope. Returns a dict of DAKERA_* environment variables
+        set in the server process, plus ``_version`` and optionally ``_build_sha``.
+        Secret-bearing keys (TOKEN, KEY, SECRET, PASSWORD, CRED, URL, URI, DSN)
+        are filtered server-side.
+
+        Used by bench harnesses to verify the server is running with the exact
+        feature-flag configuration requested before scoring.
+        """
+        return await self._request("GET", "/debug/config")
+
     async def cluster_status(self) -> dict[str, Any]:
         """Get cluster status."""
         return await self._request("GET", "/v1/admin/cluster/status")
