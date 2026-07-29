@@ -28,6 +28,8 @@ import asyncio
 import json
 import random
 from collections.abc import AsyncGenerator
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import Any
 
 try:
@@ -150,6 +152,14 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
+# DAK-7617: default User-Agent so the engine can attribute Python SDK usage.
+# Read from installed package metadata to avoid a circular import of ``dakera``
+# (``__version__`` is defined after this module is imported in ``__init__``).
+try:
+    _USER_AGENT = f"dakera-py/{_pkg_version('dakera')}"
+except PackageNotFoundError:  # pragma: no cover
+    _USER_AGENT = "dakera-py/unknown"
+
 
 class AsyncDakeraClient:
     """
@@ -204,7 +214,10 @@ class AsyncDakeraClient:
         else:
             self._retry_config = RetryConfig(max_retries=max_retries)
 
-        default_headers: dict[str, str] = {"Content-Type": "application/json"}
+        default_headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "User-Agent": _USER_AGENT,
+        }
         if api_key:
             default_headers["Authorization"] = f"Bearer {api_key}"
         if headers:
