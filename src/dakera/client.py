@@ -8,6 +8,8 @@ import json
 import random
 import time
 from collections.abc import Generator
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 from typing import Any, Union
 from urllib.parse import urljoin
 
@@ -126,6 +128,14 @@ from dakera.models import (
     WarmingTargetTier,
 )
 
+# DAK-7617: default User-Agent so the engine can attribute Python SDK usage.
+# Read from installed package metadata to avoid a circular import of ``dakera``
+# (``__version__`` is defined after this module is imported in ``__init__``).
+try:
+    _USER_AGENT = f"dakera-py/{_pkg_version('dakera')}"
+except PackageNotFoundError:  # pragma: no cover
+    _USER_AGENT = "dakera-py/unknown"
+
 
 class DakeraClient:
     """
@@ -185,7 +195,9 @@ class DakeraClient:
             self._retry_config = RetryConfig(max_retries=max_retries)
 
         self._session = requests.Session()
-        self._session.headers.update({"Content-Type": "application/json"})
+        self._session.headers.update(
+            {"Content-Type": "application/json", "User-Agent": _USER_AGENT}
+        )
 
         if api_key:
             self._session.headers.update({"Authorization": f"Bearer {api_key}"})
