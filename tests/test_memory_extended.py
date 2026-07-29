@@ -1257,3 +1257,64 @@ class TestCacheWarming:
         )
         assert result.entries_warmed == 100
         assert result.entries_skipped == 50
+
+
+# ===========================================================================
+# valid_from bi-temporal field (DAK-7424) — v0.11.102+
+# ===========================================================================
+
+
+class TestStoreMemoryValidFrom:
+    """Tests for the valid_from bi-temporal parameter on store_memory (DAK-7424).
+
+    Server v0.11.98 began persisting valid_from so callers can express when a
+    memory becomes temporally valid, independent of ingest time.
+    """
+
+    def test_store_memory_with_valid_from_includes_field(self, client, mock_responses):
+        """store_memory() forwards valid_from in the request body when set."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memory/store",
+            json={"memory": {"id": "mem-vf1", "content": "past event", "memory_type": "episodic"}},
+            status=200,
+        )
+        ts = 1700000000  # 2023-11-14 Unix timestamp
+        client.store_memory("agent-1", "past event", valid_from=ts)
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body.get("valid_from") == ts
+
+    def test_store_memory_without_valid_from_omits_field(self, client, mock_responses):
+        """store_memory() does not include valid_from when the caller omits it."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memory/store",
+            json={"memory": {"id": "mem-vf2", "content": "now", "memory_type": "episodic"}},
+            status=200,
+        )
+        client.store_memory("agent-1", "now")
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert "valid_from" not in req_body
+
+    def test_store_memory_valid_from_combined_with_other_fields(self, client, mock_responses):
+        """valid_from can be combined with other optional fields (tags, session_id, ttl_seconds)."""
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memory/store",
+            json={"memory": {"id": "mem-vf3", "content": "event", "memory_type": "episodic"}},
+            status=200,
+        )
+        ts = 1700000000
+        client.store_memory(
+            "agent-1",
+            "event",
+            valid_from=ts,
+            tags=["history"],
+            session_id="sess-1",
+            ttl_seconds=86400,
+        )
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body.get("valid_from") == ts
+        assert req_body.get("tags") == ["history"]
+        assert req_body.get("session_id") == "sess-1"
+        assert req_body.get("ttl_seconds") == 86400
