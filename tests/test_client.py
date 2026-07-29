@@ -3394,8 +3394,9 @@ class TestAsyncClientStoreMemoryValidFrom:
 
     async def test_store_memory_with_valid_from_includes_field(self):
         """store_memory() sends valid_from in request body when set."""
-        from dakera.async_client import AsyncDakeraClient
         from unittest.mock import patch
+
+        from dakera.async_client import AsyncDakeraClient
         client = AsyncDakeraClient("http://localhost:3000")
         captured: dict = {}
 
@@ -3410,8 +3411,9 @@ class TestAsyncClientStoreMemoryValidFrom:
 
     async def test_store_memory_without_valid_from_omits_field(self):
         """store_memory() does not include valid_from when caller omits it."""
-        from dakera.async_client import AsyncDakeraClient
         from unittest.mock import patch
+
+        from dakera.async_client import AsyncDakeraClient
         client = AsyncDakeraClient("http://localhost:3000")
         captured: dict = {}
 
