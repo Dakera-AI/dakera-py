@@ -3382,3 +3382,44 @@ class TestEmbeddingModelModernBERT:
         )
         result = client.query_text("test-ns", "hello", top_k=1)
         assert result.model == EmbeddingModel.MODERNBERT_EMBED_BASE
+
+
+# ===========================================================================
+# AsyncDakeraClient.store_memory() valid_from parity (DAK-7424) — v0.11.102+
+# ===========================================================================
+
+
+class TestAsyncClientStoreMemoryValidFrom:
+    """AsyncDakeraClient.store_memory() forwards valid_from for bi-temporal recall (DAK-7424)."""
+
+    async def test_store_memory_with_valid_from_includes_field(self):
+        """store_memory() sends valid_from in request body when set."""
+        from dakera.async_client import AsyncDakeraClient
+        from unittest.mock import patch
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured.update(data or {})
+            return {"id": "mem_vf1", "content": "past event"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory("agent-1", "past event", valid_from=1700000000)
+
+        assert captured.get("valid_from") == 1700000000
+
+    async def test_store_memory_without_valid_from_omits_field(self):
+        """store_memory() does not include valid_from when caller omits it."""
+        from dakera.async_client import AsyncDakeraClient
+        from unittest.mock import patch
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured.update(data or {})
+            return {"id": "mem_vf2", "content": "now"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.store_memory("agent-1", "now")
+
+        assert "valid_from" not in captured
