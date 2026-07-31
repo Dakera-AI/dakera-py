@@ -617,3 +617,51 @@ class TestDebugConfig:
         )
         with pytest.raises(AuthorizationError):
             client.debug_config()
+
+
+class TestAsyncDebugConfig:
+    """AsyncDakeraClient.debug_config() parity tests (DAK-7477)."""
+
+    async def test_async_debug_config_returns_env_map(self):
+        """Async variant GETs /debug/config and returns the env-var dict."""
+        from unittest.mock import patch
+
+        from dakera import AsyncDakeraClient
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+        fake_response = {
+            "DAKERA_ENABLE_BM25": "true",
+            "DAKERA_RERANKER_ENABLED": "true",
+            "_version": "0.11.102",
+            "_build_sha": "abc1234",
+        }
+
+        async def fake_request(method, path, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            return fake_response
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.debug_config()
+
+        assert captured["method"] == "GET"
+        assert captured["path"] == "/debug/config"
+        assert result["_version"] == "0.11.102"
+        assert "DAKERA_ENABLE_BM25" in result
+
+    async def test_async_debug_config_forbidden_raises(self):
+        """Async variant surfaces AuthorizationError on 403 (no Admin scope)."""
+        from unittest.mock import patch
+
+        from dakera import AsyncDakeraClient
+        from dakera.exceptions import AuthorizationError
+
+        client = AsyncDakeraClient("http://localhost:3000")
+
+        async def fake_request(method, path, **kwargs):
+            raise AuthorizationError("Forbidden: Admin scope required", status_code=403)
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            with pytest.raises(AuthorizationError):
+                await client.debug_config()
