@@ -662,6 +662,5 @@ class TestAsyncDebugConfig:
         async def fake_request(method, path, **kwargs):
             raise AuthorizationError("Forbidden: Admin scope required", status_code=403)
 
-        with patch.object(client, "_request", side_effect=fake_request):
-            with pytest.raises(AuthorizationError):
-                await client.debug_config()
+        with patch.object(client, "_request", side_effect=fake_request), pytest.raises(AuthorizationError):
+            await client.debug_config()
