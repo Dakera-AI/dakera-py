@@ -1318,3 +1318,51 @@ class TestStoreMemoryValidFrom:
         assert req_body.get("tags") == ["history"]
         assert req_body.get("session_id") == "sess-1"
         assert req_body.get("ttl_seconds") == 86400
+
+
+class TestAsyncExportVectorsCursor:
+    """AsyncDakeraClient.export_vectors() cursor pagination parity (DAK-7424 follow-up)."""
+
+    async def test_async_export_vectors_forwards_cursor(self):
+        """Async variant forwards cursor in the request body for pagination."""
+        from unittest.mock import patch
+
+        from dakera import AsyncDakeraClient
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["method"] = method
+            captured["path"] = path
+            captured["data"] = data or {}
+            return {"vectors": [{"id": "v-1", "values": [0.1, 0.2]}], "next_cursor": "cursor-page2"}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            result = await client.export_vectors("test-ns", cursor="cursor-abc", limit=50)
+
+        assert captured["method"] == "POST"
+        assert "test-ns" in captured["path"]
+        assert captured["data"]["cursor"] == "cursor-abc"
+        assert captured["data"]["limit"] == 50
+        assert result["next_cursor"] == "cursor-page2"
+        assert len(result["vectors"]) == 1
+
+    async def test_async_export_vectors_omits_cursor_when_none(self):
+        """Async variant does not include cursor in request body when not provided."""
+        from unittest.mock import patch
+
+        from dakera import AsyncDakeraClient
+
+        client = AsyncDakeraClient("http://localhost:3000")
+        captured: dict = {}
+
+        async def fake_request(method, path, data=None, **kwargs):
+            captured["data"] = data or {}
+            return {"vectors": [], "next_cursor": None}
+
+        with patch.object(client, "_request", side_effect=fake_request):
+            await client.export_vectors("test-ns", limit=10)
+
+        assert "cursor" not in captured["data"]
+        assert captured["data"]["limit"] == 10
