@@ -1552,6 +1552,8 @@ class BatchRecallResponse:
     memories: list[Memory]
     total: int
     filtered: int
+    truncated: bool = False
+    """True when the result set was capped by ``limit`` and more matching memories exist."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchRecallResponse":
@@ -1559,6 +1561,7 @@ class BatchRecallResponse:
             memories=[Memory.from_dict(m) for m in data.get("memories", [])],
             total=data.get("total", 0),
             filtered=data.get("filtered", 0),
+            truncated=data.get("truncated", False),
         )
 
 

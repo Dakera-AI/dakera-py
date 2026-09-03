@@ -933,6 +933,38 @@ class TestBatchMemoryOperations:
         assert resp.filtered == 0
         assert resp.memories == []
 
+    def test_batch_recall_truncated_true(self, client, mock_responses):
+        """batch_recall() exposes truncated=True when server signals result was capped."""
+        from dakera import BatchRecallRequest, BatchRecallResponse
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/recall/batch",
+            json={"memories": [], "total": 500, "filtered": 100, "truncated": True},
+            status=200,
+        )
+
+        resp = client.batch_recall(BatchRecallRequest("agent-x", limit=100))
+
+        assert isinstance(resp, BatchRecallResponse)
+        assert resp.truncated is True
+
+    def test_batch_recall_truncated_defaults_false(self, client, mock_responses):
+        """batch_recall() truncated defaults to False when field absent from response."""
+        from dakera import BatchRecallRequest, BatchRecallResponse
+
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/recall/batch",
+            json={"memories": [], "total": 3, "filtered": 3},
+            status=200,
+        )
+
+        resp = client.batch_recall(BatchRecallRequest("agent-x"))
+
+        assert isinstance(resp, BatchRecallResponse)
+        assert resp.truncated is False
+
     def test_batch_forget_sends_correct_request(self, client, mock_responses):
         """batch_forget() DELETEs /v1/memories/forget/batch and returns BatchForgetResponse."""
         from dakera import BatchForgetRequest, BatchForgetResponse, BatchMemoryFilter
