@@ -19,7 +19,7 @@ from dakera import DakeraClient, Vector
 def main():
     # Connect to Dakera server
     client = DakeraClient(
-        os.environ.get("DAKERA_API_URL", "http://localhost:3300"),
+        os.environ.get("DAKERA_API_URL", "http://localhost:3000"),
         api_key=os.environ.get("DAKERA_API_KEY", "dk-mykey"),
     )
 
