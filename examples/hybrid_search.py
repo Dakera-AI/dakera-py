@@ -17,7 +17,7 @@ from dakera import DakeraClient
 
 def main():
     client = DakeraClient(
-        os.environ.get("DAKERA_API_URL", "http://localhost:3300"),
+        os.environ.get("DAKERA_API_URL", "http://localhost:3000"),
         api_key=os.environ.get("DAKERA_API_KEY", "dk-mykey"),
     )
 
