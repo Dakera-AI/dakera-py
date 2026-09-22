@@ -4,9 +4,56 @@ Dakera SDK Data Models
 Dataclasses representing Dakera data structures.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Union
+
+from dakera.exceptions import UnsupportedCapabilityError
+
+# ============================================================================
+# Forward-compatible enums (R9 / DAK-10004)
+# ============================================================================
+
+
+class LenientStrEnum(str, Enum):
+    """A ``str`` enum that never fails on a value it does not know.
+
+    The server's registries (models, index kinds, search modes, ...) grow over
+    time and the capabilities contract says clients MUST ignore strings they do
+    not recognise.  A closed ``Enum`` turns every new server string into a
+    ``ValueError`` on an unrelated call, so every wire enum in this SDK derives
+    from this class instead: ``EmbeddingModel("bge-m3")`` on an SDK that
+    predates that model returns an *unknown member* whose ``value`` is the raw
+    string and whose :attr:`is_known` is ``False``.  Unknown members compare
+    equal to their string, serialise back to it unchanged, and are interned so
+    ``EmbeddingModel("x") is EmbeddingModel("x")``.
+    """
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        if not isinstance(value, str):
+            return None
+        member = str.__new__(cls, value)
+        member._name_ = f"UNKNOWN({value})"
+        member._value_ = value
+        # Intern so identity comparisons hold, like a declared member.
+        return cls._value2member_map_.setdefault(value, member)
+
+    @property
+    def is_known(self) -> bool:
+        """``True`` for a member declared in this SDK, ``False`` for a server string
+        this SDK version does not know yet."""
+        return self.name in type(self).__members__
+
+    @classmethod
+    def known_values(cls) -> list[str]:
+        """Wire strings this SDK version declares (in declaration order)."""
+        return [m.value for m in cls.__members__.values()]
+
+    def __str__(self) -> str:
+        return str(self.value)
+
 
 # ============================================================================
 # Consistency & Query Types (Turbopuffer-inspired)
@@ -26,15 +73,19 @@ class ReadConsistency(str, Enum):
     """Read from replicas within staleness bounds."""
 
 
-class DistanceMetric(str, Enum):
-    """Distance metric for similarity search."""
+class DistanceMetric(LenientStrEnum):
+    """Distance metric for similarity search.
+
+    Lenient: a metric this SDK does not know parses as an unknown member
+    (``is_known == False``) instead of raising.
+    """
 
     COSINE = "cosine"
     EUCLIDEAN = "euclidean"
     DOT_PRODUCT = "dot_product"
 
 
-class RoutingMode(str, Enum):
+class RoutingMode(LenientStrEnum):
     """Routing mode for recall and search (CE-10).
 
     Controls which retrieval index to use when recalling or searching memories.
@@ -51,7 +102,7 @@ class RoutingMode(str, Enum):
     """Fuse ANN and BM25 scores (RRF)."""
 
 
-class FusionStrategy(str, Enum):
+class FusionStrategy(LenientStrEnum):
     """Fusion strategy for hybrid recall (CE-14).
 
     Controls how vector and BM25 scores are combined when ``routing=hybrid``.
@@ -467,9 +518,9 @@ class HybridSearchResult:
 # ============================================================================
 
 
-class EmbeddingModel(str, Enum):
+class EmbeddingModel(LenientStrEnum):
     """
-    Supported embedding models for text-based operations.
+    Embedding models this SDK version knows for text-based operations.
 
     - BGE_LARGE: BGE-large - Best quality, default (1024 dimensions)
     - MINILM: MiniLM-L6 - Fast, good quality (384 dimensions)
@@ -477,6 +528,12 @@ class EmbeddingModel(str, Enum):
     - E5_SMALL: E5-small - High quality (384 dimensions)
     - MODERNBERT_EMBED_BASE: ModernBERT-embed-base - 768 dimensions, MRL, 8192 tokens
     - GTE_MODERNBERT_BASE: GTE-ModernBERT-base - 768 dimensions, MTEB retrieval 64.38
+    - BGE_M3: BGE-M3 multilingual - 1024 dimensions, 8192-token window (server v0.12+)
+
+    The list the *server* supports is authoritative — read it from
+    :meth:`DakeraClient.capabilities`.  A model string the server returns that
+    this SDK does not declare parses as an unknown member (``is_known == False``)
+    rather than raising; the raw string is preserved in ``.value``.
     """
 
     BGE_LARGE = "bge-large"
@@ -485,6 +542,301 @@ class EmbeddingModel(str, Enum):
     E5_SMALL = "e5-small"
     MODERNBERT_EMBED_BASE = "modernbert-embed-base"
     GTE_MODERNBERT_BASE = "gte-modernbert-base"
+    BGE_M3 = "bge-m3"
+
+
+class IndexKind(LenientStrEnum):
+    """Index kinds the server may build or advertise (``index_type`` values).
+
+    Strings are the server's stable storage keys.  Lenient: unknown kinds parse
+    as unknown members.
+    """
+
+    HNSW = "hnsw"
+    PQ = "pq"
+    IVF = "ivf"
+    IVFPQ = "ivfpq"
+    SPFRESH = "spfresh"
+    FULLTEXT = "fulltext"
+
+
+class SearchMode(LenientStrEnum):
+    """Vector search mode the server process runs (``DAKERA_SEARCH_MODE``).
+
+    Process-wide, not selectable per request; exposed through
+    :attr:`ServerCapabilities.search_mode`.  Lenient.
+    """
+
+    HYBRID = "hybrid"
+    BINARY = "binary"
+    FLOAT = "float"
+    SCALAR = "scalar"
+    RABITQ = "rabitq"
+
+
+class RepresentationKind(LenientStrEnum):
+    """Kinds a record representation slot may have (R2 records surface). Lenient."""
+
+    DENSE = "dense"
+    TOKEN_MULTIVECTOR = "token_multivector"
+    PATCH_MULTIVECTOR = "patch_multivector"
+
+
+class BlockDType(LenientStrEnum):
+    """Payload encodings a record slot may be stored as (``store_as``). Lenient."""
+
+    F32 = "f32"
+    F16 = "f16"
+    I8 = "i8"
+
+
+# ============================================================================
+# Server capabilities (GET /v1/capabilities, server v0.12+)
+# ============================================================================
+
+
+def _str_list(value: Any) -> list[str]:
+    """Coerce a JSON list to ``list[str]``, dropping non-string entries."""
+    if not isinstance(value, list):
+        return []
+    return [v for v in value if isinstance(v, str)]
+
+
+def parse_accepted_values(value: Any) -> list[str]:
+    """Parse the server's ``search_modes_accepted`` field.
+
+    The server emits it as prose — ``"hybrid, binary, float, scalar (alias sq),
+    rabitq"`` — so ``x (alias y)`` yields both ``x`` and ``y``.  A JSON list is
+    accepted as well in case the field is ever reshaped into one.
+    """
+    if isinstance(value, list):
+        return _str_list(value)
+    if not isinstance(value, str):
+        return []
+    out: list[str] = []
+    # One token per match: the value, then an optional "(...)" annotation.
+    for match in re.finditer(r"([^,()]+)(?:\(([^)]*)\))?", value):
+        head = match.group(1).strip()
+        if head:
+            out.append(head)
+        note = (match.group(2) or "").strip()
+        if note.lower().startswith("alias"):
+            rest = note[len("alias") :]
+            if rest.startswith("es"):
+                rest = rest[2:]
+            out.extend(a for a in re.split(r"[\s,/]+", rest) if a)
+    return out
+
+
+@dataclass
+class ModelCapability:
+    """One embedding model the server can load (``capabilities.models[]``)."""
+
+    name: EmbeddingModel
+    """Wire name — the string accepted/returned in every ``model`` field."""
+    aliases: list[str] = field(default_factory=list)
+    """Other spellings accepted on input."""
+    dimension: int = 0
+    max_seq_length: int = 0
+    """The model's own context window (tokens)."""
+    effective_max_seq_length: int = 0
+    """What this server embeds before truncating."""
+    active: bool = False
+    """Whether this is the model the server embeds with (one per store)."""
+    mrl_dimensions: list[int] | None = None
+    """Matryoshka truncation dimensions, when supported."""
+    modality: str = "text"
+    raw: dict[str, Any] = field(default_factory=dict)
+    """The verbatim server row — carries fields this SDK does not model yet."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ModelCapability":
+        mrl = data.get("mrl_dimensions")
+        return cls(
+            name=EmbeddingModel(str(data.get("name", ""))),
+            aliases=_str_list(data.get("aliases")),
+            dimension=int(data.get("dimension", 0) or 0),
+            max_seq_length=int(data.get("max_seq_length", 0) or 0),
+            effective_max_seq_length=int(data.get("effective_max_seq_length", 0) or 0),
+            active=bool(data.get("active", False)),
+            mrl_dimensions=[int(d) for d in mrl] if isinstance(mrl, list) else None,
+            modality=str(data.get("modality", "text")),
+            raw=dict(data),
+        )
+
+    def matches(self, name: str) -> bool:
+        """Whether ``name`` is this model's wire name or one of its aliases."""
+        return name == self.name.value or name in self.aliases
+
+
+@dataclass
+class RecordCapabilities:
+    """The R2 record / representation surface (``capabilities.records``)."""
+
+    enabled: bool = False
+    """Whether ``/v1/namespaces/{ns}/records`` answers (else 501 FEATURE_DISABLED)."""
+    representation_kinds: list[RepresentationKind] = field(default_factory=list)
+    dtypes: list[BlockDType] = field(default_factory=list)
+    max_representations: int = 0
+    max_vectors: int = 0
+    max_bytes: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecordCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            representation_kinds=[
+                RepresentationKind(k) for k in _str_list(data.get("representation_kinds"))
+            ],
+            dtypes=[BlockDType(d) for d in _str_list(data.get("dtypes"))],
+            max_representations=int(data.get("max_representations", 0) or 0),
+            max_vectors=int(data.get("max_vectors", 0) or 0),
+            max_bytes=int(data.get("max_bytes", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class ServerCapabilities:
+    """What the connected server can do — ``GET /v1/capabilities``.
+
+    Every field is additive on the server side; this parser ignores fields it
+    does not know and keeps unknown strings inside lists as unknown enum
+    members.  ``capabilities_version`` only changes on a breaking reshape of the
+    document.  The verbatim document is kept in :attr:`raw`.
+    """
+
+    capabilities_version: int = 0
+    server_version: str = ""
+    api_versions: list[str] = field(default_factory=list)
+    default_model: EmbeddingModel = EmbeddingModel.BGE_LARGE
+    models: list[ModelCapability] = field(default_factory=list)
+    index_kinds: list[IndexKind] = field(default_factory=list)
+    vector_index_kinds: list[IndexKind] = field(default_factory=list)
+    live_vector_index_kinds: list[IndexKind] = field(default_factory=list)
+    distance_metrics: list[DistanceMetric] = field(default_factory=list)
+    search_mode: SearchMode = SearchMode.HYBRID
+    """The mode this server process runs (``DAKERA_SEARCH_MODE``)."""
+    search_modes_accepted: list[SearchMode] = field(default_factory=list)
+    """Every value the server accepts for ``DAKERA_SEARCH_MODE`` (aliases expanded)."""
+    fulltext_language: str = "en"
+    on_disk_format_version: int = 0
+    records: RecordCapabilities = field(default_factory=RecordCapabilities)
+    query_languages: list[str] = field(default_factory=list)
+    reembed_pending: bool = False
+    """A model change was acknowledged but the store is not fully re-embedded yet."""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ServerCapabilities":
+        records = data.get("records")
+        return cls(
+            capabilities_version=int(data.get("capabilities_version", 0) or 0),
+            server_version=str(data.get("server_version", "")),
+            api_versions=_str_list(data.get("api_versions")),
+            default_model=EmbeddingModel(str(data.get("default_model", "bge-large"))),
+            models=[
+                ModelCapability.from_dict(m) for m in data.get("models", []) if isinstance(m, dict)
+            ],
+            index_kinds=[IndexKind(k) for k in _str_list(data.get("index_kinds"))],
+            vector_index_kinds=[IndexKind(k) for k in _str_list(data.get("vector_index_kinds"))],
+            live_vector_index_kinds=[
+                IndexKind(k) for k in _str_list(data.get("live_vector_index_kinds"))
+            ],
+            distance_metrics=[DistanceMetric(m) for m in _str_list(data.get("distance_metrics"))],
+            search_mode=SearchMode(str(data.get("search_mode", "hybrid"))),
+            search_modes_accepted=[
+                SearchMode(m) for m in parse_accepted_values(data.get("search_modes_accepted"))
+            ],
+            fulltext_language=str(data.get("fulltext_language", "en")),
+            on_disk_format_version=int(data.get("on_disk_format_version", 0) or 0),
+            records=RecordCapabilities.from_dict(records if isinstance(records, dict) else {}),
+            query_languages=_str_list(data.get("query_languages")),
+            reembed_pending=bool(data.get("reembed_pending", False)),
+            raw=dict(data),
+        )
+
+    # -- discovery helpers ----------------------------------------------------
+
+    @property
+    def model_names(self) -> list[str]:
+        """Wire names of every model the server can load."""
+        return [m.name.value for m in self.models]
+
+    @property
+    def active_model(self) -> ModelCapability | None:
+        """The model the server embeds with (a request naming another is rejected)."""
+        return next((m for m in self.models if m.active), None)
+
+    @property
+    def supports_records(self) -> bool:
+        """Whether the record routes are switched on (``records.enabled``)."""
+        return self.records.enabled
+
+    def model(self, name: str) -> ModelCapability | None:
+        """Look a model up by wire name or alias."""
+        return next((m for m in self.models if m.matches(name)), None)
+
+    def supports_model(self, name: "EmbeddingModel | str") -> bool:
+        return self.model(wire_value(name)) is not None
+
+    def supports_index_kind(self, kind: "IndexKind | str") -> bool:
+        return wire_value(kind) in {k.value for k in self.index_kinds}
+
+    def supports_distance_metric(self, metric: "DistanceMetric | str") -> bool:
+        return wire_value(metric) in {m.value for m in self.distance_metrics}
+
+    def supports_search_mode(self, mode: "SearchMode | str") -> bool:
+        return wire_value(mode) in {m.value for m in self.search_modes_accepted}
+
+    def supports_query_language(self, lang: str) -> bool:
+        return lang in self.query_languages
+
+    # -- pre-flight validation --------------------------------------------------
+
+    def supported_values(self, kind: str) -> list[str]:
+        """Wire strings the server advertises for ``kind`` (see :meth:`require`)."""
+        if kind == "model":
+            return self.model_names
+        if kind == "index_kind":
+            return [k.value for k in self.index_kinds]
+        if kind == "distance_metric":
+            return [m.value for m in self.distance_metrics]
+        if kind == "search_mode":
+            return [m.value for m in self.search_modes_accepted]
+        if kind == "query_language":
+            return list(self.query_languages)
+        raise ValueError(f"unknown capability kind: {kind!r}")
+
+    def supports(self, kind: str, value: Any) -> bool:
+        """Whether the server advertises ``value`` for ``kind``."""
+        if kind == "model":
+            return self.supports_model(value)
+        return wire_value(value) in self.supported_values(kind)
+
+    def require(self, kind: str, value: Any) -> None:
+        """Raise :class:`~dakera.exceptions.UnsupportedCapabilityError` unless the
+        server advertises ``value`` for ``kind``.
+
+        ``kind`` is one of ``"model"``, ``"index_kind"``, ``"distance_metric"``,
+        ``"search_mode"``, ``"query_language"``.  ``value`` may be an enum member
+        or a plain string.
+        """
+        if not self.supports(kind, value):
+            raise UnsupportedCapabilityError(
+                kind,
+                wire_value(value),
+                self.supported_values(kind),
+                self.server_version or None,
+            )
+
+
+def wire_value(value: Any) -> str:
+    """The wire string of an enum member or plain string."""
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
 
 
 @dataclass
@@ -766,8 +1118,7 @@ class RecallResponse:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
         memories = [
-            RecalledMemory.from_dict(cls._normalize_memory(m))
-            for m in data.get("memories", [])
+            RecalledMemory.from_dict(cls._normalize_memory(m)) for m in data.get("memories", [])
         ]
         raw_assoc = data.get("associated_memories")
         associated_memories = (
@@ -2603,9 +2954,7 @@ class FulltextReindexResponse:
             namespaces_processed=data.get("namespaces_processed", 0),
             total_indexed=data.get("total_indexed", 0),
             total_skipped=data.get("total_skipped", 0),
-            details=[
-                FulltextReindexNamespaceResult.from_dict(d) for d in data.get("details", [])
-            ],
+            details=[FulltextReindexNamespaceResult.from_dict(d) for d in data.get("details", [])],
         )
 
 

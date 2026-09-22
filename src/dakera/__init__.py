@@ -30,6 +30,7 @@ from dakera.exceptions import (
     NotFoundError,
     RateLimitError,
     ServerError,
+    UnsupportedCapabilityError,
     ValidationError,
 )
 from dakera.models import (
@@ -55,6 +56,7 @@ from dakera.models import (
     BatchStoreMemoryItem,
     BatchStoreMemoryRequest,
     BatchStoreMemoryResponse,
+    BlockDType,
     # CE-12
     CompressResponse,
     ConfigureNamespaceRequest,
@@ -98,6 +100,7 @@ from dakera.models import (
     GraphNode,
     GraphPath,
     HybridSearchResult,
+    IndexKind,
     IndexStats,
     # KG-2
     KgExportResponse,
@@ -108,6 +111,7 @@ from dakera.models import (
     KnowledgeNode,
     # OBS-2
     KpiSnapshot,
+    LenientStrEnum,
     ListNamespaceKeysResponse,
     Memory,
     MemoryEntitiesResponse,
@@ -118,6 +122,7 @@ from dakera.models import (
     MemoryImportResponse,
     # COG-1
     MemoryPolicy,
+    ModelCapability,
     NamespaceInfo,
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
@@ -130,13 +135,17 @@ from dakera.models import (
     RecalledMemory,
     # COG-2
     RecallResponse,
+    RecordCapabilities,
+    RepresentationKind,
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
     # CE-10
     RoutingMode,
+    SearchMode,
     SearchResult,
+    ServerCapabilities,
     Session,
     StalenessConfig,
     StoreMemoryRequest,
@@ -149,6 +158,8 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    parse_accepted_values,
+    wire_value,
 )
 
 with contextlib.suppress(ImportError):
@@ -158,7 +169,7 @@ with contextlib.suppress(ImportError):
         DakeraDelegationHelper,
     )
 
-__version__ = "0.12.13"
+__version__ = "0.12.14"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -302,6 +313,18 @@ __all__ = [
     "ConnectionError",
     "NotFoundError",
     "ValidationError",
+    "UnsupportedCapabilityError",
+    # R9: forward-compat enums + server capabilities
+    "LenientStrEnum",
+    "IndexKind",
+    "SearchMode",
+    "RepresentationKind",
+    "BlockDType",
+    "ModelCapability",
+    "RecordCapabilities",
+    "ServerCapabilities",
+    "parse_accepted_values",
+    "wire_value",
     "RateLimitError",
     "ServerError",
     "AuthenticationError",

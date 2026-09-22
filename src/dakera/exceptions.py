@@ -78,6 +78,36 @@ class ValidationError(DakeraError):
     pass
 
 
+class UnsupportedCapabilityError(ValidationError):
+    """Raised *before* a request is sent when the server's advertised
+    capabilities (``GET /v1/capabilities``) do not include what was asked for.
+
+    ``kind`` names the registry (``"model"``, ``"index_kind"``,
+    ``"distance_metric"``, ``"search_mode"``, ``"query_language"``),
+    ``requested`` is the wire string that was rejected and ``supported`` is what
+    the server does accept, so the message is actionable on its own.
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        requested: str,
+        supported: list[str],
+        server_version: str | None = None,
+    ) -> None:
+        self.kind = kind
+        self.requested = requested
+        self.supported = list(supported)
+        self.server_version = server_version
+        server = f"Dakera server v{server_version}" if server_version else "this Dakera server"
+        accepted = ", ".join(self.supported) if self.supported else "(none advertised)"
+        super().__init__(
+            f"{kind} '{requested}' is not supported by {server}; "
+            f"supported {kind} values: {accepted}",
+            code=ErrorCode.INVALID_REQUEST,
+        )
+
+
 class RateLimitError(DakeraError):
     """Raised when rate limit is exceeded."""
 

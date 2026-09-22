@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.14] - 2026-09-22
+
+### Added
+
+- **Forward-compat contract (R9, DAK-10004)** — the server's registries (models, index kinds,
+  search modes, distance metrics, record representation kinds, block dtypes) grow over time and
+  `GET /v1/capabilities` documents the rule: every field is additive; unknown fields and unknown
+  strings inside lists MUST be ignored; `capabilities_version` bumps only on a breaking reshape.
+  This release makes the SDK honour that rule end to end.
+- **Lenient enums** — every wire enum (`EmbeddingModel`, `DistanceMetric`, `RoutingMode`,
+  `FusionStrategy`, and the new `IndexKind`, `SearchMode`, `RepresentationKind`, `BlockDType`)
+  now derives from `LenientStrEnum`: a server string this SDK does not declare parses as an
+  *unknown member* (`.is_known == False`, raw string in `.value`) instead of raising
+  `ValueError` on an unrelated call. Known members are unchanged. `EmbeddingModel.BGE_M3`,
+  `IndexKind.IVFPQ` and `SearchMode.RABITQ` are declared for the strings server v0.12 adds.
+- **`DakeraClient.capabilities(refresh=False)` / `AsyncDakeraClient.capabilities()`** — typed
+  `ServerCapabilities` for `GET /v1/capabilities`: models (name, aliases, dimension, context
+  window, active flag, MRL dims), index kinds (all / vector / live), distance metrics, the search
+  mode the server runs and every value it accepts (`search_modes_accepted` prose parsed, aliases
+  expanded), `records` (`supports_records`, kinds, dtypes, limits), `query_languages`,
+  `reembed_pending`. Cached per client instance; `refresh=True` re-fetches. The verbatim
+  document is kept in `.raw`.
+- **Pre-flight validation** — `upsert_text` / `query_text` / `batch_query_text` (`model`),
+  `create_namespace` (`index_type`), `configure_namespace` and `query` (`distance_metric`) check
+  the requested value against cached capabilities *before* sending and raise
+  `UnsupportedCapabilityError` (a `ValidationError`) whose message and `.supported` list name what
+  the server accepts. Runs whenever `capabilities()` has been called; `DakeraClient(...,
+  preflight=True)` fetches lazily on first use and degrades silently on a pre-0.12 server (404).
+  `require_supported(kind, value)` exposes the same check for `search_mode` and `query_language`.
+- `model=` on the text endpoints now also accepts a plain string (any server-advertised name or
+  alias), not only an `EmbeddingModel` member.
+
 ## [0.12.11] - 2026-07-16
 
 ### Added

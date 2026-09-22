@@ -133,6 +133,7 @@ from dakera.models import (
     # CE-10
     RoutingMode,
     SearchResult,
+    ServerCapabilities,
     StalenessConfig,
     StaticCountResponse,
     StorageTierOverview,
@@ -150,6 +151,7 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    wire_value,
 )
 
 # DAK-7617: default User-Agent so the engine can attribute Python SDK usage.
@@ -183,6 +185,7 @@ class AsyncDakeraClient:
         retry_config: RetryConfig | None = None,
         headers: dict[str, str] | None = None,
         ode_url: str | None = None,
+        preflight: bool = False,
     ) -> None:
         """
         Initialize async Dakera client.
@@ -202,6 +205,9 @@ class AsyncDakeraClient:
             ode_url: Base URL of the dakera-ode sidecar
                 (e.g., ``"http://localhost:8080"``).  Required to call
                 :meth:`extract_entities`.
+            preflight: Validate the requested embedding model, index kind and
+                distance metric against ``GET /v1/capabilities`` *before* sending
+                a request (see :class:`dakera.DakeraClient` for the full contract).
         """
         self.base_url = base_url.rstrip("/")
         self.ode_url = ode_url.rstrip("/") if ode_url else None
@@ -231,6 +237,11 @@ class AsyncDakeraClient:
         # OPS-1: last seen rate-limit headers (updated after every response)
         self._last_rate_limit_headers: RateLimitHeaders | None = None
 
+        # R9: per-instance capabilities cache + pre-flight validation switch
+        self._preflight_enabled = preflight
+        self._capabilities: ServerCapabilities | None = None
+        self._capabilities_unavailable = False
+
     @property
     def last_rate_limit_headers(self) -> RateLimitHeaders | None:
         """Rate-limit headers from the most recent API response (OPS-1).
@@ -238,6 +249,47 @@ class AsyncDakeraClient:
         Returns ``None`` until the first successful request has been made.
         """
         return self._last_rate_limit_headers
+
+    # =========================================================================
+    # Server capabilities (R9 / DAK-10004)
+    # =========================================================================
+
+    async def capabilities(self, refresh: bool = False) -> ServerCapabilities:
+        """What the connected server can do — ``GET /v1/capabilities`` (server v0.12+).
+
+        Cached per client instance; pass ``refresh=True`` to fetch again.
+        Raises :class:`NotFoundError` on a server that predates the endpoint.
+        See :meth:`dakera.DakeraClient.capabilities`.
+        """
+        if self._capabilities is None or refresh:
+            response = await self._request("GET", "/v1/capabilities")
+            self._capabilities = ServerCapabilities.from_dict(response or {})
+            self._capabilities_unavailable = False
+        return self._capabilities
+
+    async def require_supported(self, kind: str, value: Any) -> None:
+        """Raise :class:`~dakera.exceptions.UnsupportedCapabilityError` unless the
+        server advertises ``value`` for ``kind`` (``"model"``, ``"index_kind"``,
+        ``"distance_metric"``, ``"search_mode"``, ``"query_language"``)."""
+        (await self.capabilities()).require(kind, value)
+
+    async def _preflight(self, kind: str, value: Any) -> None:
+        """Validate ``value`` against cached capabilities before a request.
+
+        Uses the cache when populated; fetches only when ``preflight=True`` was
+        passed to the constructor.  A 404 (pre-0.12 server) disables the check
+        for the lifetime of this client.
+        """
+        caps = self._capabilities
+        if caps is None:
+            if not self._preflight_enabled or self._capabilities_unavailable:
+                return
+            try:
+                caps = await self.capabilities()
+            except NotFoundError:
+                self._capabilities_unavailable = True
+                return
+        caps.require(kind, value)
 
     def _url(self, path: str) -> str:
         """Build full URL from path."""
@@ -420,7 +472,8 @@ class AsyncDakeraClient:
         if filter:
             data["filter"] = filter
         if distance_metric:
-            data["distance_metric"] = distance_metric.value
+            await self._preflight("distance_metric", distance_metric)
+            data["distance_metric"] = wire_value(distance_metric)
         if consistency:
             data["consistency"] = consistency.value
         if staleness_config:
@@ -525,13 +578,14 @@ class AsyncDakeraClient:
         self,
         namespace: str,
         documents: list[TextDocumentInput],
-        model: EmbeddingModel | None = None,
+        model: EmbeddingModel | str | None = None,
     ) -> TextUpsertResponse:
         """Upsert text documents with automatic embedding generation."""
         doc_dicts = [d.to_dict() if isinstance(d, TextDocument) else d for d in documents]
         data: dict[str, Any] = {"documents": doc_dicts}
         if model:
-            data["model"] = model.value
+            await self._preflight("model", model)
+            data["model"] = wire_value(model)
         response = await self._request("POST", f"/v1/namespaces/{namespace}/upsert-text", data=data)
         return TextUpsertResponse.from_dict(response)
 
@@ -543,7 +597,7 @@ class AsyncDakeraClient:
         filter: FilterDict | None = None,
         include_text: bool = True,
         include_vectors: bool = False,
-        model: EmbeddingModel | None = None,
+        model: EmbeddingModel | str | None = None,
     ) -> TextQueryResponse:
         """Query using natural language text with automatic embedding."""
         data: dict[str, Any] = {
@@ -555,7 +609,8 @@ class AsyncDakeraClient:
         if filter:
             data["filter"] = filter
         if model:
-            data["model"] = model.value
+            await self._preflight("model", model)
+            data["model"] = wire_value(model)
         response = await self._request("POST", f"/v1/namespaces/{namespace}/query-text", data=data)
         return TextQueryResponse.from_dict(response)
 
@@ -566,7 +621,7 @@ class AsyncDakeraClient:
         top_k: int = 10,
         filter: FilterDict | None = None,
         include_vectors: bool = False,
-        model: EmbeddingModel | None = None,
+        model: EmbeddingModel | str | None = None,
     ) -> BatchTextQueryResponse:
         """Batch query using multiple text queries with automatic embedding."""
         data: dict[str, Any] = {
@@ -577,7 +632,8 @@ class AsyncDakeraClient:
         if filter:
             data["filter"] = filter
         if model:
-            data["model"] = model.value
+            await self._preflight("model", model)
+            data["model"] = wire_value(model)
         response = await self._request(
             "POST",
             f"/v1/namespaces/{namespace}/batch-query-text",
@@ -671,6 +727,7 @@ class AsyncDakeraClient:
         if dimensions:
             data["dimensions"] = dimensions
         if index_type:
+            await self._preflight("index_kind", index_type)
             data["index_type"] = index_type
         if metadata:
             data["metadata"] = metadata
@@ -696,6 +753,8 @@ class AsyncDakeraClient:
         Returns:
             ConfigureNamespaceResponse with ``created=True`` if newly created.
         """
+        if distance is not None:
+            await self._preflight("distance_metric", distance)
         req = ConfigureNamespaceRequest(dimension=dimension, distance=distance)
         response = await self._request("PUT", f"/v1/namespaces/{namespace}", data=req.to_dict())
         return ConfigureNamespaceResponse.from_dict(response)
@@ -2756,9 +2815,7 @@ class AsyncDakeraClient:
     # CE-54: Fulltext Reindex (Admin)
     # =========================================================================
 
-    async def admin_fulltext_reindex(
-        self, namespace: str | None = None
-    ) -> FulltextReindexResponse:
+    async def admin_fulltext_reindex(self, namespace: str | None = None) -> FulltextReindexResponse:
         """Backfill the BM25 fulltext index for memories that were stored before
         CE-12 auto-indexing was added (CE-54).
 

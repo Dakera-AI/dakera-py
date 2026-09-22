@@ -109,6 +109,7 @@ from dakera.models import (
     # CE-10
     RoutingMode,
     SearchResult,
+    ServerCapabilities,
     StalenessConfig,
     StaticCountResponse,
     StorageTierOverview,
@@ -126,6 +127,7 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    wire_value,
 )
 
 # DAK-7617: default User-Agent so the engine can attribute Python SDK usage.
@@ -162,6 +164,7 @@ class DakeraClient:
         retry_config: RetryConfig | None = None,
         headers: dict[str, str] | None = None,
         ode_url: str | None = None,
+        preflight: bool = False,
     ) -> None:
         """
         Initialize Dakera client.
@@ -181,6 +184,14 @@ class DakeraClient:
             ode_url: Base URL of the dakera-ode sidecar
                 (e.g., ``"http://localhost:8080"``).  Required to call
                 :meth:`extract_entities`.
+            preflight: Validate the requested embedding model, index kind and
+                distance metric against ``GET /v1/capabilities`` *before* sending
+                a request, raising :class:`~dakera.exceptions.UnsupportedCapabilityError`
+                naming what the server supports.  Capabilities are fetched lazily
+                on first use and cached (see :meth:`capabilities`).  A server that
+                predates the endpoint (404) disables the check silently.  When
+                ``False`` (default) the check still runs whenever capabilities
+                have already been fetched through :meth:`capabilities`.
         """
         self.base_url = base_url.rstrip("/")
         self.ode_url = ode_url.rstrip("/") if ode_url else None
@@ -208,6 +219,11 @@ class DakeraClient:
         # OPS-1: last seen rate-limit headers (updated after every response)
         self._last_rate_limit_headers: RateLimitHeaders | None = None
 
+        # R9: per-instance capabilities cache + pre-flight validation switch
+        self._preflight_enabled = preflight
+        self._capabilities: ServerCapabilities | None = None
+        self._capabilities_unavailable = False
+
     @property
     def last_rate_limit_headers(self) -> RateLimitHeaders | None:
         """Rate-limit headers from the most recent API response (OPS-1).
@@ -215,6 +231,68 @@ class DakeraClient:
         Returns ``None`` until the first successful request has been made.
         """
         return self._last_rate_limit_headers
+
+    # =========================================================================
+    # Server capabilities (R9 / DAK-10004)
+    # =========================================================================
+
+    def capabilities(self, refresh: bool = False) -> ServerCapabilities:
+        """
+        What the connected server can do — ``GET /v1/capabilities`` (server v0.12+).
+
+        Returns the models the server can load (and which one is active), index
+        kinds, distance metrics, the search mode it runs, whether the R2
+        ``records`` surface is enabled and whether a re-embed is still pending.
+        The document is cached on this client instance; pass ``refresh=True`` to
+        fetch it again.  Unknown fields and unknown strings in the document are
+        kept (as unknown enum members) rather than rejected.
+
+        Raises:
+            NotFoundError: the server predates ``/v1/capabilities``.
+
+        Example:
+            >>> caps = client.capabilities()
+            >>> caps.model_names
+            ['bge-large', 'minilm', ...]
+            >>> caps.supports_records, caps.reembed_pending
+            (False, False)
+        """
+        if self._capabilities is None or refresh:
+            response = self._request("GET", "/v1/capabilities")
+            self._capabilities = ServerCapabilities.from_dict(response or {})
+            self._capabilities_unavailable = False
+        return self._capabilities
+
+    def require_supported(self, kind: str, value: Any) -> None:
+        """
+        Raise :class:`~dakera.exceptions.UnsupportedCapabilityError` unless the
+        server advertises ``value`` for ``kind``.
+
+        ``kind`` is one of ``"model"``, ``"index_kind"``, ``"distance_metric"``,
+        ``"search_mode"``, ``"query_language"``.  Fetches (and caches)
+        capabilities on first use.  ``search_mode`` is process-wide on the
+        server (``DAKERA_SEARCH_MODE``), so this is the pre-flight for tooling
+        that configures it rather than for a per-request field.
+        """
+        self.capabilities().require(kind, value)
+
+    def _preflight(self, kind: str, value: Any) -> None:
+        """Validate ``value`` against cached capabilities before a request.
+
+        Uses the cache when populated; fetches only when ``preflight=True`` was
+        passed to the constructor.  A 404 (pre-0.12 server) disables the check
+        for the lifetime of this client.
+        """
+        caps = self._capabilities
+        if caps is None:
+            if not self._preflight_enabled or self._capabilities_unavailable:
+                return
+            try:
+                caps = self.capabilities()
+            except NotFoundError:
+                self._capabilities_unavailable = True
+                return
+        caps.require(kind, value)
 
     def _url(self, path: str) -> str:
         """Build full URL from path."""
@@ -446,7 +524,8 @@ class DakeraClient:
         if filter:
             data["filter"] = filter
         if distance_metric:
-            data["distance_metric"] = distance_metric.value
+            self._preflight("distance_metric", distance_metric)
+            data["distance_metric"] = wire_value(distance_metric)
         if consistency:
             data["consistency"] = consistency.value
         if staleness_config:
@@ -633,7 +712,7 @@ class DakeraClient:
         self,
         namespace: str,
         documents: list[TextDocumentInput],
-        model: EmbeddingModel | None = None,
+        model: EmbeddingModel | str | None = None,
     ) -> TextUpsertResponse:
         """
         Upsert text documents with automatic embedding generation.
@@ -665,7 +744,8 @@ class DakeraClient:
 
         data: dict[str, Any] = {"documents": doc_dicts}
         if model:
-            data["model"] = model.value
+            self._preflight("model", model)
+            data["model"] = wire_value(model)
 
         response = self._request(
             "POST",
@@ -682,7 +762,7 @@ class DakeraClient:
         filter: FilterDict | None = None,
         include_text: bool = True,
         include_vectors: bool = False,
-        model: EmbeddingModel | None = None,
+        model: EmbeddingModel | str | None = None,
     ) -> TextQueryResponse:
         """
         Query using natural language text with automatic embedding.
@@ -715,7 +795,8 @@ class DakeraClient:
         if filter:
             data["filter"] = filter
         if model:
-            data["model"] = model.value
+            self._preflight("model", model)
+            data["model"] = wire_value(model)
 
         response = self._request(
             "POST",
@@ -731,7 +812,7 @@ class DakeraClient:
         top_k: int = 10,
         filter: FilterDict | None = None,
         include_vectors: bool = False,
-        model: EmbeddingModel | None = None,
+        model: EmbeddingModel | str | None = None,
     ) -> BatchTextQueryResponse:
         """
         Batch query using multiple text queries with automatic embedding.
@@ -763,7 +844,8 @@ class DakeraClient:
         if filter:
             data["filter"] = filter
         if model:
-            data["model"] = model.value
+            self._preflight("model", model)
+            data["model"] = wire_value(model)
 
         response = self._request(
             "POST",
@@ -955,6 +1037,7 @@ class DakeraClient:
         if dimensions:
             data["dimension"] = dimensions
         if index_type:
+            self._preflight("index_kind", index_type)
             data["index_type"] = index_type
         if metadata:
             data["metadata"] = metadata
@@ -983,6 +1066,8 @@ class DakeraClient:
         Returns:
             ConfigureNamespaceResponse with ``created=True`` if newly created.
         """
+        if distance is not None:
+            self._preflight("distance_metric", distance)
         req = ConfigureNamespaceRequest(dimension=dimension, distance=distance)
         response = self._request("PUT", f"/v1/namespaces/{namespace}", data=req.to_dict())
         return ConfigureNamespaceResponse.from_dict(response)
@@ -1448,9 +1533,7 @@ class DakeraClient:
             data["min_samples"] = min_samples
         if soft_deprecation_days is not None:
             data["soft_deprecation_days"] = soft_deprecation_days
-        return self._request(
-            "PATCH", f"/v1/agents/{agent_id}/consolidation/config", data=data
-        )
+        return self._request("PATCH", f"/v1/agents/{agent_id}/consolidation/config", data=data)
 
     def memory_feedback(
         self,
@@ -3277,9 +3360,7 @@ class DakeraClient:
     # CE-54: Fulltext Reindex (Admin)
     # =========================================================================
 
-    def admin_fulltext_reindex(
-        self, namespace: str | None = None
-    ) -> FulltextReindexResponse:
+    def admin_fulltext_reindex(self, namespace: str | None = None) -> FulltextReindexResponse:
         """Backfill the BM25 fulltext index for memories that were stored before
         CE-12 auto-indexing was added (CE-54).
 
