@@ -365,7 +365,7 @@ class QueryResult:
         return cls(
             id=data["id"],
             score=data["score"],
-            values=data.get("values"),
+            values=data.get("values", data.get("vector")),  # the server names it ``vector``
             metadata=data.get("metadata"),
         )
 
@@ -430,11 +430,13 @@ class IndexStats:
     def from_dict(cls, data: dict[str, Any]) -> "IndexStats":
         """Create IndexStats from API response dictionary."""
         return cls(
-            total_vectors=data.get("total_vectors", 0),
-            dimensions=data.get("dimensions", 0),
-            index_type=data.get("index_type", "unknown"),
+            # ``GET /v1/namespaces/{ns}`` names these vector_count / dimension /
+            # estimated_storage_bytes; the older IndexStats spellings still work.
+            total_vectors=data.get("total_vectors", data.get("vector_count", 0)),
+            dimensions=data.get("dimensions", data.get("dimension") or 0),
+            index_type=data.get("index_type") or "unknown",
             memory_usage_bytes=data.get("memory_usage_bytes"),
-            disk_usage_bytes=data.get("disk_usage_bytes"),
+            disk_usage_bytes=data.get("disk_usage_bytes", data.get("estimated_storage_bytes")),
             build_progress=data.get("build_progress"),
             is_trained=data.get("is_trained"),
         )
@@ -3008,7 +3010,7 @@ class AuditListResponse:
 
 @dataclass
 class AuditExportResponse:
-    """Response from ``POST /v1/audit/export`` (OBS-1)."""
+    """Response from ``GET /v1/audit/export`` (OBS-1)."""
 
     data: str
     format: str

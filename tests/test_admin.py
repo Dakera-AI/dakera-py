@@ -574,20 +574,6 @@ class TestDimensionMigration:
 class TestTTLAdmin:
     """Tests for TTL administration methods."""
 
-    def test_configure_ttl(self, client, mock_responses):
-        """Test configuring TTL for a namespace."""
-        mock_responses.add(
-            responses.POST,
-            "http://localhost:3000/v1/admin/namespaces/test-ns/ttl",
-            json={"namespace": "test-ns", "ttl_seconds": 86400, "strategy": "hard_delete"},
-            status=200,
-        )
-        result = client.configure_ttl("test-ns", ttl_seconds=86400, strategy="hard_delete")
-        assert result["ttl_seconds"] == 86400
-        req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body["ttl_seconds"] == 86400
-        assert req_body["strategy"] == "hard_delete"
-
     def test_ttl_stats(self, client, mock_responses):
         """Test getting TTL stats."""
         mock_responses.add(
@@ -836,14 +822,31 @@ class TestConfigAdmin:
 
     def test_update_quotas(self, client, mock_responses):
         """Test updating quotas via v1/admin path."""
+        # The server serves PUT /admin/quotas/default and /admin/quotas/{namespace};
+        # there is no PUT /admin/quotas.
         mock_responses.add(
             responses.PUT,
-            "http://localhost:3000/v1/admin/quotas",
-            json={"global_max_vectors": 5000000},
+            "http://localhost:3000/v1/admin/quotas/default",
+            json={"success": True, "namespace": "_default", "config": {"max_vectors": 5000000}},
             status=200,
         )
-        result = client.update_quotas({"global_max_vectors": 5000000})
-        assert result["global_max_vectors"] == 5000000
+        result = client.update_quotas({"max_vectors": 5000000})
+        assert result["config"]["max_vectors"] == 5000000
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "config": {"max_vectors": 5000000}
+        }
+
+    def test_update_quotas_for_namespace(self, client, mock_responses):
+        mock_responses.add(
+            responses.PUT,
+            "http://localhost:3000/v1/admin/quotas/my-ns",
+            json={"success": True, "namespace": "my-ns", "config": {}},
+            status=200,
+        )
+        client.update_quotas({"config": {"max_vectors": 10, "enforcement": "hard"}}, "my-ns")
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "config": {"max_vectors": 10, "enforcement": "hard"}
+        }
 
 
 class TestKPIs:

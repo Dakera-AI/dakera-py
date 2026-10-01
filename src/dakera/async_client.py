@@ -41,7 +41,7 @@ except ImportError as exc:  # pragma: no cover
         "httpx is required for AsyncDakeraClient. Install it with: pip install dakera[async]"
     ) from exc
 
-from dakera._util import _attachment_body, _memory_job_body
+from dakera._util import _attachment_body, _audit_export_response, _memory_job_body
 from dakera.exceptions import (
     AuthorizationError,
     ConnectionError,
@@ -89,8 +89,6 @@ from dakera.models import (
     EntityExtractionResponse,
     # ODE-2
     ExtractEntitiesResponse,
-    ExtractionProviderInfo,
-    # EXT-1
     ExtractionResult,
     FeedbackHealthResponse,
     FeedbackHistoryResponse,
@@ -438,7 +436,7 @@ class AsyncDakeraClient:
         data: dict[str, Any] = {
             "vector": vector,
             "top_k": top_k,
-            "include_values": include_values,
+            "include_vectors": include_values,
             "include_metadata": include_metadata,
         }
         if filter:
@@ -460,15 +458,36 @@ class AsyncDakeraClient:
         filter: FilterDict | None = None,
         delete_all: bool = False,
     ) -> dict[str, Any]:
-        """Delete vectors from a namespace."""
-        data: dict[str, Any] = {}
-        if ids:
-            data["ids"] = ids
-        if filter:
-            data["filter"] = filter
+        """
+        Delete vectors from a namespace, by ID or by metadata filter.
+
+        ``ids`` use ``POST /v1/namespaces/{ns}/vectors/delete`` (answer:
+        ``{"deleted_count"}``); a ``filter`` uses ``POST .../vectors/bulk-delete``
+        (answer: ``{"deleted", "failed", "errors"}``). The server has no
+        delete-everything route.
+
+        Raises:
+            ValueError: ``delete_all`` was requested, or neither ``ids`` nor
+                ``filter`` was given.
+
+        Example:
+            >>> client.delete("my-namespace", ids=["vec1", "vec2"])
+            >>> client.delete("my-namespace", filter={"label": "obsolete"})
+        """
         if delete_all:
-            data["delete_all"] = True
-        return await self._request("POST", f"/v1/namespaces/{namespace}/delete", data=data)
+            raise ValueError(
+                "delete_all is not supported by the Dakera server; "
+                "delete by ids or by filter, or delete the namespace"
+            )
+        if ids:
+            return await self._request(
+                "POST", f"/v1/namespaces/{namespace}/vectors/delete", data={"ids": ids}
+            )
+        if filter:
+            return await self._request(
+                "POST", f"/v1/namespaces/{namespace}/vectors/bulk-delete", data={"filter": filter}
+            )
+        raise ValueError("delete() needs ids or a filter")
 
     async def bulk_update_vectors(
         self,
@@ -509,25 +528,6 @@ class AsyncDakeraClient:
             f"/v1/namespaces/{namespace}/vectors/count",
             data=data,
         )
-
-    async def fetch(
-        self,
-        namespace: str,
-        ids: list[str],
-        include_values: bool = True,
-        include_metadata: bool = True,
-    ) -> list[Vector]:
-        """Fetch vectors by ID."""
-        response = await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/fetch",
-            data={
-                "ids": ids,
-                "include_values": include_values,
-                "include_metadata": include_metadata,
-            },
-        )
-        return [Vector.from_dict(v) for v in response.get("vectors", [])]
 
     async def batch_query(
         self,
@@ -693,16 +693,20 @@ class AsyncDakeraClient:
         dimensions: int | None = None,
         index_type: str | None = None,
         metadata: dict[str, Any] | None = None,
+        distance: DistanceMetric | str | None = None,
     ) -> NamespaceInfo:
         """Create a new namespace."""
         data: dict[str, Any] = {"name": namespace}
         if dimensions:
-            data["dimensions"] = dimensions
+            data["dimension"] = dimensions
         if index_type:
             await self._preflight("index_kind", index_type)
             data["index_type"] = index_type
         if metadata:
             data["metadata"] = metadata
+        if distance:
+            await self._preflight("distance_metric", distance)
+            data["distance"] = wire_value(distance)
         response = await self._request("POST", "/v1/namespaces", data=data)
         return NamespaceInfo.from_dict(response)
 
@@ -1055,17 +1059,39 @@ class AsyncDakeraClient:
         return await self._request("PUT", f"/v1/namespaces/{namespace}/config", data=body)
 
     async def get_index_stats(self, namespace: str) -> IndexStats:
-        """Get index statistics for a namespace."""
-        response = await self._request("GET", f"/v1/namespaces/{namespace}/stats")
+        """
+        Get index statistics for a namespace (from ``GET /v1/namespaces/{ns}``).
+
+        Args:
+            namespace: Namespace name
+
+        Returns:
+            IndexStats object (``total_vectors`` = the namespace's ``vector_count``,
+            ``index_type`` = the index actually serving it, ``disk_usage_bytes`` =
+            the server's storage estimate). For every namespace at once use
+            :meth:`index_stats` (Admin scope).
+        """
+        response = await self._request("GET", f"/v1/namespaces/{namespace}")
         return IndexStats.from_dict(response)
 
-    async def compact(self, namespace: str) -> dict[str, Any]:
-        """Trigger compaction for a namespace."""
-        return await self._request("POST", f"/v1/namespaces/{namespace}/compact")
+    async def compact(self, namespace: str | None = None, force: bool = False) -> dict[str, Any]:
+        """
+        Trigger storage compaction (``POST /ops/compact``, Admin scope).
 
-    async def flush(self, namespace: str) -> dict[str, Any]:
-        """Flush pending writes for a namespace."""
-        return await self._request("POST", f"/v1/namespaces/{namespace}/flush")
+        Args:
+            namespace: Compact only this namespace (``None`` = all).
+            force: Compact every segment holding garbage, ignoring the backend's
+                threshold.
+
+        Returns:
+            ``{"job_id", "message", "report"}``. A backend without on-request
+            compaction answers ``501``
+            (:class:`~dakera.exceptions.FeatureNotAvailableError`).
+        """
+        data: dict[str, Any] = {"force": force}
+        if namespace is not None:
+            data["namespace"] = namespace
+        return await self._request("POST", "/ops/compact", data=data)
 
     # =========================================================================
     # Memory Operations
@@ -1460,11 +1486,20 @@ class AsyncDakeraClient:
         feedback: str,
         relevance_score: float | None = None,
     ) -> dict[str, Any]:
-        """Submit feedback on a memory recall."""
-        data: dict[str, Any] = {"memory_id": memory_id, "feedback": feedback}
-        if relevance_score is not None:
-            data["relevance_score"] = relevance_score
-        return await self._request("POST", f"/v1/agents/{agent_id}/memories/feedback", data=data)
+        """Submit feedback on a memory (``POST /v1/memory/feedback``).
+
+        Args:
+            feedback: The signal: ``"upvote"``, ``"downvote"``, ``"flag"`` (or the
+                aliases ``"positive"`` / ``"negative"``).
+            relevance_score: Ignored — the server has no such field. Kept so existing
+                calls keep working; use :meth:`feedback_memory` for the path-based
+                INT-1 route.
+
+        Returns:
+            ``{"memory_id", "new_importance", "signal"}``.
+        """
+        data: dict[str, Any] = {"agent_id": agent_id, "memory_id": memory_id, "signal": feedback}
+        return await self._request("POST", "/v1/memory/feedback", data=data)
 
     # =========================================================================
     # Memory Feedback Loop — INT-1
@@ -1950,26 +1985,39 @@ class AsyncDakeraClient:
         mmr_lambda: float | None = None,
         mmr_prefetch_k: int | None = None,
     ) -> dict[str, Any]:
-        """Multi-vector search with positive/negative examples."""
+        """
+        Multi-vector search with positive/negative vectors and optional MMR
+        (``POST /v1/namespaces/{ns}/multi-vector``).
+
+        Args:
+            namespace: Target namespace
+            positive: List of positive query vectors
+            negative: Optional list of negative query vectors
+            top_k: Number of results to return
+            filter: Optional metadata filter
+            include_metadata: Include metadata in results
+            include_vectors: Include vector values in results
+            mmr_lambda: Enables MMR re-ranking; 0.0 = max diversity, 1.0 = max relevance
+            mmr_prefetch_k: Ignored — the server has no such field (kept for
+                compatibility).
+
+        Returns:
+            Dict with results and search metadata
+        """
         data: dict[str, Any] = {
-            "positive": positive,
+            "positive_vectors": positive,
             "top_k": top_k,
             "include_metadata": include_metadata,
             "include_vectors": include_vectors,
         }
         if negative is not None:
-            data["negative"] = negative
+            data["negative_vectors"] = negative
         if filter:
             data["filter"] = filter
         if mmr_lambda is not None:
+            data["enable_mmr"] = True
             data["mmr_lambda"] = mmr_lambda
-        if mmr_prefetch_k is not None:
-            data["mmr_prefetch_k"] = mmr_prefetch_k
-        return await self._request(
-            "POST",
-            f"/v1/namespaces/{namespace}/search/multi-vector",
-            data=data,
-        )
+        return await self._request("POST", f"/v1/namespaces/{namespace}/multi-vector", data=data)
 
     async def unified_query(
         self,
@@ -1984,52 +2032,101 @@ class AsyncDakeraClient:
         text_weight: float | None = None,
         fusion_method: str | None = None,
         rerank: bool = False,
+        rank_by: list[Any] | None = None,
     ) -> dict[str, Any]:
-        """Unified query combining vector and text search."""
+        """
+        Unified query (``POST /v1/namespaces/{ns}/unified-query``): rank by a
+        ``rank_by`` expression.
+
+        Pass ``rank_by`` yourself (``["ANN", [..]]``, ``["text", "BM25", "query"]``,
+        ``["Sum", [..]]``, ``["Product", weight, expr]``, ``["field", "asc"]``) or
+        give ``vector`` and / or ``text`` and one is built: both are combined with
+        ``Sum``, each wrapped in ``Product`` when ``vector_weight`` /
+        ``text_weight`` is set.
+
+        ``fusion_method`` and ``rerank`` are ignored (the server has no such
+        fields; kept for compatibility).
+
+        Returns:
+            Dict with ``results`` (each with ``$dist``) and ``next_cursor``.
+        """
+        if rank_by is None:
+            parts: list[Any] = []
+            if vector is not None:
+                expr: list[Any] = ["ANN", vector]
+                parts.append(
+                    ["Product", vector_weight, expr] if vector_weight is not None else expr
+                )
+            if text is not None:
+                expr = ["text", "BM25", text]
+                if text_weight is not None:
+                    expr = ["Product", text_weight, expr]
+                parts.append(expr)
+            if not parts:
+                raise ValueError("unified_query() needs rank_by, vector or text")
+            rank_by = parts[0] if len(parts) == 1 else ["Sum", parts]
         data: dict[str, Any] = {
+            "rank_by": rank_by,
             "top_k": top_k,
             "include_metadata": include_metadata,
             "include_vectors": include_vectors,
-            "rerank": rerank,
         }
-        if vector is not None:
-            data["vector"] = vector
-        if text is not None:
-            data["text"] = text
         if filter:
             data["filter"] = filter
-        if vector_weight is not None:
-            data["vector_weight"] = vector_weight
-        if text_weight is not None:
-            data["text_weight"] = text_weight
-        if fusion_method is not None:
-            data["fusion_method"] = fusion_method
-        return await self._request("POST", f"/v1/namespaces/{namespace}/search/unified", data=data)
+        return await self._request("POST", f"/v1/namespaces/{namespace}/unified-query", data=data)
 
     async def aggregate(
         self,
         namespace: str,
         vector: list[float] | None = None,
-        group_by: str | None = None,
+        group_by: str | list[str] | None = None,
         metrics: list[str] | None = None,
         top_k: int | None = None,
         filter: FilterDict | None = None,
         top_groups: int | None = None,
+        aggregate_by: dict[str, list[Any]] | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any]:
-        """Aggregation query with grouping."""
-        data: dict[str, Any] = {}
-        if vector is not None:
-            data["vector"] = vector
+        """
+        Aggregate vectors' metadata (``POST /v1/namespaces/{ns}/aggregate``).
+
+        Args:
+            namespace: Target namespace.
+            group_by: Attribute(s) to group by.
+            aggregate_by: Named aggregates exactly as the server takes them:
+                ``{"n": ["Count"], "avg_price": ["Avg", "price"]}`` (``Count``,
+                ``Sum``, ``Avg``, ``Min``, ``Max``).
+            metrics: Shorthand for ``aggregate_by``: ``"count"`` or
+                ``"sum:field"`` / ``"avg:field"`` / ``"min:field"`` / ``"max:field"``.
+            filter: Optional metadata filter.
+            limit: Maximum groups (server default 100); ``top_groups`` is the older
+                name for the same thing.
+            vector, top_k: Ignored — the server's aggregation is a metadata scan
+                (kept for compatibility).
+
+        With neither ``aggregate_by`` nor ``metrics`` a ``count`` is computed.
+        """
+        agg: dict[str, list[Any]] = dict(aggregate_by or {})
+        for metric in metrics or []:
+            name, _, field = metric.partition(":")
+            kind = name.lower()
+            if kind == "count":
+                agg.setdefault("count", ["Count"])
+            elif kind in ("sum", "avg", "min", "max") and field:
+                agg[f"{kind}_{field}"] = [kind.capitalize(), field]
+            else:
+                raise ValueError(
+                    f"unsupported metric {metric!r}: use 'count' or 'sum|avg|min|max:<field>'"
+                )
+        data: dict[str, Any] = {"aggregate_by": agg or {"count": ["Count"]}}
         if group_by is not None:
-            data["group_by"] = group_by
-        if metrics is not None:
-            data["metrics"] = metrics
-        if top_k is not None:
-            data["top_k"] = top_k
+            data["group_by"] = [group_by] if isinstance(group_by, str) else list(group_by)
         if filter:
             data["filter"] = filter
-        if top_groups is not None:
-            data["top_groups"] = top_groups
+        if limit is None:
+            limit = top_groups
+        if limit is not None:
+            data["limit"] = limit
         return await self._request("POST", f"/v1/namespaces/{namespace}/aggregate", data=data)
 
     async def export_vectors(
@@ -2053,20 +2150,42 @@ class AsyncDakeraClient:
     async def explain_query(
         self,
         namespace: str,
-        vector: list[float],
+        vector: list[float] | None = None,
         top_k: int = 10,
         filter: FilterDict | None = None,
         include_metadata: bool = True,
+        query_type: str = "vector_search",
+        text_query: str | None = None,
+        execute: bool = False,
     ) -> dict[str, Any]:
-        """Explain query execution plan."""
-        data: dict[str, Any] = {
-            "vector": vector,
-            "top_k": top_k,
-            "include_metadata": include_metadata,
-        }
+        """
+        Explain query execution plan (``POST /v1/namespaces/{ns}/explain``).
+
+        Args:
+            namespace: Target namespace
+            vector: Query vector (``vector_search`` / ``hybrid_search``)
+            top_k: Number of results
+            filter: Optional metadata filter
+            include_metadata: Ignored — the server has no such field (kept for
+                compatibility).
+            query_type: ``vector_search`` (default), ``full_text_search``,
+                ``hybrid_search``, ``multi_vector`` or ``batch_query``.
+            text_query: Text query for ``full_text_search`` / ``hybrid_search``.
+            execute: Also run the query and report measured ``actual_stats``.
+
+        Returns:
+            Dict with the query plan, execution steps and timing information
+        """
+        data: dict[str, Any] = {"query_type": query_type, "top_k": top_k}
+        if vector is not None:
+            data["vector"] = vector
+        if text_query is not None:
+            data["text_query"] = text_query
         if filter:
             data["filter"] = filter
-        return await self._request("POST", f"/v1/namespaces/{namespace}/query/explain", data=data)
+        if execute:
+            data["execute"] = True
+        return await self._request("POST", f"/v1/namespaces/{namespace}/explain", data=data)
 
     async def upsert_columns(
         self,
@@ -2346,13 +2465,29 @@ class AsyncDakeraClient:
         """Optimize a namespace."""
         return await self._request("POST", f"/v1/admin/namespaces/{namespace}/optimize")
 
-    async def index_stats(self, namespace: str) -> dict[str, Any]:
-        """Get admin index stats for a namespace."""
-        return await self._request("GET", f"/v1/admin/namespaces/{namespace}/index/stats")
+    async def index_stats(self, namespace: str | None = None) -> dict[str, Any]:
+        """Index statistics (``GET /v1/admin/indexes/stats``, Admin scope).
 
-    async def rebuild_indexes(self, namespace: str) -> dict[str, Any]:
-        """Rebuild indexes for a namespace."""
-        return await self._request("POST", f"/v1/admin/namespaces/{namespace}/index/rebuild")
+        Without ``namespace``: every namespace (``namespaces``, totals). With one:
+        that namespace's entry (:class:`~dakera.exceptions.NotFoundError` if absent).
+        """
+        stats = await self._request("GET", "/v1/admin/indexes/stats")
+        if namespace is None:
+            return stats
+        entry = (stats.get("namespaces") or {}).get(namespace)
+        if entry is None:
+            raise NotFoundError(
+                f"Namespace not found: {namespace}", status_code=404, response_body=stats
+            )
+        return entry
+
+    async def rebuild_indexes(self, namespace: str | None = None) -> dict[str, Any]:
+        """Rebuild indexes, optionally for one namespace
+        (``POST /v1/admin/indexes/rebuild``)."""
+        data: dict[str, Any] = {}
+        if namespace is not None:
+            data["namespace"] = namespace
+        return await self._request("POST", "/v1/admin/indexes/rebuild", data=data or None)
 
     async def cache_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
@@ -2375,9 +2510,30 @@ class AsyncDakeraClient:
         """Get server quotas."""
         return await self._request("GET", "/v1/admin/quotas")
 
-    async def update_quotas(self, quotas: dict[str, Any]) -> dict[str, Any]:
-        """Update server quotas."""
-        return await self._request("PUT", "/v1/admin/quotas", data=quotas)
+    async def update_quotas(
+        self, quotas: dict[str, Any], namespace: str | None = None
+    ) -> dict[str, Any]:
+        """Set a quota configuration.
+
+        Uses ``PUT /v1/admin/quotas/{namespace}`` for one namespace, or
+        ``PUT /v1/admin/quotas/default`` (the default applied to namespaces
+        without their own quota) when ``namespace`` is omitted. The server has no
+        ``PUT /v1/admin/quotas``.
+
+        Args:
+            quotas: The quota config: ``max_vectors``, ``max_storage_bytes``,
+                ``max_dimensions``, ``max_metadata_bytes``, ``enforcement``
+                (``"none"``, ``"soft"`` or ``"hard"``). A ``{"config": {...}}``
+                wrapper is accepted as well.
+            namespace: Target namespace; ``None`` sets the default quota.
+
+        Note:
+            v0.12 enforces quotas: a write over a ``hard`` quota is a ``413``
+            (:class:`~dakera.exceptions.PayloadTooLargeError`, ``.is_quota``).
+        """
+        config = quotas["config"] if set(quotas) == {"config"} else quotas
+        path = "/v1/admin/quotas/default" if namespace is None else f"/v1/admin/quotas/{namespace}"
+        return await self._request("PUT", path, data={"config": config})
 
     async def slow_queries(
         self,
@@ -2399,24 +2555,16 @@ class AsyncDakeraClient:
         return await self._request("GET", "/v1/admin/backups")
 
     async def restore_backup(self, backup_id: str) -> dict[str, Any]:
-        """Restore from a backup."""
-        return await self._request("POST", f"/v1/admin/backups/{backup_id}/restore")
+        """Restore a backup (``POST /v1/admin/backups/restore``; needs global
+        ``super_admin`` on v0.12). See also admin_restore_backup for full restore
+        options."""
+        return await self._request(
+            "POST", "/v1/admin/backups/restore", data={"backup_id": backup_id}
+        )
 
     async def delete_backup(self, backup_id: str) -> dict[str, Any]:
         """Delete a backup."""
         return await self._request("DELETE", f"/v1/admin/backups/{backup_id}")
-
-    async def configure_ttl(
-        self,
-        namespace: str,
-        ttl_seconds: int,
-        strategy: str | None = None,
-    ) -> dict[str, Any]:
-        """Configure TTL for a namespace."""
-        data: dict[str, Any] = {"namespace": namespace, "ttl_seconds": ttl_seconds}
-        if strategy is not None:
-            data["strategy"] = strategy
-        return await self._request("PUT", f"/v1/admin/namespaces/{namespace}/ttl", data=data)
 
     async def autopilot_status(self) -> dict[str, Any]:
         """Get AutoPilot status: current config and last-run statistics (PILOT-1)."""
@@ -2976,19 +3124,36 @@ class AsyncDakeraClient:
         event_type: str | None = None,
         from_ts: int | None = None,
         to_ts: int | None = None,
+        limit: int | None = None,
     ) -> AuditExportResponse:
-        """Bulk-export audit log entries (OBS-1)."""
-        body: dict[str, Any] = {"format": format}
+        """Bulk-export audit log entries (``GET /v1/audit/export``, Admin scope).
+
+        Args:
+            format: ``"jsonl"`` (one JSON event per line), ``"json"`` (a JSON array)
+                or ``"csv"``. The server speaks ``json`` and ``csv``; ``jsonl`` is
+                produced here from the ``json`` answer.
+            agent_id: Filter to a specific agent.
+            event_type: Filter to a specific event type.
+            from_ts: Unix timestamp lower bound.
+            to_ts: Unix timestamp upper bound.
+            limit: Maximum events (server default 10 000).
+
+        Returns:
+            :class:`AuditExportResponse` with the serialised data and count.
+        """
+        params: dict[str, Any] = {"format": "csv" if format == "csv" else "json"}
         if agent_id is not None:
-            body["agent_id"] = agent_id
+            params["agent_id"] = agent_id
         if event_type is not None:
-            body["event_type"] = event_type
+            params["event_type"] = event_type
         if from_ts is not None:
-            body["from"] = from_ts
+            params["from"] = from_ts
         if to_ts is not None:
-            body["to"] = to_ts
-        result = await self._request("POST", "/v1/audit/export", data=body)
-        return AuditExportResponse.from_dict(result)
+            params["to"] = to_ts
+        if limit is not None:
+            params["limit"] = limit
+        result = await self._request("GET", "/v1/audit/export", params=params)
+        return _audit_export_response(result, format)
 
     # =========================================================================
     # EXT-1: External Extraction Providers
@@ -3011,12 +3176,6 @@ class AsyncDakeraClient:
             body["model"] = model
         result = await self._request("POST", "/v1/extract", data=body)
         return ExtractionResult.from_dict(result)
-
-    async def list_extract_providers(self) -> list[ExtractionProviderInfo]:
-        """List available extraction providers and their models (EXT-1)."""
-        result = await self._request("GET", "/v1/extract/providers")
-        items = result if isinstance(result, list) else result.get("providers", [])
-        return [ExtractionProviderInfo.from_dict(p) for p in items]
 
     async def configure_namespace_extractor(
         self,

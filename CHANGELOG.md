@@ -54,6 +54,48 @@ releases already exist on PyPI), so it cannot adopt the server's 0.12.0; this is
 - `configure_namespace_ner()` documents that `PATCH` merges on v0.12; pass `entity_types=[]`
   or use `replace_namespace_ner_config()` to clear.
 
+### Route sweep against the v0.12.0 router
+
+Every endpoint the SDK calls (196 distinct method + path pairs across the sync and async
+clients) was diffed against the router in the server's `crates/api/src/lib.rs` (admin routes
+under both `/admin` and `/v1/admin`). 17 calls hit routes the server does not serve; **all 17
+were equally absent on v0.11.108**, so nothing here regresses an old server. A snapshot of the
+v0.12.0 router (`tests/v0_12_routes.txt`) now guards this: a test fails if the SDK calls a route
+that is not in it.
+
+- `update_quotas()` called `PUT /v1/admin/quotas`; the routes are `PUT /admin/quotas/default`
+  and `PUT /admin/quotas/{namespace}`. It now takes `namespace=None` and sends `{"config": ...}`.
+- `memory_feedback()` called `POST /v1/agents/{id}/memories/feedback`; now
+  `POST /v1/memory/feedback` with `{agent_id, memory_id, signal}` (the server reads `signal`).
+- `export_audit()` called `POST /v1/audit/export`; the route is `GET` with query parameters
+  (`format` is `json` or `csv`; `jsonl` is rendered client-side); added `limit`.
+- `get_index_stats()` called `GET /v1/namespaces/{ns}/stats`; now reads `GET /v1/namespaces/{ns}`.
+- `compact()` called `POST /v1/namespaces/{ns}/compact`; now `POST /ops/compact` with
+  `{namespace, force}`.
+- Async `delete()` called `/v1/namespaces/{ns}/delete`; the sync one (and now both) use
+  `/vectors/delete`, with `filter` going to `/vectors/bulk-delete`. `delete_all=True` raises
+  `ValueError` (the server has no such route; the body was silently ignored before).
+- Async `multi_vector_search()` / `unified_query()` / `explain_query()` called
+  `/search/multi-vector`, `/search/unified`, `/query/explain`; the routes are `/multi-vector`,
+  `/unified-query`, `/explain`. Async `index_stats()`, `rebuild_indexes()` and `restore_backup()`
+  used per-namespace / per-backup admin routes that do not exist; they now use
+  `/admin/indexes/stats`, `/admin/indexes/rebuild` and `/admin/backups/restore`.
+- Request bodies that the server ignored or refused (checked against the request structs):
+  `query()` sent `include_values` (the field is `include_vectors`, so vectors were never
+  returned; results also read `values` where the server answers `vector`); `create_namespace()`
+  sent `dimensions` from the async client and could not set `distance`;
+  `multi_vector_search()` sent `positive` / `negative` (`positive_vectors` / `negative_vectors`,
+  `enable_mmr`); `unified_query()` sent no `rank_by`, which is required; `explain_query()` sent no
+  `query_type`, which is required (added `query_type`, `text_query`, `execute`);
+  `aggregate()` sent no `aggregate_by`, which is required (added `aggregate_by`, `limit`;
+  `metrics=["count", "avg:field"]` shorthand).
+
+### Removed (these never worked: the server has no such routes, on v0.11.108 or v0.12.0)
+
+- `fetch()` (`POST /v1/namespaces/{ns}/fetch`), `flush()` (`.../flush`),
+  `configure_ttl()` (`/admin/namespaces/{ns}/ttl`), `list_extract_providers()`
+  (`GET /v1/extract/providers`). Read vectors back with `query()` (`include_values=True`).
+
 ### Fixed
 
 - `AsyncDakeraClient.extract_entities()` sent the text as `text`; `POST /v1/memories/extract`

@@ -284,43 +284,61 @@ class TestNamespaceOps:
         assert result["status"] == "started"
 
     def test_get_index_stats(self, client, mock_responses):
-        """Test getting index stats via v1 namespace path."""
+        """Index stats come from GET /v1/namespaces/{ns} (there is no .../stats route)."""
         mock_responses.add(
             responses.GET,
-            "http://localhost:3000/v1/namespaces/test-ns/stats",
+            "http://localhost:3000/v1/namespaces/test-ns",
             json={
-                "total_vectors": 10000,
-                "dimensions": 384,
+                "namespace": "test-ns",
+                "vector_count": 10000,
+                "dimension": 384,
                 "index_type": "hnsw",
-                "memory_usage_bytes": 5000000,
+                "estimated_storage_bytes": 16000000,
             },
             status=200,
         )
         result = client.get_index_stats("test-ns")
         assert result.total_vectors == 10000
         assert result.dimensions == 384
+        assert result.index_type == "hnsw"
+        assert result.disk_usage_bytes == 16000000
+
+    def test_get_index_stats_empty_namespace(self, client, mock_responses):
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/namespaces/empty",
+            json={"namespace": "empty", "vector_count": 0, "dimension": None},
+            status=200,
+        )
+        result = client.get_index_stats("empty")
+        assert (result.total_vectors, result.dimensions, result.index_type) == (0, 0, "unknown")
 
     def test_compact_namespace(self, client, mock_responses):
-        """Test compacting a specific namespace."""
+        """Compaction is POST /ops/compact {namespace, force}."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/compact",
-            json={"compacted": True, "segments_merged": 2},
+            "http://localhost:3000/ops/compact",
+            json={"job_id": "job_1_0", "message": "started", "report": {}},
             status=200,
         )
-        result = client.compact("test-ns")
-        assert result["compacted"] is True
+        result = client.compact("test-ns", force=True)
+        assert result["job_id"] == "job_1_0"
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "namespace": "test-ns",
+            "force": True,
+        }
 
-    def test_flush_namespace(self, client, mock_responses):
-        """Test flushing a namespace."""
+    def test_compact_everything(self, client, mock_responses):
         mock_responses.add(
-            responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/flush",
-            json={"flushed": True, "pending_writes": 0},
-            status=200,
+            responses.POST, "http://localhost:3000/ops/compact", json={"job_id": "j"}, status=200
         )
-        result = client.flush("test-ns")
-        assert result["flushed"] is True
+        client.compact()
+        assert json.loads(mock_responses.calls[0].request.body) == {"force": False}
+
+    def test_no_flush_or_fetch_methods(self, client):
+        """The server never had .../flush or .../fetch routes; the methods are gone."""
+        assert not hasattr(client, "flush")
+        assert not hasattr(client, "fetch")
 
 
 class TestBulkVectorOps:

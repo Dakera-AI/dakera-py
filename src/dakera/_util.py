@@ -2,7 +2,10 @@
 
 import mimetypes
 import os
-from typing import Any, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO
+
+if TYPE_CHECKING:
+    from dakera.models import AuditExportResponse
 
 
 def _attachment_body(data: bytes | str | os.PathLike[str] | BinaryIO) -> tuple[bytes, str]:
@@ -49,3 +52,23 @@ def _memory_job_body(
         if value is not None:
             body[key] = value
     return body
+
+
+def _audit_export_response(result: Any, fmt: str) -> "AuditExportResponse":
+    """Build an :class:`AuditExportResponse` from ``GET /v1/audit/export``.
+
+    The server answers ``{"events": [...], "count": n}`` for ``format=json`` and the
+    CSV text for ``format=csv``; ``jsonl`` is rendered here, one event per line.
+    """
+    import json
+
+    from dakera.models import AuditExportResponse
+
+    if isinstance(result, dict):
+        events = result.get("events", [])
+        count = int(result.get("count", len(events)))
+        data = "\n".join(json.dumps(e) for e in events) if fmt == "jsonl" else json.dumps(events)
+        return AuditExportResponse(data=data, format=fmt, count=count)
+    text = result if isinstance(result, str) else ""
+    rows = [line for line in text.splitlines() if line]
+    return AuditExportResponse(data=text, format="csv", count=max(0, len(rows) - 1))
