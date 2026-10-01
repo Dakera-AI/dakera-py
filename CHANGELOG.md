@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Dakera server **v0.12.0** support. Works against v0.11.108 and v0.12.0 servers: every
 addition is opt-in or additive. See the server's
-[upgrade guide](https://github.com/Dakera-AI/dakera/blob/v0.12.0/docs/v0.12/UPGRADE.md).
+[upgrade guide](https://dakera.ai/docs/changelog).
 
 Version note: the Python SDK has been numbered ahead of the server since 0.12.0 (0.12.x
 releases already exist on PyPI), so it cannot adopt the server's 0.12.0; this is a minor bump.

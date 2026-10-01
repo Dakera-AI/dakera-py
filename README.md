@@ -49,7 +49,7 @@ curl http://localhost:3000/health  # → {"status":"ok"}
 For persistent storage with Docker Compose:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker-compose.yml \
+curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker/docker-compose.yml \
   -o docker-compose.yml
 DAKERA_API_KEY=dk-mykey docker compose up -d
 ```
@@ -155,8 +155,8 @@ asyncio.run(main())
 ## What's new for Dakera server v0.12.0
 
 Version 0.13.0 of this SDK adds support for Dakera server **v0.12.0**
-([release notes](https://github.com/Dakera-AI/dakera/blob/v0.12.0/docs/v0.12/RELEASE_NOTES.md),
-[upgrade guide](https://github.com/Dakera-AI/dakera/blob/v0.12.0/docs/v0.12/UPGRADE.md)).
+(operator upgrade guide: `docs/v0.12/UPGRADE.md` in the server release; release notes in the
+[Dakera changelog](https://dakera.ai/docs/changelog)).
 
 **Compatible with both v0.11.108 and v0.12.0 servers.** Everything new is additive:
 calls that do not use a v0.12 feature send exactly what they sent before, and
@@ -298,7 +298,7 @@ See the [`examples/`](examples/) directory:
 | | |
 |---|---|
 | [Documentation](https://dakera.ai/docs) | Full API reference and guides |
-| [Python SDK docs](https://dakera.ai/docs/sdk/python) | Python-specific reference |
+| [Python SDK docs](https://dakera.ai/docs/python-sdk) | Python-specific reference |
 | [Benchmark](https://dakera.ai/benchmark) | LoCoMo evaluation results |
 | [dakera.ai](https://dakera.ai) | Website and early access |
 | [GitHub Org](https://github.com/dakera-ai) | All public repos |
