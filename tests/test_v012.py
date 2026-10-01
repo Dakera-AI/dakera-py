@@ -798,3 +798,18 @@ class TestLangAndConfig:
         assert seen["PUT/v1/memory/update/m"]["lang"] == "es"
         assert seen["POST/v1/memory/recall"]["lang"] == "it"
         assert seen["POST/v1/memory/search"]["lang"] == "nl"
+
+    async def test_async_get_and_update_send_agent_id_query(self):
+        # GET /v1/memory/get/{id} and PUT /v1/memory/update/{id} read agent_id
+        # from the query string; without it the v0.12.0 server answers 400.
+        seen = {}
+
+        def handler(request):
+            seen[request.method] = dict(request.url.params)
+            return httpx.Response(200, json={"id": "m", "content": "y"})
+
+        c = _async_client(handler)
+        await c.get_memory("agent-7", "m")
+        await c.update_memory("agent-7", "m", content="y")
+        assert seen["GET"] == {"agent_id": "agent-7"}
+        assert seen["PUT"] == {"agent_id": "agent-7"}

@@ -103,7 +103,7 @@ def main() -> None:
 
     if mem1_id and mem2_id:
         try:
-            link = client.memory_link(mem1_id, mem2_id, edge_type="related_to")
+            link = client.memory_link(mem1_id, mem2_id, agent_id=AGENT_ID, label="related")
             print(f"Linked {mem1_id} → {mem2_id}: edge_type={link.edge.edge_type}")
         except Exception as kg_err:
             print(f"KG link not available in sandbox: {kg_err}")

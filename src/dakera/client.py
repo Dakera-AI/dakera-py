@@ -1469,6 +1469,7 @@ class DakeraClient:
         iterations: int | None = None,
         neighborhood: bool | None = None,
         lang: str | None = None,
+        tags: list[str] | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -1478,6 +1479,7 @@ class DakeraClient:
             top_k: Number of primary results to return (default: 5).
             memory_type: Filter by memory type.
             min_importance: Minimum importance threshold.
+            tags: Only memories carrying at least one of these tags.
             include_associated: COG-2 — traverse KG from recalled memories
                 and include associatively linked memories in
                 ``associated_memories`` (default: False).
@@ -1549,6 +1551,8 @@ class DakeraClient:
             data["neighborhood"] = neighborhood
         if lang is not None:
             data["lang"] = lang
+        if tags is not None:
+            data["tags"] = tags
         data["agent_id"] = agent_id
         result = self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
@@ -1582,7 +1586,12 @@ class DakeraClient:
             data["memory_type"] = memory_type
         if lang is not None:
             data["lang"] = lang
-        return self._request("PUT", f"/v1/memory/update/{memory_id}", data=data)
+        return self._request(
+            "PUT",
+            f"/v1/memory/update/{memory_id}",
+            data=data,
+            params={"agent_id": agent_id},
+        )
 
     def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
         """Delete a memory."""
@@ -1666,10 +1675,12 @@ class DakeraClient:
         routing: "RoutingMode | str | None" = None,
         rerank: bool | None = None,
         lang: str | None = None,
+        tags: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Search memories for an agent.
 
         ``lang`` (server v0.12+): language of ``query`` for rule-based routing.
+        ``tags``: only memories carrying at least one of these tags.
         """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
@@ -1682,6 +1693,8 @@ class DakeraClient:
             data["rerank"] = rerank
         if lang is not None:
             data["lang"] = lang
+        if tags is not None:
+            data["tags"] = tags
         data["agent_id"] = agent_id
         result = self._request("POST", "/v1/memory/search", data=data)
         items = result.get("memories", result) if isinstance(result, dict) else result
@@ -1942,16 +1955,18 @@ class DakeraClient:
 
         Args:
             memory_id: Root memory ID to start traversal from.
-            depth: Maximum traversal depth (default: 1, max: 3).
+            depth: Maximum traversal depth (default: 1; the server caps it at 5).
             types: Filter by edge types — any of ``"related_to"``,
                 ``"shares_entity"``, ``"precedes"``, ``"linked_by"``.
-                ``None`` returns all edge types.
+                ``None`` returns all edge types. Applied client-side: the
+                server returns every type.
         """
+        # The server takes only `depth` (capped at 5) and returns every edge
+        # type, so `types` is applied here.
         params: dict[str, Any] = {"depth": depth}
-        if types:
-            params["types"] = ",".join(types)
         result = self._request("GET", f"/v1/memories/{memory_id}/graph", params=params)
-        return MemoryGraph.from_dict(result)
+        graph = MemoryGraph.from_dict(result)
+        return graph.only_edge_types(types) if types else graph
 
     def memory_path(
         self,
@@ -1962,7 +1977,7 @@ class DakeraClient:
 
         Requires CE-5 (Memory Knowledge Graph) on the server.
         """
-        params: dict[str, Any] = {"target": target_id}
+        params: dict[str, Any] = {"to": target_id}
         result = self._request("GET", f"/v1/memories/{source_id}/path", params=params)
         return GraphPath.from_dict(result)
 
@@ -1971,13 +1986,31 @@ class DakeraClient:
         source_id: str,
         target_id: str,
         edge_type: Union[str, EdgeType] = EdgeType.LINKED_BY,
+        *,
+        agent_id: str,
+        label: str | None = None,
     ) -> GraphLinkResponse:
         """Create an explicit edge between two memories.
 
         Requires CE-5 (Memory Knowledge Graph) on the server.
+
+        Args:
+            source_id: Source memory ID.
+            target_id: Target memory ID.
+            edge_type: Accepted for compatibility; the server records every
+                explicit link as ``linked_by`` and this value is not sent.
+            agent_id: Agent that owns both memories (required by the server).
+            label: Optional human-readable label stored with the link.
         """
-        edge_type_str = edge_type.value if isinstance(edge_type, EdgeType) else edge_type
-        data: dict[str, Any] = {"target_id": target_id, "edge_type": edge_type_str}
+        # The server reads {target_id, agent_id, label?} and records every
+        # explicit link as `linked_by`; `edge_type` is accepted for
+        # compatibility and not sent.
+        if not agent_id:
+            raise ValueError("memory_link() needs agent_id: the server requires it")
+        del edge_type  # always recorded as linked_by by the server
+        data: dict[str, Any] = {"target_id": target_id, "agent_id": agent_id}
+        if label is not None:
+            data["label"] = label
         result = self._request("POST", f"/v1/memories/{source_id}/links", data=data)
         if isinstance(result, dict) and "error" in result:
             raise AuthorizationError(
@@ -1999,7 +2032,9 @@ class DakeraClient:
 
         Args:
             agent_id: Agent whose graph to export.
-            format: Export format — ``"json"`` (default), ``"graphml"``, or ``"csv"``.
+            format: Sent as given; the server always answers JSON
+                (``{agent_id, namespace, node_count, edge_count, edges}``).
+                For GraphML use :meth:`knowledge_export` with ``format="graphml"``.
         """
         params: dict[str, Any] = {"format": format}
         result = self._request("GET", f"/v1/agents/{agent_id}/graph/export", params=params)
@@ -2106,7 +2141,7 @@ class DakeraClient:
             Requires CE-4 (GLiNER) on the server.
         """
         result = self._request("GET", f"/v1/memory/entities/{memory_id}")
-        return MemoryEntitiesResponse.from_dict(result)
+        return MemoryEntitiesResponse.from_dict(result, memory_id=memory_id)
 
     # =========================================================================
     # Session Operations
@@ -2563,9 +2598,11 @@ class DakeraClient:
         min_similarity: float | None = None,
     ) -> dict[str, Any]:
         """Build a knowledge graph from a seed memory."""
-        data: dict[str, Any] = {"agent_id": agent_id}
-        if memory_id is not None:
-            data["memory_id"] = memory_id
+        if not memory_id:
+            raise ValueError(
+                "knowledge_graph() needs memory_id: the server builds the graph from a seed memory"
+            )
+        data: dict[str, Any] = {"agent_id": agent_id, "memory_id": memory_id}
         if depth is not None:
             data["depth"] = depth
         if min_similarity is not None:
@@ -2600,9 +2637,15 @@ class DakeraClient:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Summarize memories."""
-        data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
-        if memory_ids is not None:
-            data["memory_ids"] = memory_ids
+        # The server needs at least two memory ids and has no dry run: it
+        # always writes the summary memory.
+        if dry_run:
+            raise ValueError(
+                "summarize() has no dry run on the server: it always stores the summary"
+            )
+        if not memory_ids or len(memory_ids) < 2:
+            raise ValueError("summarize() needs at least two memory_ids")
+        data: dict[str, Any] = {"agent_id": agent_id, "memory_ids": memory_ids}
         if target_type is not None:
             data["target_type"] = target_type
         return self._request("POST", "/v1/knowledge/summarize", data=data)

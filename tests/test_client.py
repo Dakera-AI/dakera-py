@@ -1611,70 +1611,31 @@ class TestAsyncClientStoreMemoryParity:
 # Memory Knowledge Graph Tests (CE-5 / SDK-9)
 # ===========================================================================
 
+# The server's shapes (GET /v1/memories/{id}/graph, /path, POST /links): edges
+# are listed per node as {from_id, to_id, edge_type, weight, created_at}.
 GRAPH_RESPONSE = {
     "root_id": "mem-abc",
     "depth": 2,
+    "node_count": 3,
     "nodes": [
-        {"memory_id": "mem-abc", "content_preview": "Root memory", "importance": 0.9, "depth": 0},
-        {"memory_id": "mem-def", "content_preview": "Related memory", "importance": 0.7,
-         "depth": 1},
-        {"memory_id": "mem-ghi", "content_preview": "Linked memory", "importance": 0.5, "depth": 2},
-    ],
-    "edges": [
-        {
-            "id": "edge-1",
-            "source_id": "mem-abc",
-            "target_id": "mem-def",
-            "edge_type": "related_to",
-            "weight": 0.92,
-            "created_at": 1774000000,
-        },
-        {
-            "id": "edge-2",
-            "source_id": "mem-def",
-            "target_id": "mem-ghi",
-            "edge_type": "linked_by",
-            "weight": 1.0,
-            "created_at": 1774001000,
-        },
+        {"memory_id": "mem-abc", "depth": 0, "edges": []},
+        {"memory_id": "mem-def", "depth": 1, "edges": [
+            {"from_id": "mem-abc", "to_id": "mem-def", "edge_type": "related_to",
+             "weight": 0.92, "created_at": 1774000000}]},
+        {"memory_id": "mem-ghi", "depth": 2, "edges": [
+            {"from_id": "mem-def", "to_id": "mem-ghi", "edge_type": "linked_by",
+             "weight": 1.0, "created_at": 1774001000}]},
     ],
 }
 
 PATH_RESPONSE = {
-    "source_id": "mem-abc",
-    "target_id": "mem-ghi",
+    "from_id": "mem-abc",
+    "to_id": "mem-ghi",
     "path": ["mem-abc", "mem-def", "mem-ghi"],
-    "hops": 2,
-    "edges": [
-        {
-            "id": "edge-1",
-            "source_id": "mem-abc",
-            "target_id": "mem-def",
-            "edge_type": "related_to",
-            "weight": 0.92,
-            "created_at": 1774000000,
-        },
-        {
-            "id": "edge-2",
-            "source_id": "mem-def",
-            "target_id": "mem-ghi",
-            "edge_type": "linked_by",
-            "weight": 1.0,
-            "created_at": 1774001000,
-        },
-    ],
+    "hop_count": 2,
 }
 
-LINK_RESPONSE = {
-    "edge": {
-        "id": "edge-new",
-        "source_id": "mem-abc",
-        "target_id": "mem-xyz",
-        "edge_type": "linked_by",
-        "weight": 1.0,
-        "created_at": 1774002000,
-    }
-}
+LINK_RESPONSE = {"from_id": "mem-abc", "to_id": "mem-xyz", "edge_type": "linked_by"}
 
 EXPORT_RESPONSE = {
     "agent_id": "test-agent",
@@ -1715,7 +1676,11 @@ class TestMemoryGraphSyncClient:
         assert result.root_id == "mem-abc"
         url = mock_responses.calls[0].request.url
         assert "depth=2" in url
-        assert "related_to" in url
+        # The server ignores `types`; it is applied client-side.
+        assert "types" not in url
+        assert {e.edge_type.value for e in result.edges} == {"related_to", "linked_by"}
+        only = client.memory_graph("mem-abc", depth=2, types=["linked_by"])
+        assert [(e.source_id, e.target_id) for e in only.edges] == [("mem-def", "mem-ghi")]
 
     def test_memory_graph_edge_types_parsed(self, client, mock_responses):
         """memory_graph() returns edges with correct EdgeType enum values."""
@@ -1757,8 +1722,9 @@ class TestMemoryGraphSyncClient:
         assert result.target_id == "mem-ghi"
         assert result.path == ["mem-abc", "mem-def", "mem-ghi"]
         assert result.hops == 2
-        assert len(result.edges) == 2
-        assert "target=mem-ghi" in mock_responses.calls[0].request.url
+        # The server sends the path ids only, no edges.
+        assert result.edges == []
+        assert "to=mem-ghi" in mock_responses.calls[0].request.url
 
     def test_memory_link_default_edge_type(self, client, mock_responses):
         """memory_link() defaults to EdgeType.LINKED_BY."""
@@ -1768,13 +1734,37 @@ class TestMemoryGraphSyncClient:
             json=LINK_RESPONSE,
             status=200,
         )
-        result = client.memory_link("mem-abc", "mem-xyz")
-        assert result.edge.id == "edge-new"
+        result = client.memory_link("mem-abc", "mem-xyz", agent_id="agent-1")
+        assert result.edge.source_id == "mem-abc"
+        assert result.edge.target_id == "mem-xyz"
         assert result.edge.edge_type.value == "linked_by"
+        assert result.edge.weight == 1.0
+        assert (result.from_id, result.to_id) == ("mem-abc", "mem-xyz")
+        assert result.edge_type == "linked_by"
         import json as _json
         body = _json.loads(mock_responses.calls[0].request.body)
-        assert body["target_id"] == "mem-xyz"
-        assert body["edge_type"] == "linked_by"
+        # The server's MemoryLinkRequest: {target_id, agent_id, label?}.
+        assert body == {"target_id": "mem-xyz", "agent_id": "agent-1"}
+
+    def test_memory_link_requires_agent_id(self, client, mock_responses):
+        """The server answers 422 without agent_id; the SDK requires it."""
+        with pytest.raises(TypeError):
+            client.memory_link("mem-abc", "mem-xyz")  # type: ignore[call-arg]
+        with pytest.raises(ValueError, match="agent_id"):
+            client.memory_link("mem-abc", "mem-xyz", agent_id="")
+        assert len(mock_responses.calls) == 0
+
+    def test_memory_link_sends_label(self, client, mock_responses):
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memories/mem-abc/links",
+            json=LINK_RESPONSE,
+            status=200,
+        )
+        client.memory_link("mem-abc", "mem-xyz", agent_id="agent-1", label="see also")
+        import json as _json
+        body = _json.loads(mock_responses.calls[0].request.body)
+        assert body == {"target_id": "mem-xyz", "agent_id": "agent-1", "label": "see also"}
 
     def test_memory_link_custom_edge_type_string(self, client, mock_responses):
         """memory_link() accepts a plain string edge_type."""
@@ -1784,8 +1774,8 @@ class TestMemoryGraphSyncClient:
             json=LINK_RESPONSE,
             status=200,
         )
-        result = client.memory_link("mem-abc", "mem-xyz", edge_type="linked_by")
-        assert result.edge.id == "edge-new"
+        result = client.memory_link("mem-abc", "mem-xyz", edge_type="linked_by", agent_id="a")
+        assert result.edge.target_id == "mem-xyz"
 
     def test_memory_link_raises_authorization_error_on_403(self, client, mock_responses):
         """memory_link() raises AuthorizationError when server returns HTTP 403."""
@@ -1800,7 +1790,7 @@ class TestMemoryGraphSyncClient:
             status=403,
         )
         with pytest.raises(AuthorizationError) as exc_info:
-            client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+            client.memory_link("mem-abc", "mem-xyz", edge_type="related_to", agent_id="agent-1")
         assert "forbidden_endpoint" in str(exc_info.value)
 
     def test_memory_link_raises_authorization_error_on_200_error_body(self, client, mock_responses):
@@ -1817,7 +1807,7 @@ class TestMemoryGraphSyncClient:
             status=200,
         )
         with pytest.raises(AuthorizationError) as exc_info:
-            client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+            client.memory_link("mem-abc", "mem-xyz", edge_type="related_to", agent_id="agent-1")
         assert "forbidden_endpoint" in str(exc_info.value) or "not available" in str(exc_info.value)
 
     def test_agent_graph_export_json(self, client, mock_responses):
@@ -1881,9 +1871,11 @@ class TestMemoryGraphAsyncClient:
             return GRAPH_RESPONSE
 
         with patch.object(client, "_request", side_effect=fake_request):
-            await client.memory_graph("mem-abc", depth=1, types=["related_to"])
+            result = await client.memory_graph("mem-abc", depth=1, types=["related_to"])
+        assert [e.edge_type.value for e in result.edges] == ["related_to"]
 
-        assert calls[0][2]["types"] == "related_to"
+        # The server ignores `types`; it is applied client-side.
+        assert "types" not in calls[0][2]
 
     async def test_memory_graph_no_types_filter(self):
         """memory_graph() omits types param when not specified."""
@@ -1900,7 +1892,7 @@ class TestMemoryGraphAsyncClient:
         assert "types" not in calls[0][2]
 
     async def test_memory_path_calls_correct_endpoint(self):
-        """memory_path() calls GET /v1/memories/{id}/path?target={id}."""
+        """memory_path() calls GET /v1/memories/{id}/path?to={id}."""
         client = AsyncDakeraClient("http://localhost:3000")
         calls: list = []
 
@@ -1913,7 +1905,7 @@ class TestMemoryGraphAsyncClient:
 
         assert calls[0][0] == "GET"
         assert calls[0][1] == "/v1/memories/mem-abc/path"
-        assert calls[0][2]["target"] == "mem-ghi"
+        assert calls[0][2] == {"to": "mem-ghi"}
         assert result.hops == 2
         assert result.path == ["mem-abc", "mem-def", "mem-ghi"]
 
@@ -1927,13 +1919,13 @@ class TestMemoryGraphAsyncClient:
             return LINK_RESPONSE
 
         with patch.object(client, "_request", side_effect=fake_request):
-            result = await client.memory_link("mem-abc", "mem-xyz")
+            result = await client.memory_link("mem-abc", "mem-xyz", agent_id="agent-1")
 
         assert calls[0][0] == "POST"
         assert calls[0][1] == "/v1/memories/mem-abc/links"
-        assert calls[0][2]["target_id"] == "mem-xyz"
-        assert calls[0][2]["edge_type"] == "linked_by"
-        assert result.edge.id == "edge-new"
+        assert calls[0][2] == {"target_id": "mem-xyz", "agent_id": "agent-1"}
+        assert result.edge.source_id == "mem-abc"
+        assert result.edge.target_id == "mem-xyz"
 
     async def test_memory_link_enum_edge_type(self):
         """memory_link() accepts EdgeType enum values."""
@@ -1946,9 +1938,12 @@ class TestMemoryGraphAsyncClient:
             return LINK_RESPONSE
 
         with patch.object(client, "_request", side_effect=fake_request):
-            await client.memory_link("mem-abc", "mem-xyz", edge_type=EdgeType.LINKED_BY)
+            await client.memory_link(
+                "mem-abc", "mem-xyz", edge_type=EdgeType.LINKED_BY, agent_id="agent-1"
+            )
 
-        assert calls[0][2]["edge_type"] == "linked_by"
+        # edge_type is accepted but not sent: the server records linked_by.
+        assert "edge_type" not in calls[0][2]
 
     async def test_memory_link_raises_authorization_error_on_error_body(self):
         """memory_link() raises AuthorizationError on error body (DAK-6785).
@@ -1965,7 +1960,9 @@ class TestMemoryGraphAsyncClient:
 
         with patch.object(client, "_request", side_effect=fake_request), \
                 pytest.raises(AuthorizationError) as exc_info:
-            await client.memory_link("mem-abc", "mem-xyz", edge_type="related_to")
+            await client.memory_link(
+                "mem-abc", "mem-xyz", edge_type="related_to", agent_id="agent-1"
+            )
         assert "forbidden_endpoint" in str(exc_info.value) or "not available" in str(exc_info.value)
 
     async def test_memory_link_raises_authorization_error_no_message(self):
@@ -1978,7 +1975,7 @@ class TestMemoryGraphAsyncClient:
 
         with patch.object(client, "_request", side_effect=fake_request), \
                 pytest.raises(AuthorizationError) as exc_info:
-            await client.memory_link("mem-abc", "mem-xyz")
+            await client.memory_link("mem-abc", "mem-xyz", agent_id="agent-1")
         assert "forbidden_endpoint" in str(exc_info.value)
 
     async def test_agent_graph_export(self):
@@ -2069,9 +2066,43 @@ class TestGraphModels:
         """GraphPath.hops falls back to len(path)-1 if not in response."""
         from dakera import GraphPath
         data = {**PATH_RESPONSE}
-        del data["hops"]
+        del data["hop_count"]
         path = GraphPath.from_dict(data)
         assert path.hops == 2  # len(["mem-abc","mem-def","mem-ghi"]) - 1
+
+    def test_graph_edge_from_server_shape(self):
+        """The server sends from_id/to_id and no edge id."""
+        from dakera import EdgeType, GraphEdge
+        edge = GraphEdge.from_dict({"from_id": "a", "to_id": "b", "edge_type": "related_to",
+                                    "weight": 0.9, "created_at": 5})
+        assert (edge.id, edge.source_id, edge.target_id) == ("", "a", "b")
+        assert edge.edge_type == EdgeType.RELATED_TO
+
+    def test_graph_edge_unknown_and_supersedes_types(self):
+        """`supersedes` (server v0.11+) and future types parse instead of raising."""
+        from dakera import EdgeType, GraphEdge
+        sup = GraphEdge.from_dict({"from_id": "a", "to_id": "b", "edge_type": "supersedes"})
+        assert sup.edge_type == EdgeType.SUPERSEDES
+        new = GraphEdge.from_dict({"from_id": "a", "to_id": "b", "edge_type": "future_kind"})
+        assert new.edge_type == "future_kind"
+        assert not new.edge_type.is_known
+
+    def test_graph_link_response_from_flat_answer(self):
+        from dakera import GraphLinkResponse
+        resp = GraphLinkResponse.from_dict(LINK_RESPONSE)
+        assert (resp.from_id, resp.to_id, resp.edge_type) == ("mem-abc", "mem-xyz", "linked_by")
+        assert resp.edge.source_id == "mem-abc"
+        assert resp.edge.weight == 1.0
+
+    def test_memory_entities_response_fills_requested_id(self):
+        from dakera import MemoryEntitiesResponse
+        resp = MemoryEntitiesResponse.from_dict(
+            {"entities": [{"entity_type": "person", "value": "Anna", "score": 0.9}], "count": 1},
+            memory_id="mem-1",
+        )
+        assert resp.memory_id == "mem-1"
+        assert resp.count == 1
+        assert resp.entities[0].value == "Anna"
 
     def test_graph_export_from_dict(self):
         """GraphExport.from_dict() parses all fields."""
@@ -2232,11 +2263,12 @@ EXTRACT_RESPONSE = {
     ],
 }
 
+# The server's shape: {entities, count}; there is no memory_id in the answer.
 MEMORY_ENTITIES_RESPONSE = {
-    "memory_id": "mem-001",
     "entities": [
         {"entity_type": "org", "value": "Dakera", "score": 0.88},
     ],
+    "count": 1,
 }
 
 
@@ -2446,10 +2478,14 @@ class TestEntityExtractionModels:
         assert resp.entities == []
 
     def test_memory_entities_response_from_dict(self):
-        """MemoryEntitiesResponse.from_dict() parses memory_id and entities."""
+        """MemoryEntitiesResponse.from_dict() parses entities; memory_id comes from the
+        request (or from the answer if a server sends it)."""
         from dakera import MemoryEntitiesResponse
-        resp = MemoryEntitiesResponse.from_dict(MEMORY_ENTITIES_RESPONSE)
+        resp = MemoryEntitiesResponse.from_dict(MEMORY_ENTITIES_RESPONSE, memory_id="mem-001")
         assert resp.memory_id == "mem-001"
+        assert resp.count == 1
+        legacy = MemoryEntitiesResponse.from_dict({**MEMORY_ENTITIES_RESPONSE, "memory_id": "m9"})
+        assert legacy.memory_id == "m9"
         assert len(resp.entities) == 1
         assert resp.entities[0].value == "Dakera"
 
