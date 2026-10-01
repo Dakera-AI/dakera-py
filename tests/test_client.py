@@ -2385,7 +2385,7 @@ class TestEntityExtractionAsyncClient:
 
         assert calls[0][0] == "POST"
         assert calls[0][1] == "/v1/memories/extract"
-        assert calls[0][2]["text"] == "Alice lives in Paris."
+        assert calls[0][2]["content"] == "Alice lives in Paris."
         assert len(result.entities) == 2
         assert result.entities[0].value == "Alice"
 

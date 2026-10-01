@@ -24,12 +24,16 @@ except ImportError:
 from dakera.exceptions import (
     AuthenticationError,
     AuthorizationError,
+    ConflictError,
     ConnectionError,
     DakeraError,
     ErrorCode,
+    FeatureNotAvailableError,
     NotFoundError,
+    PayloadTooLargeError,
     RateLimitError,
     ServerError,
+    ServiceUnavailableError,
     UnsupportedCapabilityError,
     ValidationError,
 )
@@ -43,6 +47,11 @@ from dakera.models import (
     AgentStats,
     AgentSummary,
     AnalyticsOverview,
+    AttachmentCapabilities,
+    AttachmentContent,
+    AttachmentInfo,
+    AttachmentJob,
+    AttachmentUploadResponse,
     # OBS-1
     AuditEvent,
     AuditExportResponse,
@@ -102,6 +111,7 @@ from dakera.models import (
     HybridSearchResult,
     IndexKind,
     IndexStats,
+    JobAccepted,
     # KG-2
     KgExportResponse,
     KgPathResponse,
@@ -111,6 +121,7 @@ from dakera.models import (
     KnowledgeNode,
     # OBS-2
     KpiSnapshot,
+    LateInteractionCapabilities,
     LenientStrEnum,
     ListNamespaceKeysResponse,
     Memory,
@@ -135,7 +146,12 @@ from dakera.models import (
     RecalledMemory,
     # COG-2
     RecallResponse,
+    Record,
     RecordCapabilities,
+    RecordUpsertResponse,
+    RecordView,
+    Representation,
+    RepresentationInfo,
     RepresentationKind,
     RetryConfig,
     # SEC-3
@@ -143,6 +159,7 @@ from dakera.models import (
     RotateEncryptionKeyResponse,
     # CE-10
     RoutingMode,
+    ScoringCapabilities,
     SearchMode,
     SearchResult,
     ServerCapabilities,
@@ -151,8 +168,10 @@ from dakera.models import (
     StoreMemoryRequest,
     SummarizeResponse,
     TifScore,
+    TranscriptionCapabilities,
     Vector,
     VectorMutationOp,
+    VisionCapabilities,
     WakeUpResponse,
     WarmCacheRequest,
     WarmCacheResponse,
@@ -169,7 +188,7 @@ with contextlib.suppress(ImportError):
         DakeraDelegationHelper,
     )
 
-__version__ = "0.12.14"
+__version__ = "0.13.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -314,6 +333,10 @@ __all__ = [
     "NotFoundError",
     "ValidationError",
     "UnsupportedCapabilityError",
+    "ConflictError",
+    "FeatureNotAvailableError",
+    "PayloadTooLargeError",
+    "ServiceUnavailableError",
     # R9: forward-compat enums + server capabilities
     "LenientStrEnum",
     "IndexKind",
@@ -322,6 +345,21 @@ __all__ = [
     "BlockDType",
     "ModelCapability",
     "RecordCapabilities",
+    "AttachmentCapabilities",
+    "AttachmentContent",
+    "AttachmentInfo",
+    "AttachmentJob",
+    "AttachmentUploadResponse",
+    "JobAccepted",
+    "LateInteractionCapabilities",
+    "Record",
+    "RecordUpsertResponse",
+    "RecordView",
+    "Representation",
+    "RepresentationInfo",
+    "ScoringCapabilities",
+    "TranscriptionCapabilities",
+    "VisionCapabilities",
     "ServerCapabilities",
     "parse_accepted_values",
     "wire_value",

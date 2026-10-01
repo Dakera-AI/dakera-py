@@ -26,11 +26,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
+import time
 from collections.abc import AsyncGenerator
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import Any
+from typing import Any, BinaryIO
 
 try:
     import httpx
@@ -39,8 +41,8 @@ except ImportError as exc:  # pragma: no cover
         "httpx is required for AsyncDakeraClient. Install it with: pip install dakera[async]"
     ) from exc
 
+from dakera._util import _attachment_body, _memory_job_body
 from dakera.exceptions import (
-    AuthenticationError,
     AuthorizationError,
     ConnectionError,
     DakeraError,
@@ -48,12 +50,18 @@ from dakera.exceptions import (
     NotFoundError,
     RateLimitError,
     ServerError,
+    ServiceUnavailableError,
     TimeoutError,
-    ValidationError,
+    error_from_response,
+    parse_retry_after,
 )
 from dakera.models import (
     AccessPatternHint,
     AgentFeedbackSummary,
+    AttachmentContent,
+    AttachmentInfo,
+    AttachmentJob,
+    AttachmentUploadResponse,
     # OBS-1
     AuditExportResponse,
     AuditListResponse,
@@ -64,7 +72,6 @@ from dakera.models import (
     BatchStoreMemoryRequest,
     BatchStoreMemoryResponse,
     BatchTextQueryResponse,
-    # CE-12
     CompressResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
@@ -102,6 +109,7 @@ from dakera.models import (
     HybridSearchResult,
     ImportJobStatus,
     IndexStats,
+    JobAccepted,
     # KG-2
     KgExportResponse,
     KgPathResponse,
@@ -126,6 +134,9 @@ from dakera.models import (
     ReadConsistency,
     # COG-2
     RecallResponse,
+    Record,
+    RecordUpsertResponse,
+    RecordView,
     RetryConfig,
     # SEC-3
     RotateEncryptionKeyResponse,
@@ -295,84 +306,37 @@ class AsyncDakeraClient:
         """Build full URL from path."""
         return f"{self.base_url}/{path.lstrip('/')}"
 
-    def _handle_response(self, response: httpx.Response) -> Any:
-        """Handle API response and raise appropriate exceptions."""
+    def _handle_response(self, response: httpx.Response, raw: bool = False) -> Any:
+        """Handle API response and raise appropriate exceptions.
+
+        With ``raw=True`` a successful response is returned as-is (binary
+        downloads); errors are mapped the same way either way.
+        """
         # OPS-1: capture rate-limit headers before consuming the body
         self._last_rate_limit_headers = RateLimitHeaders.from_headers(dict(response.headers))
+
+        if raw and 200 <= response.status_code < 300:
+            return response
 
         try:
             body = response.json() if response.content else None
         except json.JSONDecodeError:
             body = response.text
 
-        if response.status_code in (200, 201):
-            return body
         if response.status_code == 204:
             return None
+        if 200 <= response.status_code < 300:  # 200, 201 and the v0.12 job routes' 202
+            return body
 
-        raw_code = body.get("code") if isinstance(body, dict) else None
-        try:
-            error_code = ErrorCode(raw_code) if raw_code is not None else ErrorCode.UNKNOWN
-        except ValueError:
-            error_code = ErrorCode.UNKNOWN
+        raise error_from_response(response.status_code, body, response.headers.get("Retry-After"))
 
-        if response.status_code == 400:
-            raise ValidationError(
-                message=(
-                    body.get("error", "Validation error") if isinstance(body, dict) else str(body)
-                ),
-                status_code=response.status_code,
-                response_body=body,
-                code=error_code,
-            )
-        if response.status_code == 401:
-            raise AuthenticationError(
-                message=(
-                    body.get("error", "Authentication failed")
-                    if isinstance(body, dict)
-                    else "Authentication failed"
-                ),
-                status_code=response.status_code,
-                response_body=body,
-                code=error_code,
-            )
-        if response.status_code == 403:
-            raise AuthorizationError(
-                message=(body.get("error", "Forbidden") if isinstance(body, dict) else "Forbidden"),
-                status_code=response.status_code,
-                response_body=body,
-                code=error_code,
-            )
-        if response.status_code == 404:
-            raise NotFoundError(
-                message=(
-                    body.get("error", "Resource not found") if isinstance(body, dict) else str(body)
-                ),
-                status_code=response.status_code,
-                response_body=body,
-                code=error_code,
-            )
-        if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After")
-            raise RateLimitError(
-                message="Rate limit exceeded",
-                status_code=response.status_code,
-                response_body=body,
-                retry_after=int(retry_after) if retry_after else None,
-            )
-        if response.status_code >= 500:
-            raise ServerError(
-                message=body.get("error", "Server error") if isinstance(body, dict) else str(body),
-                status_code=response.status_code,
-                response_body=body,
-                code=error_code,
-            )
-        raise DakeraError(
-            message=f"Unexpected status code: {response.status_code}",
-            status_code=response.status_code,
-            response_body=body,
-            code=error_code,
-        )
+    @classmethod
+    def _retry_delay(cls, rc: RetryConfig, retry_after: float | None, attempt: int) -> float:
+        """Delay before the next attempt: the server's ``Retry-After`` when it sent
+        one (capped at ``rc.max_delay``), else exponential backoff."""
+        if retry_after is not None:
+            return min(float(retry_after), rc.max_delay)
+        return cls._compute_backoff(rc, attempt)
 
     @staticmethod
     def _compute_backoff(rc: RetryConfig, attempt: int) -> float:
@@ -388,8 +352,19 @@ class AsyncDakeraClient:
         path: str,
         data: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        *,
+        content: bytes | None = None,
+        headers: dict[str, str] | None = None,
+        raw: bool = False,
     ) -> Any:
-        """Make async HTTP request with retry logic and exponential backoff."""
+        """Make async HTTP request with retry logic and exponential backoff.
+
+        ``content`` sends a raw body (with ``headers``, e.g. its ``Content-Type``)
+        instead of JSON; ``raw=True`` returns the successful response object
+        instead of its parsed body. A ``503`` / ``429`` waits for the server's
+        ``Retry-After`` (capped at the retry config's ``max_delay``) before the
+        next attempt; other transient errors use exponential backoff.
+        """
         url = self._url(path)
         rc = self._retry_config
 
@@ -398,25 +373,22 @@ class AsyncDakeraClient:
                 response = await self._client.request(
                     method=method,
                     url=url,
-                    json=data,
+                    json=data if content is None else None,
+                    content=content,
+                    headers=headers,
                     params=params,
                 )
-                return self._handle_response(response)
+                return self._handle_response(response, raw=raw)
             except httpx.ConnectError as e:
                 if attempt == rc.max_retries - 1:
                     raise ConnectionError(f"Failed to connect to {url}: {e}") from e
             except httpx.TimeoutException as e:
                 if attempt == rc.max_retries - 1:
                     raise TimeoutError(f"Request timed out: {e}") from e
-            except RateLimitError as e:
+            except (RateLimitError, ServiceUnavailableError) as e:
                 if attempt == rc.max_retries - 1:
                     raise
-                wait = (
-                    float(e.retry_after)
-                    if e.retry_after is not None
-                    else self._compute_backoff(rc, attempt)
-                )
-                await asyncio.sleep(wait)
+                await asyncio.sleep(self._retry_delay(rc, e.retry_after, attempt))
                 continue
             except ServerError:
                 if attempt == rc.max_retries - 1:
@@ -779,6 +751,309 @@ class AsyncDakeraClient:
         """K8s liveness probe — checks process is alive."""
         return await self._request("GET", "/health/live")
 
+    # =========================================================================
+    # Health: readiness wait (server v0.12 /health/ready + /health/live)
+    # =========================================================================
+
+    async def is_ready(self) -> bool:
+        """Whether the server answers ``GET /health/ready`` with ``200``.
+
+        One probe, no retries. A ``503`` (starting, storage unreachable,
+        embedding warm-up failed) or an unreachable server is **not ready**: a
+        starting v0.12 server answers ``503`` + ``Retry-After`` on its health
+        routes while models load, and that must never count as healthy.
+        """
+        ready, _ = await self._probe_ready()
+        return ready
+
+    async def _probe_ready(self) -> tuple[bool, float | None]:
+        """One ``/health/ready`` probe → ``(ready, retry_after_seconds)``."""
+        try:
+            response = await self._client.request("GET", self._url("/health/ready"))
+        except httpx.HTTPError:
+            return False, None
+        if response.status_code == 200:
+            return True, None
+        return False, parse_retry_after(response.headers.get("Retry-After"))
+
+    async def wait_until_ready(
+        self, timeout: float = 60.0, poll_interval: float = 1.0
+    ) -> dict[str, Any]:
+        """Block until ``GET /health/ready`` answers ``200`` and return its body.
+
+        Polls every ``poll_interval`` seconds, or as long as the server's
+        ``Retry-After`` asks when it sent one. Use this after starting a server
+        instead of treating any HTTP answer as healthy.
+
+        Raises:
+            TimeoutError: the server was not ready within ``timeout`` seconds.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            ready, retry_after = await self._probe_ready()
+            if ready:
+                return await self.health_ready()
+            now = time.monotonic()
+            if now >= deadline:
+                raise TimeoutError(f"server not ready after {timeout:g}s ({self.base_url})")
+            delay = retry_after if retry_after is not None else poll_interval
+            await asyncio.sleep(max(0.0, min(max(delay, 0.05), deadline - now)))
+
+    # =========================================================================
+    # Attachments (server v0.12, DAKERA_ATTACHMENTS — else 501 FEATURE_DISABLED)
+    # =========================================================================
+
+    async def upload_attachment(
+        self,
+        namespace: str,
+        data: bytes | str | os.PathLike[str] | BinaryIO,
+        content_type: str | None = None,
+    ) -> AttachmentUploadResponse:
+        """Upload a file to a namespace (content-addressed).
+
+        Args:
+            namespace: Namespace to store it in. To attach it to a memory use the
+                agent's own namespace, ``_dakera_agent_{agent_id}``; the
+                transcribe / index jobs accept an attachment from any namespace
+                the key can read.
+            data: The bytes, a path to a file, or a binary file object.
+            content_type: Media type. Defaults to a guess from the file name, else
+                ``application/octet-stream``.
+
+        Returns:
+            :class:`AttachmentUploadResponse` — ``attachment_ref`` is
+            ``sha256:<hex>``; ``created`` is ``False`` when the namespace already
+            held the same bytes.
+
+        Raises:
+            PayloadTooLargeError: over ``DAKERA_ATTACHMENT_MAX_BYTES`` (25 MiB by
+                default) or the namespace quota.
+            FeatureNotAvailableError: the server has attachments off (501).
+        """
+        body, guessed = _attachment_body(data)
+        headers = {"Content-Type": content_type or guessed}
+        result = await self._request(
+            "POST", f"/v1/namespaces/{namespace}/attachments", content=body, headers=headers
+        )
+        return AttachmentUploadResponse.from_dict(result)
+
+    async def list_attachments(self, namespace: str) -> list[AttachmentInfo]:
+        """List a namespace's attachments (reference, media type, size; no bytes)."""
+        result = await self._request("GET", f"/v1/namespaces/{namespace}/attachments")
+        items = result.get("attachments", []) if isinstance(result, dict) else []
+        return [AttachmentInfo.from_dict(a) for a in items]
+
+    async def download_attachment(self, namespace: str, attachment_ref: str) -> AttachmentContent:
+        """Download an attachment's bytes with the media type it was uploaded with."""
+        response = await self._request(
+            "GET", f"/v1/namespaces/{namespace}/attachments/{attachment_ref}", raw=True
+        )
+        etag = response.headers.get("ETag")
+        return AttachmentContent(
+            data=response.content,
+            content_type=response.headers.get("Content-Type", "application/octet-stream"),
+            etag=etag.strip('"') if etag else None,
+        )
+
+    async def delete_attachment(self, namespace: str, attachment_ref: str) -> None:
+        """Delete an attachment.
+
+        Raises:
+            ConflictError: a memory still references it (409) — forget the memory
+                instead; the attachment goes with the last memory that references it.
+        """
+        await self._request("DELETE", f"/v1/namespaces/{namespace}/attachments/{attachment_ref}")
+
+    async def transcribe_attachment(
+        self,
+        namespace: str,
+        attachment_ref: str,
+        agent_id: str,
+        *,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
+        id: str | None = None,
+        lang: str | None = None,
+    ) -> JobAccepted:
+        """Start a speech-to-text job on a WAV attachment (``202``).
+
+        The job transcribes the audio and stores the transcript as a memory of
+        ``agent_id`` (embedded and full-text indexed, ``attachment_ref`` set to the
+        audio). Poll :meth:`get_transcription_job` or call
+        :meth:`wait_for_transcription`. Needs read on ``namespace`` and write on
+        the agent's namespace. Anything but WAV is a ``400`` before a job exists.
+        """
+        body = _memory_job_body(
+            agent_id, None, memory_type, session_id, importance, tags, metadata,
+            ttl_seconds, expires_at, id, lang,
+        )  # fmt: skip
+        result = await self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/attachments/{attachment_ref}/transcribe",
+            data=body,
+        )
+        return JobAccepted.from_dict(result)
+
+    async def get_transcription_job(
+        self, namespace: str, attachment_ref: str, job_id: str
+    ) -> AttachmentJob:
+        """Status of a transcription job. Jobs live in server memory: after a server
+        restart this is a ``NotFoundError`` (``code == JOB_NOT_FOUND``); the memory a
+        completed job stored is kept — look it up by ``JobAccepted.memory_id``."""
+        result = await self._request(
+            "GET",
+            f"/v1/namespaces/{namespace}/attachments/{attachment_ref}/transcribe/{job_id}",
+        )
+        return AttachmentJob.from_dict(result)
+
+    async def wait_for_transcription(
+        self,
+        namespace: str,
+        attachment_ref: str,
+        job_id: str,
+        timeout: float = 300.0,
+        poll_interval: float = 1.0,
+    ) -> AttachmentJob:
+        """Poll a transcription job until it completes, fails or is cancelled.
+
+        Returns the final :class:`AttachmentJob` (check ``succeeded`` /
+        ``error_code``). Raises :class:`~dakera.exceptions.TimeoutError` after
+        ``timeout`` seconds.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.get_transcription_job(namespace, attachment_ref, job_id)
+            if job.is_done:
+                return job
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"transcription job {job_id} not done after {timeout:g}s")
+            await asyncio.sleep(poll_interval)
+
+    async def index_attachment(
+        self,
+        namespace: str,
+        attachment_ref: str,
+        agent_id: str,
+        *,
+        content: str | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
+        id: str | None = None,
+        lang: str | None = None,
+    ) -> JobAccepted:
+        """Start an image-indexing job on a PNG attachment (``202``).
+
+        Needs ``DAKERA_VISION`` **and** ``DAKERA_ATTACHMENTS`` on the server (else
+        501). The image is embedded from its pixels; ``content`` is only the
+        caption stored as the memory's text (default ``[image sha256:...]``).
+        """
+        body = _memory_job_body(
+            agent_id, content, memory_type, session_id, importance, tags, metadata,
+            ttl_seconds, expires_at, id, lang,
+        )  # fmt: skip
+        result = await self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/attachments/{attachment_ref}/index",
+            data=body,
+        )
+        return JobAccepted.from_dict(result)
+
+    async def get_index_job(
+        self, namespace: str, attachment_ref: str, job_id: str
+    ) -> AttachmentJob:
+        """Status of an image-index job (see :meth:`get_transcription_job`)."""
+        result = await self._request(
+            "GET",
+            f"/v1/namespaces/{namespace}/attachments/{attachment_ref}/index/{job_id}",
+        )
+        return AttachmentJob.from_dict(result)
+
+    async def wait_for_index(
+        self,
+        namespace: str,
+        attachment_ref: str,
+        job_id: str,
+        timeout: float = 600.0,
+        poll_interval: float = 2.0,
+    ) -> AttachmentJob:
+        """Poll an image-index job until it completes, fails or is cancelled."""
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.get_index_job(namespace, attachment_ref, job_id)
+            if job.is_done:
+                return job
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"index job {job_id} not done after {timeout:g}s")
+            await asyncio.sleep(poll_interval)
+
+    # =========================================================================
+    # Records: one vector plus named representations (server v0.12, DAKERA_RECORDS)
+    # =========================================================================
+
+    async def upsert_records(
+        self, namespace: str, records: list[Record | dict[str, Any]]
+    ) -> RecordUpsertResponse:
+        """Upsert records: a primary dense vector (indexed, searched) plus named
+        extra representations (``token_multivector`` / ``patch_multivector`` /
+        ``dense``) stored beside it and deleted with it through the vector routes.
+
+        Raises:
+            FeatureNotAvailableError: ``DAKERA_RECORDS`` is off (501).
+            PayloadTooLargeError: a record is over ``DAKERA_RECORD_MAX_VECTORS`` /
+                ``DAKERA_RECORD_MAX_BYTES`` (413).
+
+        Example:
+            >>> client.upsert_records("docs", [Record(
+            ...     id="r1", values=[0.1, 0.2, 0.3, 0.4],
+            ...     representations=[Representation(
+            ...         "tokens", [[0.1, 0.2], [0.3, 0.4]],
+            ...         kind=RepresentationKind.TOKEN_MULTIVECTOR,
+            ...         store_as=BlockDType.F16)])])
+        """
+        payload = [r.to_dict() if isinstance(r, Record) else r for r in records]
+        result = await self._request(
+            "POST", f"/v1/namespaces/{namespace}/records", data={"records": payload}
+        )
+        return RecordUpsertResponse.from_dict(result)
+
+    async def get_record(
+        self, namespace: str, record_id: str, include_vectors: bool = False
+    ) -> RecordView:
+        """Read a record: a manifest of its representations (name, kind, model,
+        shape, dtype, bytes); the vectors themselves only with ``include_vectors``.
+        There is no record delete route — delete the id through the vector routes."""
+        params = {"include_vectors": "true"} if include_vectors else None
+        result = await self._request(
+            "GET", f"/v1/namespaces/{namespace}/records/{record_id}", params=params
+        )
+        return RecordView.from_dict(result)
+
+    async def replace_namespace_ner_config(
+        self,
+        namespace: str,
+        extract_entities: bool,
+        entity_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Replace a namespace's entity-extraction config (``PUT .../config``,
+        server v0.12+).
+
+        Unlike :meth:`configure_namespace_ner` (``PATCH``, which merges), ``PUT`` is
+        a full replacement: an omitted ``entity_types`` clears the list. A v0.11
+        server answers ``405``.
+        """
+        body = {"extract_entities": extract_entities, "entity_types": entity_types or []}
+        return await self._request("PUT", f"/v1/namespaces/{namespace}/config", data=body)
+
     async def get_index_stats(self, namespace: str) -> IndexStats:
         """Get index statistics for a namespace."""
         response = await self._request("GET", f"/v1/namespaces/{namespace}/stats")
@@ -808,6 +1083,8 @@ class AsyncDakeraClient:
         ttl_seconds: int | None = None,
         expires_at: int | None = None,
         valid_from: int | None = None,
+        lang: str | None = None,
+        attachment_ref: str | None = None,
     ) -> dict[str, Any]:
         """Store a memory for an agent.
 
@@ -828,6 +1105,15 @@ class AsyncDakeraClient:
                 (seconds). Indicates when this memory becomes temporally valid,
                 independent of ingest time. Defaults to ingest time when omitted.
                 Requires server v0.11.98+ (DAK-7424).
+            lang: Language of ``content`` for the write-time derivations (event
+                dates, entity tags): an ISO 639-1 code or name, optionally with a
+                region (``"de"``, ``"pt-BR"``). Omitted ⇒ the server-wide default.
+                Server v0.12+; an unsupported value is a ``400`` naming the
+                supported languages (see ``capabilities().query_languages``).
+            attachment_ref: ``sha256:<hex>`` of an attachment already uploaded to
+                this agent's namespace (``_dakera_agent_{agent_id}``) with
+                :meth:`upload_attachment`. Server v0.12+, needs
+                ``DAKERA_ATTACHMENTS``.
         """
         data: dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
@@ -844,6 +1130,10 @@ class AsyncDakeraClient:
             data["expires_at"] = expires_at
         if valid_from is not None:
             data["valid_from"] = valid_from
+        if lang is not None:
+            data["lang"] = lang
+        if attachment_ref is not None:
+            data["attachment_ref"] = attachment_ref
         data["agent_id"] = agent_id
         response = await self._request("POST", "/v1/memory/store", data=data)
         # Server wraps the memory in {"memory": {...}, "embedding_time_ms": ...}
@@ -870,6 +1160,7 @@ class AsyncDakeraClient:
         vector_weight: float | None = None,
         iterations: int | None = None,
         neighborhood: bool | None = None,
+        lang: str | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -948,6 +1239,8 @@ class AsyncDakeraClient:
             data["iterations"] = iterations
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
+        if lang is not None:
+            data["lang"] = lang
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
@@ -965,8 +1258,13 @@ class AsyncDakeraClient:
         content: str | None = None,
         metadata: dict[str, Any] | None = None,
         memory_type: str | None = None,
+        lang: str | None = None,
     ) -> dict[str, Any]:
-        """Update an existing memory."""
+        """Update an existing memory.
+
+        ``lang`` (server v0.12+) is the language of the content; when it differs
+        from the recorded one the text-derived data is re-derived.
+        """
         data: dict[str, Any] = {}
         if content is not None:
             data["content"] = content
@@ -974,6 +1272,8 @@ class AsyncDakeraClient:
             data["metadata"] = metadata
         if memory_type is not None:
             data["memory_type"] = memory_type
+        if lang is not None:
+            data["lang"] = lang
         return await self._request("PUT", f"/v1/memory/update/{memory_id}", data=data)
 
     async def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
@@ -1044,8 +1344,12 @@ class AsyncDakeraClient:
         min_importance: float | None = None,
         routing: RoutingMode | str | None = None,
         rerank: bool | None = None,
+        lang: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Search memories for an agent."""
+        """Search memories for an agent.
+
+        ``lang`` (server v0.12+): language of ``query`` for rule-based routing.
+        """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
@@ -1055,6 +1359,8 @@ class AsyncDakeraClient:
             data["routing"] = routing.value if hasattr(routing, "value") else routing
         if rerank is not None:
             data["rerank"] = rerank
+        if lang is not None:
+            data["lang"] = lang
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/search", data=data)
         items = result.get("memories", result) if isinstance(result, dict) else result
@@ -1409,7 +1715,9 @@ class AsyncDakeraClient:
             namespace: Target namespace.
             extract_entities: Enable automatic entity extraction on store.
             entity_types: Entity types to extract, e.g. ``["person", "org",
-                "location", "date"]``.  ``None`` keeps existing types.
+                "location", "date"]``.  ``None`` keeps existing types; ``[]`` clears
+                them (a v0.12 server's ``PATCH`` merges what it is sent; use
+                :meth:`replace_namespace_ner_config` for a full replacement).
 
         Returns:
             Updated namespace config dict.
@@ -1431,6 +1739,7 @@ class AsyncDakeraClient:
         self,
         text: str,
         entity_types: list[str] | None = None,
+        lang: str | None = None,
     ) -> EntityExtractionResponse:
         """Extract entities from arbitrary text without storing a memory.
 
@@ -1441,6 +1750,7 @@ class AsyncDakeraClient:
             text: Text to extract entities from.
             entity_types: Entity types to extract.  ``None`` uses server
                 defaults (person, org, location, date, url, email).
+            lang: Language of ``text`` for the rule-based date rules (server v0.12+).
 
         Returns:
             :class:`EntityExtractionResponse` with extracted entities.
@@ -1448,9 +1758,11 @@ class AsyncDakeraClient:
         Note:
             Requires CE-4 (GLiNER) on the server.
         """
-        data: dict[str, Any] = {"text": text}
+        data: dict[str, Any] = {"content": text}
         if entity_types is not None:
             data["entity_types"] = entity_types
+        if lang is not None:
+            data["lang"] = lang
         result = await self._request("POST", "/v1/memories/extract", data=data)
         return EntityExtractionResponse.from_dict(result)
 

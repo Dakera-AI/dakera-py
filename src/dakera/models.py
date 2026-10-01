@@ -602,6 +602,10 @@ def _str_list(value: Any) -> list[str]:
     return [v for v in value if isinstance(v, str)]
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 def parse_accepted_values(value: Any) -> list[str]:
     """Parse the server's ``search_modes_accepted`` field.
 
@@ -698,6 +702,123 @@ class RecordCapabilities:
 
 
 @dataclass
+class LateInteractionCapabilities:
+    """The late-interaction lane (``capabilities.scoring.late_interaction``)."""
+
+    enabled: bool = False
+    model_supported: bool = False
+    lane: str = "text"
+    """``text`` (``colbert`` slots) or ``visual`` (``patch`` slots)."""
+    token_slot: str = ""
+    fde_slot: str = ""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LateInteractionCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            model_supported=bool(data.get("model_supported", False)),
+            lane=str(data.get("lane", "text")),
+            token_slot=str(data.get("token_slot", "")),
+            fde_slot=str(data.get("fde_slot", "")),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class ScoringCapabilities:
+    """What a score is made of (``capabilities.scoring``, v0.12)."""
+
+    strategy: str = "single-vector"
+    """``DAKERA_SCORING_STRATEGY`` — ``single-vector`` or ``late-interaction``."""
+    strategies_accepted: list[str] = field(default_factory=list)
+    late_interaction: LateInteractionCapabilities = field(
+        default_factory=LateInteractionCapabilities
+    )
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ScoringCapabilities":
+        li = data.get("late_interaction")
+        return cls(
+            strategy=str(data.get("strategy", "single-vector")),
+            strategies_accepted=parse_accepted_values(data.get("strategies_accepted")),
+            late_interaction=LateInteractionCapabilities.from_dict(
+                li if isinstance(li, dict) else {}
+            ),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class TranscriptionCapabilities:
+    """The speech-to-text surface (``capabilities.attachments.transcription``)."""
+
+    model: str = ""
+    models: list[str] = field(default_factory=list)
+    media_types: list[str] = field(default_factory=list)
+    languages: list[str] = field(default_factory=list)
+    sample_rate_hz: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TranscriptionCapabilities":
+        return cls(
+            model=str(data.get("model", "")),
+            models=_str_list(data.get("models")),
+            media_types=_str_list(data.get("media_types")),
+            languages=_str_list(data.get("languages")),
+            sample_rate_hz=int(data.get("sample_rate_hz", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class AttachmentCapabilities:
+    """The attachment lane (``capabilities.attachments``, ``DAKERA_ATTACHMENTS``)."""
+
+    enabled: bool = False
+    """``False`` ⇒ the attachment routes answer ``501 FEATURE_DISABLED``."""
+    max_bytes: int = 0
+    """Largest upload (``DAKERA_ATTACHMENT_MAX_BYTES``); over it: ``413``."""
+    transcription: TranscriptionCapabilities = field(default_factory=TranscriptionCapabilities)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentCapabilities":
+        t = data.get("transcription")
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            max_bytes=int(data.get("max_bytes", 0) or 0),
+            transcription=TranscriptionCapabilities.from_dict(t if isinstance(t, dict) else {}),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class VisionCapabilities:
+    """The visual (image indexing) lane (``capabilities.vision``, ``DAKERA_VISION``)."""
+
+    enabled: bool = False
+    model: str = ""
+    models: list[str] = field(default_factory=list)
+    media_types: list[str] = field(default_factory=list)
+    dimension: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisionCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            model=str(data.get("model", "")),
+            models=_str_list(data.get("models")),
+            media_types=_str_list(data.get("media_types")),
+            dimension=int(data.get("dimension", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
 class ServerCapabilities:
     """What the connected server can do — ``GET /v1/capabilities``.
 
@@ -726,6 +847,15 @@ class ServerCapabilities:
     query_languages: list[str] = field(default_factory=list)
     reembed_pending: bool = False
     """A model change was acknowledged but the store is not fully re-embedded yet."""
+    scoring: ScoringCapabilities = field(default_factory=ScoringCapabilities)
+    """Scoring strategy and the late-interaction lane (v0.12)."""
+    attachments: AttachmentCapabilities = field(default_factory=AttachmentCapabilities)
+    """Attachment lane and speech-to-text (v0.12, opt-in on the server)."""
+    vision: VisionCapabilities = field(default_factory=VisionCapabilities)
+    """Image indexing lane (v0.12, opt-in on the server)."""
+    unreadable_records: int = 0
+    """Records the server skipped because a newer binary wrote them."""
+    late_interaction_stats: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -754,6 +884,11 @@ class ServerCapabilities:
             records=RecordCapabilities.from_dict(records if isinstance(records, dict) else {}),
             query_languages=_str_list(data.get("query_languages")),
             reembed_pending=bool(data.get("reembed_pending", False)),
+            scoring=ScoringCapabilities.from_dict(_dict(data.get("scoring"))),
+            attachments=AttachmentCapabilities.from_dict(_dict(data.get("attachments"))),
+            vision=VisionCapabilities.from_dict(_dict(data.get("vision"))),
+            unreadable_records=int(data.get("unreadable_records", 0) or 0),
+            late_interaction_stats=_dict(data.get("late_interaction_stats")),
             raw=dict(data),
         )
 
@@ -773,6 +908,16 @@ class ServerCapabilities:
     def supports_records(self) -> bool:
         """Whether the record routes are switched on (``records.enabled``)."""
         return self.records.enabled
+
+    @property
+    def supports_attachments(self) -> bool:
+        """Whether the attachment routes are switched on (``DAKERA_ATTACHMENTS``)."""
+        return self.attachments.enabled
+
+    @property
+    def supports_vision(self) -> bool:
+        """Whether image indexing is switched on (``DAKERA_VISION``)."""
+        return self.vision.enabled
 
     def model(self, name: str) -> ModelCapability | None:
         """Look a model up by wire name or alias."""
@@ -997,9 +1142,17 @@ class StoreMemoryRequest:
     expires_at: int | None = None
     session_id: str | None = None
     embedding: list[float] | None = None
+    lang: str | None = None
+    """Language of ``content`` for write-time derivations (server v0.12+)."""
+    attachment_ref: str | None = None
+    """``sha256:<hex>`` of an attachment in the agent's namespace (server v0.12+)."""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"content": self.content, "memory_type": self.memory_type}
+        if self.lang is not None:
+            d["lang"] = self.lang
+        if self.attachment_ref is not None:
+            d["attachment_ref"] = self.attachment_ref
         if self.importance is not None:
             d["importance"] = self.importance
         if self.metadata is not None:
@@ -1972,6 +2125,9 @@ class BatchStoreMemoryItem:
     """Optional explicit expiry as a Unix timestamp (seconds)."""
     id: str | None = None
     """Optional custom ID. Auto-generated if not provided."""
+    attachment_ref: str | None = None
+    """``sha256:<hex>`` of an attachment already uploaded to the agent's namespace
+    (server v0.12+, needs ``DAKERA_ATTACHMENTS``)."""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -1979,6 +2135,8 @@ class BatchStoreMemoryItem:
             "memory_type": self.memory_type,
             "importance": self.importance,
         }
+        if self.attachment_ref is not None:
+            d["attachment_ref"] = self.attachment_ref
         if self.tags is not None:
             d["tags"] = self.tags
         if self.session_id is not None:
@@ -2007,12 +2165,17 @@ class BatchStoreMemoryRequest:
     """Agent namespace to store the memories in."""
     memories: list[BatchStoreMemoryItem]
     """Memories to store (1–1000 items)."""
+    lang: str | None = None
+    """Language of the whole batch (server v0.12+); applies to every item."""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "agent_id": self.agent_id,
             "memories": [m.to_dict() for m in self.memories],
         }
+        if self.lang is not None:
+            d["lang"] = self.lang
+        return d
 
 
 @dataclass
@@ -3598,3 +3761,264 @@ class StaticCountResponse:
     def from_dict(cls, data: dict[str, Any]) -> "StaticCountResponse":
         """Construct from API response dict."""
         return cls(static_count=int(data["static_count"]))
+
+
+# ============================================================================
+# Attachments, transcription / image-index jobs (server v0.12, opt-in)
+# ============================================================================
+
+
+@dataclass
+class AttachmentUploadResponse:
+    """Answer of ``POST /v1/namespaces/{ns}/attachments``."""
+
+    attachment_ref: str
+    """``sha256:<hex of the bytes>`` — what a memory's ``attachment_ref`` carries."""
+    content_type: str
+    size_bytes: int
+    created: bool
+    """``False`` when the namespace already held these bytes (HTTP 200, a no-op)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentUploadResponse":
+        return cls(
+            attachment_ref=str(data["attachment_ref"]),
+            content_type=str(data.get("content_type", "")),
+            size_bytes=int(data.get("size_bytes", 0) or 0),
+            created=bool(data.get("created", True)),
+        )
+
+
+@dataclass
+class AttachmentInfo:
+    """One entry of ``GET /v1/namespaces/{ns}/attachments`` (no bytes)."""
+
+    attachment_ref: str
+    content_type: str
+    size_bytes: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentInfo":
+        return cls(
+            attachment_ref=str(data["attachment_ref"]),
+            content_type=str(data.get("content_type", "")),
+            size_bytes=int(data.get("size_bytes", 0) or 0),
+        )
+
+
+@dataclass
+class AttachmentContent:
+    """The bytes of an attachment, as downloaded."""
+
+    data: bytes
+    content_type: str
+    etag: str | None = None
+    """The attachment hash (the server's ``ETag``, quotes stripped)."""
+
+    @property
+    def size_bytes(self) -> int:
+        return len(self.data)
+
+
+@dataclass
+class JobAccepted:
+    """``202`` answer of the ``…/transcribe`` and ``…/index`` routes."""
+
+    job_id: str
+    attachment_ref: str
+    agent_id: str
+    memory_id: str
+    """Id of the memory the job stores — keep it: jobs live in server memory, so
+    after a restart this is how to find what a completed job stored."""
+    model: str
+    status_url: str
+    """Server-relative route to poll (``GET``)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobAccepted":
+        return cls(
+            job_id=str(data["job_id"]),
+            attachment_ref=str(data.get("attachment_ref", "")),
+            agent_id=str(data.get("agent_id", "")),
+            memory_id=str(data.get("memory_id", "")),
+            model=str(data.get("model", "")),
+            status_url=str(data.get("status_url", "")),
+        )
+
+
+@dataclass
+class AttachmentJob:
+    """A transcription / image-index job (``GET …/transcribe/{job_id}``,
+    ``GET …/index/{job_id}``). ``status`` is ``Pending``, ``Running``,
+    ``Completed``, ``Failed`` or ``Cancelled`` (kept as the server's string)."""
+
+    id: str
+    job_type: str
+    status: str
+    progress: int = 0
+    message: str | None = None
+    created_at: int = 0
+    started_at: int | None = None
+    completed_at: int | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
+    error_status: int | None = None
+    """On a failed job: the HTTP status the synchronous request would have answered."""
+    error_code: str | None = None
+    """On a failed job: its error code (``INVALID_REQUEST``, ``SERVICE_UNAVAILABLE``, …)."""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    TERMINAL = ("Completed", "Failed", "Cancelled")
+
+    @property
+    def is_done(self) -> bool:
+        """The job reached a final state (completed, failed or cancelled)."""
+        return self.status in self.TERMINAL
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status == "Completed"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentJob":
+        err = data.get("error")
+        err = err if isinstance(err, dict) else {}
+        meta = data.get("metadata")
+        return cls(
+            id=str(data.get("id", "")),
+            job_type=str(data.get("job_type", "")),
+            status=str(data.get("status", "")),
+            progress=int(data.get("progress", 0) or 0),
+            message=data.get("message"),
+            created_at=int(data.get("created_at", 0) or 0),
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            metadata={str(k): str(v) for k, v in meta.items()} if isinstance(meta, dict) else {},
+            error_status=err.get("status"),
+            error_code=err.get("code"),
+            raw=dict(data),
+        )
+
+
+# ============================================================================
+# Records: one vector plus named representations (server v0.12, opt-in)
+# ============================================================================
+
+
+@dataclass
+class Representation:
+    """An extra named representation of a record (write side)."""
+
+    name: str
+    """Slot name, unique within the record and never ``"dense"``."""
+    vectors: list[list[float]]
+    """Row-major vectors; all rows the same, non-zero length."""
+    kind: "RepresentationKind | str" = RepresentationKind.DENSE
+    """``dense``, ``token_multivector`` or ``patch_multivector``."""
+    model: str = ""
+    """Model that produced the vectors; empty ⇒ the namespace's default."""
+    store_as: "BlockDType | str" = BlockDType.F32
+    """On-disk packing: ``f32`` (lossless), ``f16`` or ``i8``."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "name": self.name,
+            "kind": wire_value(self.kind),
+            "vectors": self.vectors,
+            "store_as": wire_value(self.store_as),
+        }
+        if self.model:
+            d["model"] = self.model
+        return d
+
+
+@dataclass
+class Record:
+    """One record: a primary dense vector (indexed and searched) plus extras."""
+
+    id: str
+    values: list[float]
+    representations: list[Representation] = field(default_factory=list)
+    metadata: dict[str, Any] | None = None
+    ttl_seconds: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"id": self.id, "values": self.values}
+        if self.representations:
+            d["representations"] = [r.to_dict() for r in self.representations]
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
+        if self.ttl_seconds is not None:
+            d["ttl_seconds"] = self.ttl_seconds
+        return d
+
+
+@dataclass
+class RepresentationInfo:
+    """A representation as a record read describes it."""
+
+    name: str
+    kind: RepresentationKind
+    dim: int
+    count: int
+    dtype: BlockDType
+    bytes: int
+    model: str = ""
+    vectors: list[list[float]] | None = None
+    """Decoded rows — only with ``include_vectors=True``."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RepresentationInfo":
+        vectors = data.get("vectors")
+        return cls(
+            name=str(data.get("name", "")),
+            kind=RepresentationKind(str(data.get("kind", "dense"))),
+            dim=int(data.get("dim", 0) or 0),
+            count=int(data.get("count", 0) or 0),
+            dtype=BlockDType(str(data.get("dtype", "f32"))),
+            bytes=int(data.get("bytes", 0) or 0),
+            model=str(data.get("model", "")),
+            vectors=vectors if isinstance(vectors, list) else None,
+        )
+
+
+@dataclass
+class RecordView:
+    """``GET /v1/namespaces/{ns}/records/{id}``."""
+
+    id: str
+    dimension: int
+    values: list[float] | None = None
+    """The primary vector — only with ``include_vectors=True``."""
+    representations: list[RepresentationInfo] = field(default_factory=list)
+    unsupported_representations: int = 0
+    """Slots the server skipped because a newer Dakera wrote them."""
+    metadata: dict[str, Any] | None = None
+    ttl_seconds: int | None = None
+    expires_at: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecordView":
+        reps = data.get("representations")
+        return cls(
+            id=str(data["id"]),
+            dimension=int(data.get("dimension", 0) or 0),
+            values=data.get("values"),
+            representations=[RepresentationInfo.from_dict(r) for r in reps if isinstance(r, dict)]
+            if isinstance(reps, list)
+            else [],
+            unsupported_representations=int(data.get("unsupported_representations", 0) or 0),
+            metadata=data.get("metadata"),
+            ttl_seconds=data.get("ttl_seconds"),
+            expires_at=data.get("expires_at"),
+        )
+
+
+@dataclass
+class RecordUpsertResponse:
+    """Answer of ``POST /v1/namespaces/{ns}/records``."""
+
+    upserted_count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecordUpsertResponse":
+        return cls(upserted_count=int(data.get("upserted_count", 0) or 0))

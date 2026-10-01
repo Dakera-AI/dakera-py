@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-01
+
+Dakera server **v0.12.0** support. Works against v0.11.108 and v0.12.0 servers: every
+addition is opt-in or additive. See the server's
+[upgrade guide](https://github.com/Dakera-AI/dakera/blob/v0.12.0/docs/v0.12/UPGRADE.md).
+
+Version note: the Python SDK has been numbered ahead of the server since 0.12.0 (0.12.x
+releases already exist on PyPI), so it cannot adopt the server's 0.12.0; this is a minor bump.
+
+### Added
+
+- **Health**: `is_ready()` (one `GET /health/ready` probe: `200` is ready; `503`, a starting
+  server or an unreachable one is not) and `wait_until_ready(timeout, poll_interval)` (polls,
+  waiting as long as `Retry-After` says). A `503` from `health()` / `health_ready()` raises
+  `ServiceUnavailableError`; it is never reported healthy.
+- **Errors**: `ServiceUnavailableError` (503, `.retry_after`; a `ServerError` subclass),
+  `PayloadTooLargeError` (413; `.is_quota` / `.is_oversize`), `FeatureNotAvailableError`
+  (501; `.is_feature_disabled`, `.details` names the `DAKERA_*` switch), `ConflictError` (409),
+  `DakeraError.details` and `NotFoundError.resource`; new `ErrorCode` members
+  (`PAYLOAD_TOO_LARGE`, `FEATURE_DISABLED`, `NOT_IMPLEMENTED`, `CONFLICT`, `JOB_NOT_FOUND`,
+  `RATE_LIMIT_EXCEEDED`, `QUERY_TIMEOUT`, ...). `error_from_response()` maps a status + body.
+- **Attachments** (server `DAKERA_ATTACHMENTS`): `upload_attachment`, `list_attachments`,
+  `download_attachment`, `delete_attachment`, `transcribe_attachment`,
+  `get_transcription_job`, `wait_for_transcription`; with `DAKERA_VISION`: `index_attachment`,
+  `get_index_job`, `wait_for_index` (sync and async). `attachment_ref` on `store_memory` and on
+  `BatchStoreMemoryItem` / `StoreMemoryRequest`.
+- **Records** (server `DAKERA_RECORDS`): `upsert_records`, `get_record`, `Record`,
+  `Representation` (kinds `dense` / `token_multivector` / `patch_multivector`, `store_as`
+  `f32` / `f16` / `i8`), `RecordView`.
+- **Per-request `lang`** on `store_memory`, `BatchStoreMemoryRequest`, `StoreMemoryRequest`,
+  `update_memory`, `recall`, `search_memories`, `extract_entities`.
+- **Capabilities**: `scoring`, `attachments` (incl. transcription), `vision`,
+  `unreadable_records`, `late_interaction_stats`; `supports_attachments`, `supports_vision`.
+- `replace_namespace_ner_config()` (`PUT /v1/namespaces/{ns}/config`, a full replacement;
+  clears `entity_types` when omitted).
+
+### Changed
+
+- The retry logic waits for the server's `Retry-After` on `503` (new) and `429` (capped at
+  `RetryConfig.max_delay`) instead of the computed backoff; `Retry-After` may be seconds or an
+  HTTP date. `501`, `413`, `409` are never retried.
+- `413` raises `PayloadTooLargeError` and `409` `ConflictError` (previously a bare
+  `DakeraError`; both are still `DakeraError`s).
+- Any 2xx is success (the job routes answer `202`).
+- `configure_namespace_ner()` documents that `PATCH` merges on v0.12; pass `entity_types=[]`
+  or use `replace_namespace_ner_config()` to clear.
+
+### Fixed
+
+- `AsyncDakeraClient.extract_entities()` sent the text as `text`; `POST /v1/memories/extract`
+  reads `content` (the sync client was already right).
+
 ## [0.12.14] - 2026-09-22
 
 ### Added
