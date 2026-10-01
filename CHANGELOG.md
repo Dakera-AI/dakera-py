@@ -7,6 +7,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-01
+
+Dakera server **v0.12.0** support. Works against v0.11.108 and v0.12.0 servers: every
+addition is opt-in or additive. See the server's
+[upgrade guide](https://dakera.ai/docs/changelog).
+
+Version note: the Python SDK has been numbered ahead of the server since 0.12.0 (0.12.x
+releases already exist on PyPI), so it cannot adopt the server's 0.12.0; this is a minor bump.
+
+### Added
+
+- **Health**: `is_ready()` (one `GET /health/ready` probe: `200` is ready; `503`, a starting
+  server or an unreachable one is not) and `wait_until_ready(timeout, poll_interval)` (polls,
+  waiting as long as `Retry-After` says). A `503` from `health()` / `health_ready()` raises
+  `ServiceUnavailableError`; it is never reported healthy.
+- **Errors**: `ServiceUnavailableError` (503, `.retry_after`; a `ServerError` subclass),
+  `PayloadTooLargeError` (413; `.is_quota` / `.is_oversize`), `FeatureNotAvailableError`
+  (501; `.is_feature_disabled`, `.details` names the `DAKERA_*` switch), `ConflictError` (409),
+  `DakeraError.details` and `NotFoundError.resource`; new `ErrorCode` members
+  (`PAYLOAD_TOO_LARGE`, `FEATURE_DISABLED`, `NOT_IMPLEMENTED`, `CONFLICT`, `JOB_NOT_FOUND`,
+  `RATE_LIMIT_EXCEEDED`, `QUERY_TIMEOUT`, ...). `error_from_response()` maps a status + body.
+- **Attachments** (server `DAKERA_ATTACHMENTS`): `upload_attachment`, `list_attachments`,
+  `download_attachment`, `delete_attachment`, `transcribe_attachment`,
+  `get_transcription_job`, `wait_for_transcription`; with `DAKERA_VISION`: `index_attachment`,
+  `get_index_job`, `wait_for_index` (sync and async). `attachment_ref` on `store_memory` and on
+  `BatchStoreMemoryItem` / `StoreMemoryRequest`.
+- **Records** (server `DAKERA_RECORDS`): `upsert_records`, `get_record`, `Record`,
+  `Representation` (kinds `dense` / `token_multivector` / `patch_multivector`, `store_as`
+  `f32` / `f16` / `i8`), `RecordView`.
+- **Per-request `lang`** on `store_memory`, `BatchStoreMemoryRequest`, `StoreMemoryRequest`,
+  `update_memory`, `recall`, `search_memories`, `extract_entities`.
+- **Capabilities**: `scoring`, `attachments` (incl. transcription), `vision`,
+  `unreadable_records`, `late_interaction_stats`; `supports_attachments`, `supports_vision`.
+- `replace_namespace_ner_config()` (`PUT /v1/namespaces/{ns}/config`, a full replacement;
+  clears `entity_types` when omitted).
+
+### Changed
+
+- The retry logic waits for the server's `Retry-After` on `503` (new) and `429` (capped at
+  `RetryConfig.max_delay`) instead of the computed backoff; `Retry-After` may be seconds or an
+  HTTP date. `501`, `413`, `409` are never retried.
+- `413` raises `PayloadTooLargeError` and `409` `ConflictError` (previously a bare
+  `DakeraError`; both are still `DakeraError`s).
+- Any 2xx is success (the job routes answer `202`).
+- `configure_namespace_ner()` documents that `PATCH` merges on v0.12; pass `entity_types=[]`
+  or use `replace_namespace_ner_config()` to clear.
+
+### Route sweep against the v0.12.0 router
+
+Every endpoint the SDK calls (196 distinct method + path pairs across the sync and async
+clients) was diffed against the router in the server's `crates/api/src/lib.rs` (admin routes
+under both `/admin` and `/v1/admin`). 17 calls hit routes the server does not serve; **all 17
+were equally absent on v0.11.108**, so nothing here regresses an old server. A snapshot of the
+v0.12.0 router (`tests/v0_12_routes.txt`) now guards this: a test fails if the SDK calls a route
+that is not in it.
+
+- `update_quotas()` called `PUT /v1/admin/quotas`; the routes are `PUT /admin/quotas/default`
+  and `PUT /admin/quotas/{namespace}`. It now takes `namespace=None` and sends `{"config": ...}`.
+- `memory_feedback()` called `POST /v1/agents/{id}/memories/feedback`; now
+  `POST /v1/memory/feedback` with `{agent_id, memory_id, signal}` (the server reads `signal`).
+- `export_audit()` called `POST /v1/audit/export`; the route is `GET` with query parameters
+  (`format` is `json` or `csv`; `jsonl` is rendered client-side); added `limit`.
+- `get_index_stats()` called `GET /v1/namespaces/{ns}/stats`; now reads `GET /v1/namespaces/{ns}`.
+- `compact()` called `POST /v1/namespaces/{ns}/compact`; now `POST /ops/compact` with
+  `{namespace, force}`.
+- Async `delete()` called `/v1/namespaces/{ns}/delete`; the sync one (and now both) use
+  `/vectors/delete`, with `filter` going to `/vectors/bulk-delete`. `delete_all=True` raises
+  `ValueError` (the server has no such route; the body was silently ignored before).
+- Async `multi_vector_search()` / `unified_query()` / `explain_query()` called
+  `/search/multi-vector`, `/search/unified`, `/query/explain`; the routes are `/multi-vector`,
+  `/unified-query`, `/explain`. Async `index_stats()`, `rebuild_indexes()` and `restore_backup()`
+  used per-namespace / per-backup admin routes that do not exist; they now use
+  `/admin/indexes/stats`, `/admin/indexes/rebuild` and `/admin/backups/restore`.
+- Request bodies that the server ignored or refused (checked against the request structs):
+  `query()` sent `include_values` (the field is `include_vectors`, so vectors were never
+  returned; results also read `values` where the server answers `vector`); `create_namespace()`
+  sent `dimensions` from the async client and could not set `distance`;
+  `multi_vector_search()` sent `positive` / `negative` (`positive_vectors` / `negative_vectors`,
+  `enable_mmr`); `unified_query()` sent no `rank_by`, which is required; `explain_query()` sent no
+  `query_type`, which is required (added `query_type`, `text_query`, `execute`);
+  `aggregate()` sent no `aggregate_by`, which is required (added `aggregate_by`, `limit`;
+  `metrics=["count", "avg:field"]` shorthand).
+
+### Removed (these never worked: the server has no such routes, on v0.11.108 or v0.12.0)
+
+- `fetch()` (`POST /v1/namespaces/{ns}/fetch`), `flush()` (`.../flush`),
+  `configure_ttl()` (`/admin/namespaces/{ns}/ttl`), `list_extract_providers()`
+  (`GET /v1/extract/providers`). Read vectors back with `query()` (`include_values=True`).
+
+### Fixed
+
+- `AsyncDakeraClient.extract_entities()` sent the text as `text`; `POST /v1/memories/extract`
+  reads `content` (the sync client was already right).
+
+## [0.12.14] - 2026-09-22
+
+### Added
+
+- **Forward-compat contract (R9, DAK-10004)** — the server's registries (models, index kinds,
+  search modes, distance metrics, record representation kinds, block dtypes) grow over time and
+  `GET /v1/capabilities` documents the rule: every field is additive; unknown fields and unknown
+  strings inside lists MUST be ignored; `capabilities_version` bumps only on a breaking reshape.
+  This release makes the SDK honour that rule end to end.
+- **Lenient enums** — every wire enum (`EmbeddingModel`, `DistanceMetric`, `RoutingMode`,
+  `FusionStrategy`, and the new `IndexKind`, `SearchMode`, `RepresentationKind`, `BlockDType`)
+  now derives from `LenientStrEnum`: a server string this SDK does not declare parses as an
+  *unknown member* (`.is_known == False`, raw string in `.value`) instead of raising
+  `ValueError` on an unrelated call. Known members are unchanged. `EmbeddingModel.BGE_M3`,
+  `IndexKind.IVFPQ` and `SearchMode.RABITQ` are declared for the strings server v0.12 adds.
+- **`DakeraClient.capabilities(refresh=False)` / `AsyncDakeraClient.capabilities()`** — typed
+  `ServerCapabilities` for `GET /v1/capabilities`: models (name, aliases, dimension, context
+  window, active flag, MRL dims), index kinds (all / vector / live), distance metrics, the search
+  mode the server runs and every value it accepts (`search_modes_accepted` prose parsed, aliases
+  expanded), `records` (`supports_records`, kinds, dtypes, limits), `query_languages`,
+  `reembed_pending`. Cached per client instance; `refresh=True` re-fetches. The verbatim
+  document is kept in `.raw`.
+- **Pre-flight validation** — `upsert_text` / `query_text` / `batch_query_text` (`model`),
+  `create_namespace` (`index_type`), `configure_namespace` and `query` (`distance_metric`) check
+  the requested value against cached capabilities *before* sending and raise
+  `UnsupportedCapabilityError` (a `ValidationError`) whose message and `.supported` list name what
+  the server accepts. Runs whenever `capabilities()` has been called; `DakeraClient(...,
+  preflight=True)` fetches lazily on first use and degrades silently on a pre-0.12 server (404).
+  `require_supported(kind, value)` exposes the same check for `search_mode` and `query_language`.
+- `model=` on the text endpoints now also accepts a plain string (any server-advertised name or
+  alias), not only an `EmbeddingModel` member.
+
 ## [0.12.11] - 2026-07-16
 
 ### Added

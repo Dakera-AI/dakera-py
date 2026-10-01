@@ -313,12 +313,18 @@ class TestMemoryFeedback:
         """Test submitting feedback on a memory."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/agents/agent-1/memories/feedback",
-            json={"success": True, "new_importance": 0.85},
+            "http://localhost:3000/v1/memory/feedback",
+            json={"memory_id": "mem-1", "signal": "upvote", "new_importance": 0.85},
             status=200,
         )
-        result = client.memory_feedback("agent-1", "mem-1", "helpful", relevance_score=0.9)
-        assert result["success"] is True
+        result = client.memory_feedback("agent-1", "mem-1", "upvote")
+        assert result["new_importance"] == 0.85
+        # FeedbackRequest {agent_id, memory_id, signal}
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "agent_id": "agent-1",
+            "memory_id": "mem-1",
+            "signal": "upvote",
+        }
 
     def test_feedback_memory(self, client, mock_responses):
         """Test INT-1 feedback signal on memory."""
@@ -693,24 +699,32 @@ class TestAuditLog:
         assert len(result.events) == 0
 
     def test_export_audit(self, client, mock_responses):
-        """Test exporting audit log."""
+        """GET /v1/audit/export?format=json — the server's JSON shape is {events, count}."""
         mock_responses.add(
-            responses.POST,
+            responses.GET,
             "http://localhost:3000/v1/audit/export",
-            json={
-                "data": '{"id":"evt-1"}\n{"id":"evt-2"}',
-                "count": 2,
-                "format": "jsonl",
-            },
+            json={"events": [{"id": "evt-1"}, {"id": "evt-2"}], "count": 2},
             status=200,
         )
         result = client.export_audit(
-            format="jsonl", agent_id="agent-1", from_ts=1747000000
+            format="jsonl", agent_id="agent-1", from_ts=1747000000, limit=50
         )
         assert result.count == 2
-        req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body["format"] == "jsonl"
-        assert req_body["agent_id"] == "agent-1"
+        assert result.data.splitlines() == ['{"id": "evt-1"}', '{"id": "evt-2"}']
+        url = mock_responses.calls[0].request.url
+        assert "format=json&" in url + "&" and "format=jsonl" not in url
+        assert "agent_id=agent-1" in url and "from=1747000000" in url and "limit=50" in url
+
+    def test_export_audit_csv(self, client, mock_responses):
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/audit/export",
+            body="id,event_type\nevt-1,stored\nevt-2,recalled\n",
+            content_type="text/csv; charset=utf-8",
+        )
+        result = client.export_audit(format="csv")
+        assert result.format == "csv" and result.count == 2 and result.data.startswith("id,")
+        assert "format=csv" in mock_responses.calls[0].request.url
 
 
 class TestEntityExtraction:
@@ -824,23 +838,6 @@ class TestExtractionProviders:
         result = client.extract_text("Bob is here", provider="gliner")
         assert result.provider == "gliner"
         assert len(result.entities) == 1
-
-    def test_list_extract_providers(self, client, mock_responses):
-        """Test listing extraction providers."""
-        mock_responses.add(
-            responses.GET,
-            "http://localhost:3000/v1/extract/providers",
-            json={
-                "providers": [
-                    {"name": "gliner", "models": ["urchade/gliner_multi-v2.1"]},
-                    {"name": "openai", "models": ["gpt-4o"]},
-                ]
-            },
-            status=200,
-        )
-        result = client.list_extract_providers()
-        assert len(result) == 2
-        assert result[0].name == "gliner"
 
     def test_configure_namespace_extractor(self, client, mock_responses):
         """Test setting namespace extractor provider."""
@@ -1126,9 +1123,11 @@ class TestAdvancedSearch:
         )
         assert len(result["results"]) == 2
         req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body["positive"] == [[0.1, 0.2, 0.3]]
-        assert req_body["negative"] == [[0.9, 0.8, 0.7]]
-        assert req_body["mmr_lambda"] == 0.7
+        # MultiVectorSearchRequest: positive_vectors / negative_vectors / enable_mmr
+        assert req_body["positive_vectors"] == [[0.1, 0.2, 0.3]]
+        assert req_body["negative_vectors"] == [[0.9, 0.8, 0.7]]
+        assert req_body["enable_mmr"] is True and req_body["mmr_lambda"] == 0.7
+        assert "positive" not in req_body
 
     def test_unified_query(self, client, mock_responses):
         """Test unified query."""
@@ -1150,8 +1149,25 @@ class TestAdvancedSearch:
         )
         assert len(result["results"]) == 1
         req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body["fusion_method"] == "rrf"
-        assert req_body["rerank"] is True
+        # UnifiedQueryRequest needs rank_by; both inputs are combined with Sum
+        assert req_body["rank_by"] == ["Sum", [["ANN", [0.1, 0.2, 0.3]], ["text", "BM25", "hello"]]]
+        assert "fusion_method" not in req_body and "rerank" not in req_body
+
+    def test_unified_query_weights_and_explicit_rank_by(self, client, mock_responses):
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/test-ns/unified-query",
+            json={"results": []},
+            status=200,
+        )
+        client.unified_query("test-ns", vector=[1.0], vector_weight=0.7)
+        client.unified_query("test-ns", rank_by=["price", "asc"], top_k=3)
+        b0 = json.loads(mock_responses.calls[0].request.body)
+        b1 = json.loads(mock_responses.calls[1].request.body)
+        assert b0["rank_by"] == ["Product", 0.7, ["ANN", [1.0]]]
+        assert b1["rank_by"] == ["price", "asc"] and b1["top_k"] == 3
+        with pytest.raises(ValueError):
+            client.unified_query("test-ns")
 
     def test_aggregate(self, client, mock_responses):
         """Test vector aggregation."""
@@ -1169,10 +1185,35 @@ class TestAdvancedSearch:
         result = client.aggregate(
             "test-ns",
             group_by="category",
-            metrics=["count", "avg_score"],
+            metrics=["count", "avg:score"],
             top_groups=5,
         )
         assert len(result["groups"]) == 2
+        # AggregationRequest: aggregate_by {name: ["Count"] | ["Avg", field]}, group_by list, limit
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "aggregate_by": {"count": ["Count"], "avg_score": ["Avg", "score"]},
+            "group_by": ["category"],
+            "limit": 5,
+        }
+
+    def test_aggregate_explicit_and_default(self, client, mock_responses):
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/namespaces/test-ns/aggregate",
+            json={"aggregations": {"count": 3}},
+            status=200,
+        )
+        client.aggregate("test-ns", aggregate_by={"total": ["Sum", "price"]}, filter={"a": 1})
+        client.aggregate("test-ns")
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "aggregate_by": {"total": ["Sum", "price"]},
+            "filter": {"a": 1},
+        }
+        assert json.loads(mock_responses.calls[1].request.body) == {
+            "aggregate_by": {"count": ["Count"]}
+        }
+        with pytest.raises(ValueError):
+            client.aggregate("test-ns", metrics=["median:price"])
 
     def test_export_vectors(self, client, mock_responses):
         """Test exporting vectors."""

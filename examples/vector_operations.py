@@ -63,20 +63,20 @@ def main():
     # --- Bulk Update ---
     print("\n=== Bulk Update ===")
 
-    # Update metadata for a subset of vectors
-    updates = [
-        {"id": f"doc-{i:04d}", "metadata": {"batch": "updated", "priority": "high"}}
-        for i in range(10)
-    ]
-    update_result = client.bulk_update_vectors(namespace, updates=updates)
+    # Update metadata for every vector matching a filter (POST .../vectors/bulk-update)
+    update_result = client.bulk_update_vectors(
+        namespace,
+        filter={"category": "cat-0"},
+        update={"batch": "updated", "priority": "high"},
+    )
     print(f"Bulk update result: {update_result}")
     assert update_result is not None, "expected non-None update result"
 
-    # Verify update by fetching a vector
-    fetched = client.fetch(namespace, ids=["doc-0000", "doc-0001"])
-    print("Fetched after update:")
-    for vec in fetched:
-        print(f"  - {vec['id']}: metadata={vec.get('metadata')}")
+    # Verify the update with a query (the server has no fetch-by-id route)
+    checked = client.query(namespace, vector=[0.05] * 128, top_k=2, include_metadata=True)
+    print("Metadata after update:")
+    for hit in checked.results:
+        print(f"  - {hit.id}: metadata={hit.metadata}")
 
     # --- Aggregate ---
     print("\n=== Aggregation ===")
@@ -85,7 +85,7 @@ def main():
     agg_result = client.aggregate(
         namespace,
         group_by="category",
-        metrics=["count", "avg_score"],
+        metrics=["count"],
         vector=[0.05] * 128,
     )
     print(f"Aggregation result: {agg_result}")

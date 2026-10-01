@@ -131,34 +131,25 @@ class TestVectorOperations:
         """Test deleting vectors by filter."""
         mock_responses.add(
             responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/vectors/delete",
-            json={"deleted_count": 5},
+            "http://localhost:3000/v1/namespaces/test-ns/vectors/bulk-delete",
+            json={"deleted": 5, "failed": 0},
             status=200,
         )
 
         result = client.delete("test-ns", filter={"status": {"$eq": "obsolete"}})
 
-        assert result["deleted_count"] == 5
+        assert result["deleted"] == 5
+        assert json.loads(mock_responses.calls[0].request.body) == {
+            "filter": {"status": {"$eq": "obsolete"}}
+        }
 
-    def test_fetch(self, client, mock_responses):
-        """Test fetching vectors by ID."""
-        mock_responses.add(
-            responses.POST,
-            "http://localhost:3000/v1/namespaces/test-ns/fetch",
-            json={
-                "vectors": [
-                    {"id": "vec1", "values": [0.1, 0.2, 0.3]},
-                    {"id": "vec2", "values": [0.4, 0.5, 0.6]},
-                ]
-            },
-            status=200,
-        )
-
-        vectors = client.fetch("test-ns", ids=["vec1", "vec2"])
-
-        assert len(vectors) == 2
-        assert vectors[0].id == "vec1"
-        assert vectors[0].values == [0.1, 0.2, 0.3]
+    def test_delete_all_and_empty_are_refused(self, client, mock_responses):
+        """The server has no delete-everything route and rejects empty ids."""
+        with pytest.raises(ValueError):
+            client.delete("test-ns", delete_all=True)
+        with pytest.raises(ValueError):
+            client.delete("test-ns")
+        assert len(mock_responses.calls) == 0
 
     def test_batch_query(self, client, mock_responses):
         """Test batch querying."""
@@ -2385,7 +2376,7 @@ class TestEntityExtractionAsyncClient:
 
         assert calls[0][0] == "POST"
         assert calls[0][1] == "/v1/memories/extract"
-        assert calls[0][2]["text"] == "Alice lives in Paris."
+        assert calls[0][2]["content"] == "Alice lives in Paris."
         assert len(result.entities) == 2
         assert result.entities[0].value == "Alice"
 

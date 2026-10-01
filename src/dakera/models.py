@@ -4,9 +4,56 @@ Dakera SDK Data Models
 Dataclasses representing Dakera data structures.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Union
+
+from dakera.exceptions import UnsupportedCapabilityError
+
+# ============================================================================
+# Forward-compatible enums (R9 / DAK-10004)
+# ============================================================================
+
+
+class LenientStrEnum(str, Enum):
+    """A ``str`` enum that never fails on a value it does not know.
+
+    The server's registries (models, index kinds, search modes, ...) grow over
+    time and the capabilities contract says clients MUST ignore strings they do
+    not recognise.  A closed ``Enum`` turns every new server string into a
+    ``ValueError`` on an unrelated call, so every wire enum in this SDK derives
+    from this class instead: ``EmbeddingModel("bge-m3")`` on an SDK that
+    predates that model returns an *unknown member* whose ``value`` is the raw
+    string and whose :attr:`is_known` is ``False``.  Unknown members compare
+    equal to their string, serialise back to it unchanged, and are interned so
+    ``EmbeddingModel("x") is EmbeddingModel("x")``.
+    """
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        if not isinstance(value, str):
+            return None
+        member = str.__new__(cls, value)
+        member._name_ = f"UNKNOWN({value})"
+        member._value_ = value
+        # Intern so identity comparisons hold, like a declared member.
+        return cls._value2member_map_.setdefault(value, member)
+
+    @property
+    def is_known(self) -> bool:
+        """``True`` for a member declared in this SDK, ``False`` for a server string
+        this SDK version does not know yet."""
+        return self.name in type(self).__members__
+
+    @classmethod
+    def known_values(cls) -> list[str]:
+        """Wire strings this SDK version declares (in declaration order)."""
+        return [m.value for m in cls.__members__.values()]
+
+    def __str__(self) -> str:
+        return str(self.value)
+
 
 # ============================================================================
 # Consistency & Query Types (Turbopuffer-inspired)
@@ -26,15 +73,19 @@ class ReadConsistency(str, Enum):
     """Read from replicas within staleness bounds."""
 
 
-class DistanceMetric(str, Enum):
-    """Distance metric for similarity search."""
+class DistanceMetric(LenientStrEnum):
+    """Distance metric for similarity search.
+
+    Lenient: a metric this SDK does not know parses as an unknown member
+    (``is_known == False``) instead of raising.
+    """
 
     COSINE = "cosine"
     EUCLIDEAN = "euclidean"
     DOT_PRODUCT = "dot_product"
 
 
-class RoutingMode(str, Enum):
+class RoutingMode(LenientStrEnum):
     """Routing mode for recall and search (CE-10).
 
     Controls which retrieval index to use when recalling or searching memories.
@@ -51,7 +102,7 @@ class RoutingMode(str, Enum):
     """Fuse ANN and BM25 scores (RRF)."""
 
 
-class FusionStrategy(str, Enum):
+class FusionStrategy(LenientStrEnum):
     """Fusion strategy for hybrid recall (CE-14).
 
     Controls how vector and BM25 scores are combined when ``routing=hybrid``.
@@ -314,7 +365,7 @@ class QueryResult:
         return cls(
             id=data["id"],
             score=data["score"],
-            values=data.get("values"),
+            values=data.get("values", data.get("vector")),  # the server names it ``vector``
             metadata=data.get("metadata"),
         )
 
@@ -379,11 +430,13 @@ class IndexStats:
     def from_dict(cls, data: dict[str, Any]) -> "IndexStats":
         """Create IndexStats from API response dictionary."""
         return cls(
-            total_vectors=data.get("total_vectors", 0),
-            dimensions=data.get("dimensions", 0),
-            index_type=data.get("index_type", "unknown"),
+            # ``GET /v1/namespaces/{ns}`` names these vector_count / dimension /
+            # estimated_storage_bytes; the older IndexStats spellings still work.
+            total_vectors=data.get("total_vectors", data.get("vector_count", 0)),
+            dimensions=data.get("dimensions", data.get("dimension") or 0),
+            index_type=data.get("index_type") or "unknown",
             memory_usage_bytes=data.get("memory_usage_bytes"),
-            disk_usage_bytes=data.get("disk_usage_bytes"),
+            disk_usage_bytes=data.get("disk_usage_bytes", data.get("estimated_storage_bytes")),
             build_progress=data.get("build_progress"),
             is_trained=data.get("is_trained"),
         )
@@ -467,9 +520,9 @@ class HybridSearchResult:
 # ============================================================================
 
 
-class EmbeddingModel(str, Enum):
+class EmbeddingModel(LenientStrEnum):
     """
-    Supported embedding models for text-based operations.
+    Embedding models this SDK version knows for text-based operations.
 
     - BGE_LARGE: BGE-large - Best quality, default (1024 dimensions)
     - MINILM: MiniLM-L6 - Fast, good quality (384 dimensions)
@@ -477,6 +530,12 @@ class EmbeddingModel(str, Enum):
     - E5_SMALL: E5-small - High quality (384 dimensions)
     - MODERNBERT_EMBED_BASE: ModernBERT-embed-base - 768 dimensions, MRL, 8192 tokens
     - GTE_MODERNBERT_BASE: GTE-ModernBERT-base - 768 dimensions, MTEB retrieval 64.38
+    - BGE_M3: BGE-M3 multilingual - 1024 dimensions, 8192-token window (server v0.12+)
+
+    The list the *server* supports is authoritative — read it from
+    :meth:`DakeraClient.capabilities`.  A model string the server returns that
+    this SDK does not declare parses as an unknown member (``is_known == False``)
+    rather than raising; the raw string is preserved in ``.value``.
     """
 
     BGE_LARGE = "bge-large"
@@ -485,6 +544,446 @@ class EmbeddingModel(str, Enum):
     E5_SMALL = "e5-small"
     MODERNBERT_EMBED_BASE = "modernbert-embed-base"
     GTE_MODERNBERT_BASE = "gte-modernbert-base"
+    BGE_M3 = "bge-m3"
+
+
+class IndexKind(LenientStrEnum):
+    """Index kinds the server may build or advertise (``index_type`` values).
+
+    Strings are the server's stable storage keys.  Lenient: unknown kinds parse
+    as unknown members.
+    """
+
+    HNSW = "hnsw"
+    PQ = "pq"
+    IVF = "ivf"
+    IVFPQ = "ivfpq"
+    SPFRESH = "spfresh"
+    FULLTEXT = "fulltext"
+
+
+class SearchMode(LenientStrEnum):
+    """Vector search mode the server process runs (``DAKERA_SEARCH_MODE``).
+
+    Process-wide, not selectable per request; exposed through
+    :attr:`ServerCapabilities.search_mode`.  Lenient.
+    """
+
+    HYBRID = "hybrid"
+    BINARY = "binary"
+    FLOAT = "float"
+    SCALAR = "scalar"
+    RABITQ = "rabitq"
+
+
+class RepresentationKind(LenientStrEnum):
+    """Kinds a record representation slot may have (R2 records surface). Lenient."""
+
+    DENSE = "dense"
+    TOKEN_MULTIVECTOR = "token_multivector"
+    PATCH_MULTIVECTOR = "patch_multivector"
+
+
+class BlockDType(LenientStrEnum):
+    """Payload encodings a record slot may be stored as (``store_as``). Lenient."""
+
+    F32 = "f32"
+    F16 = "f16"
+    I8 = "i8"
+
+
+# ============================================================================
+# Server capabilities (GET /v1/capabilities, server v0.12+)
+# ============================================================================
+
+
+def _str_list(value: Any) -> list[str]:
+    """Coerce a JSON list to ``list[str]``, dropping non-string entries."""
+    if not isinstance(value, list):
+        return []
+    return [v for v in value if isinstance(v, str)]
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def parse_accepted_values(value: Any) -> list[str]:
+    """Parse the server's ``search_modes_accepted`` field.
+
+    The server emits it as prose — ``"hybrid, binary, float, scalar (alias sq),
+    rabitq"`` — so ``x (alias y)`` yields both ``x`` and ``y``.  A JSON list is
+    accepted as well in case the field is ever reshaped into one.
+    """
+    if isinstance(value, list):
+        return _str_list(value)
+    if not isinstance(value, str):
+        return []
+    out: list[str] = []
+    # One token per match: the value, then an optional "(...)" annotation.
+    for match in re.finditer(r"([^,()]+)(?:\(([^)]*)\))?", value):
+        head = match.group(1).strip()
+        if head:
+            out.append(head)
+        note = (match.group(2) or "").strip()
+        if note.lower().startswith("alias"):
+            rest = note[len("alias") :]
+            if rest.startswith("es"):
+                rest = rest[2:]
+            out.extend(a for a in re.split(r"[\s,/]+", rest) if a)
+    return out
+
+
+@dataclass
+class ModelCapability:
+    """One embedding model the server can load (``capabilities.models[]``)."""
+
+    name: EmbeddingModel
+    """Wire name — the string accepted/returned in every ``model`` field."""
+    aliases: list[str] = field(default_factory=list)
+    """Other spellings accepted on input."""
+    dimension: int = 0
+    max_seq_length: int = 0
+    """The model's own context window (tokens)."""
+    effective_max_seq_length: int = 0
+    """What this server embeds before truncating."""
+    active: bool = False
+    """Whether this is the model the server embeds with (one per store)."""
+    mrl_dimensions: list[int] | None = None
+    """Matryoshka truncation dimensions, when supported."""
+    modality: str = "text"
+    raw: dict[str, Any] = field(default_factory=dict)
+    """The verbatim server row — carries fields this SDK does not model yet."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ModelCapability":
+        mrl = data.get("mrl_dimensions")
+        return cls(
+            name=EmbeddingModel(str(data.get("name", ""))),
+            aliases=_str_list(data.get("aliases")),
+            dimension=int(data.get("dimension", 0) or 0),
+            max_seq_length=int(data.get("max_seq_length", 0) or 0),
+            effective_max_seq_length=int(data.get("effective_max_seq_length", 0) or 0),
+            active=bool(data.get("active", False)),
+            mrl_dimensions=[int(d) for d in mrl] if isinstance(mrl, list) else None,
+            modality=str(data.get("modality", "text")),
+            raw=dict(data),
+        )
+
+    def matches(self, name: str) -> bool:
+        """Whether ``name`` is this model's wire name or one of its aliases."""
+        return name == self.name.value or name in self.aliases
+
+
+@dataclass
+class RecordCapabilities:
+    """The R2 record / representation surface (``capabilities.records``)."""
+
+    enabled: bool = False
+    """Whether ``/v1/namespaces/{ns}/records`` answers (else 501 FEATURE_DISABLED)."""
+    representation_kinds: list[RepresentationKind] = field(default_factory=list)
+    dtypes: list[BlockDType] = field(default_factory=list)
+    max_representations: int = 0
+    max_vectors: int = 0
+    max_bytes: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecordCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            representation_kinds=[
+                RepresentationKind(k) for k in _str_list(data.get("representation_kinds"))
+            ],
+            dtypes=[BlockDType(d) for d in _str_list(data.get("dtypes"))],
+            max_representations=int(data.get("max_representations", 0) or 0),
+            max_vectors=int(data.get("max_vectors", 0) or 0),
+            max_bytes=int(data.get("max_bytes", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class LateInteractionCapabilities:
+    """The late-interaction lane (``capabilities.scoring.late_interaction``)."""
+
+    enabled: bool = False
+    model_supported: bool = False
+    lane: str = "text"
+    """``text`` (``colbert`` slots) or ``visual`` (``patch`` slots)."""
+    token_slot: str = ""
+    fde_slot: str = ""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LateInteractionCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            model_supported=bool(data.get("model_supported", False)),
+            lane=str(data.get("lane", "text")),
+            token_slot=str(data.get("token_slot", "")),
+            fde_slot=str(data.get("fde_slot", "")),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class ScoringCapabilities:
+    """What a score is made of (``capabilities.scoring``, v0.12)."""
+
+    strategy: str = "single-vector"
+    """``DAKERA_SCORING_STRATEGY`` — ``single-vector`` or ``late-interaction``."""
+    strategies_accepted: list[str] = field(default_factory=list)
+    late_interaction: LateInteractionCapabilities = field(
+        default_factory=LateInteractionCapabilities
+    )
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ScoringCapabilities":
+        li = data.get("late_interaction")
+        return cls(
+            strategy=str(data.get("strategy", "single-vector")),
+            strategies_accepted=parse_accepted_values(data.get("strategies_accepted")),
+            late_interaction=LateInteractionCapabilities.from_dict(
+                li if isinstance(li, dict) else {}
+            ),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class TranscriptionCapabilities:
+    """The speech-to-text surface (``capabilities.attachments.transcription``)."""
+
+    model: str = ""
+    models: list[str] = field(default_factory=list)
+    media_types: list[str] = field(default_factory=list)
+    languages: list[str] = field(default_factory=list)
+    sample_rate_hz: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TranscriptionCapabilities":
+        return cls(
+            model=str(data.get("model", "")),
+            models=_str_list(data.get("models")),
+            media_types=_str_list(data.get("media_types")),
+            languages=_str_list(data.get("languages")),
+            sample_rate_hz=int(data.get("sample_rate_hz", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class AttachmentCapabilities:
+    """The attachment lane (``capabilities.attachments``, ``DAKERA_ATTACHMENTS``)."""
+
+    enabled: bool = False
+    """``False`` ⇒ the attachment routes answer ``501 FEATURE_DISABLED``."""
+    max_bytes: int = 0
+    """Largest upload (``DAKERA_ATTACHMENT_MAX_BYTES``); over it: ``413``."""
+    transcription: TranscriptionCapabilities = field(default_factory=TranscriptionCapabilities)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentCapabilities":
+        t = data.get("transcription")
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            max_bytes=int(data.get("max_bytes", 0) or 0),
+            transcription=TranscriptionCapabilities.from_dict(t if isinstance(t, dict) else {}),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class VisionCapabilities:
+    """The visual (image indexing) lane (``capabilities.vision``, ``DAKERA_VISION``)."""
+
+    enabled: bool = False
+    model: str = ""
+    models: list[str] = field(default_factory=list)
+    media_types: list[str] = field(default_factory=list)
+    dimension: int = 0
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisionCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            model=str(data.get("model", "")),
+            models=_str_list(data.get("models")),
+            media_types=_str_list(data.get("media_types")),
+            dimension=int(data.get("dimension", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class ServerCapabilities:
+    """What the connected server can do — ``GET /v1/capabilities``.
+
+    Every field is additive on the server side; this parser ignores fields it
+    does not know and keeps unknown strings inside lists as unknown enum
+    members.  ``capabilities_version`` only changes on a breaking reshape of the
+    document.  The verbatim document is kept in :attr:`raw`.
+    """
+
+    capabilities_version: int = 0
+    server_version: str = ""
+    api_versions: list[str] = field(default_factory=list)
+    default_model: EmbeddingModel = EmbeddingModel.BGE_LARGE
+    models: list[ModelCapability] = field(default_factory=list)
+    index_kinds: list[IndexKind] = field(default_factory=list)
+    vector_index_kinds: list[IndexKind] = field(default_factory=list)
+    live_vector_index_kinds: list[IndexKind] = field(default_factory=list)
+    distance_metrics: list[DistanceMetric] = field(default_factory=list)
+    search_mode: SearchMode = SearchMode.HYBRID
+    """The mode this server process runs (``DAKERA_SEARCH_MODE``)."""
+    search_modes_accepted: list[SearchMode] = field(default_factory=list)
+    """Every value the server accepts for ``DAKERA_SEARCH_MODE`` (aliases expanded)."""
+    fulltext_language: str = "en"
+    on_disk_format_version: int = 0
+    records: RecordCapabilities = field(default_factory=RecordCapabilities)
+    query_languages: list[str] = field(default_factory=list)
+    reembed_pending: bool = False
+    """A model change was acknowledged but the store is not fully re-embedded yet."""
+    scoring: ScoringCapabilities = field(default_factory=ScoringCapabilities)
+    """Scoring strategy and the late-interaction lane (v0.12)."""
+    attachments: AttachmentCapabilities = field(default_factory=AttachmentCapabilities)
+    """Attachment lane and speech-to-text (v0.12, opt-in on the server)."""
+    vision: VisionCapabilities = field(default_factory=VisionCapabilities)
+    """Image indexing lane (v0.12, opt-in on the server)."""
+    unreadable_records: int = 0
+    """Records the server skipped because a newer binary wrote them."""
+    late_interaction_stats: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ServerCapabilities":
+        records = data.get("records")
+        return cls(
+            capabilities_version=int(data.get("capabilities_version", 0) or 0),
+            server_version=str(data.get("server_version", "")),
+            api_versions=_str_list(data.get("api_versions")),
+            default_model=EmbeddingModel(str(data.get("default_model", "bge-large"))),
+            models=[
+                ModelCapability.from_dict(m) for m in data.get("models", []) if isinstance(m, dict)
+            ],
+            index_kinds=[IndexKind(k) for k in _str_list(data.get("index_kinds"))],
+            vector_index_kinds=[IndexKind(k) for k in _str_list(data.get("vector_index_kinds"))],
+            live_vector_index_kinds=[
+                IndexKind(k) for k in _str_list(data.get("live_vector_index_kinds"))
+            ],
+            distance_metrics=[DistanceMetric(m) for m in _str_list(data.get("distance_metrics"))],
+            search_mode=SearchMode(str(data.get("search_mode", "hybrid"))),
+            search_modes_accepted=[
+                SearchMode(m) for m in parse_accepted_values(data.get("search_modes_accepted"))
+            ],
+            fulltext_language=str(data.get("fulltext_language", "en")),
+            on_disk_format_version=int(data.get("on_disk_format_version", 0) or 0),
+            records=RecordCapabilities.from_dict(records if isinstance(records, dict) else {}),
+            query_languages=_str_list(data.get("query_languages")),
+            reembed_pending=bool(data.get("reembed_pending", False)),
+            scoring=ScoringCapabilities.from_dict(_dict(data.get("scoring"))),
+            attachments=AttachmentCapabilities.from_dict(_dict(data.get("attachments"))),
+            vision=VisionCapabilities.from_dict(_dict(data.get("vision"))),
+            unreadable_records=int(data.get("unreadable_records", 0) or 0),
+            late_interaction_stats=_dict(data.get("late_interaction_stats")),
+            raw=dict(data),
+        )
+
+    # -- discovery helpers ----------------------------------------------------
+
+    @property
+    def model_names(self) -> list[str]:
+        """Wire names of every model the server can load."""
+        return [m.name.value for m in self.models]
+
+    @property
+    def active_model(self) -> ModelCapability | None:
+        """The model the server embeds with (a request naming another is rejected)."""
+        return next((m for m in self.models if m.active), None)
+
+    @property
+    def supports_records(self) -> bool:
+        """Whether the record routes are switched on (``records.enabled``)."""
+        return self.records.enabled
+
+    @property
+    def supports_attachments(self) -> bool:
+        """Whether the attachment routes are switched on (``DAKERA_ATTACHMENTS``)."""
+        return self.attachments.enabled
+
+    @property
+    def supports_vision(self) -> bool:
+        """Whether image indexing is switched on (``DAKERA_VISION``)."""
+        return self.vision.enabled
+
+    def model(self, name: str) -> ModelCapability | None:
+        """Look a model up by wire name or alias."""
+        return next((m for m in self.models if m.matches(name)), None)
+
+    def supports_model(self, name: "EmbeddingModel | str") -> bool:
+        return self.model(wire_value(name)) is not None
+
+    def supports_index_kind(self, kind: "IndexKind | str") -> bool:
+        return wire_value(kind) in {k.value for k in self.index_kinds}
+
+    def supports_distance_metric(self, metric: "DistanceMetric | str") -> bool:
+        return wire_value(metric) in {m.value for m in self.distance_metrics}
+
+    def supports_search_mode(self, mode: "SearchMode | str") -> bool:
+        return wire_value(mode) in {m.value for m in self.search_modes_accepted}
+
+    def supports_query_language(self, lang: str) -> bool:
+        return lang in self.query_languages
+
+    # -- pre-flight validation --------------------------------------------------
+
+    def supported_values(self, kind: str) -> list[str]:
+        """Wire strings the server advertises for ``kind`` (see :meth:`require`)."""
+        if kind == "model":
+            return self.model_names
+        if kind == "index_kind":
+            return [k.value for k in self.index_kinds]
+        if kind == "distance_metric":
+            return [m.value for m in self.distance_metrics]
+        if kind == "search_mode":
+            return [m.value for m in self.search_modes_accepted]
+        if kind == "query_language":
+            return list(self.query_languages)
+        raise ValueError(f"unknown capability kind: {kind!r}")
+
+    def supports(self, kind: str, value: Any) -> bool:
+        """Whether the server advertises ``value`` for ``kind``."""
+        if kind == "model":
+            return self.supports_model(value)
+        return wire_value(value) in self.supported_values(kind)
+
+    def require(self, kind: str, value: Any) -> None:
+        """Raise :class:`~dakera.exceptions.UnsupportedCapabilityError` unless the
+        server advertises ``value`` for ``kind``.
+
+        ``kind`` is one of ``"model"``, ``"index_kind"``, ``"distance_metric"``,
+        ``"search_mode"``, ``"query_language"``.  ``value`` may be an enum member
+        or a plain string.
+        """
+        if not self.supports(kind, value):
+            raise UnsupportedCapabilityError(
+                kind,
+                wire_value(value),
+                self.supported_values(kind),
+                self.server_version or None,
+            )
+
+
+def wire_value(value: Any) -> str:
+    """The wire string of an enum member or plain string."""
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
 
 
 @dataclass
@@ -645,9 +1144,17 @@ class StoreMemoryRequest:
     expires_at: int | None = None
     session_id: str | None = None
     embedding: list[float] | None = None
+    lang: str | None = None
+    """Language of ``content`` for write-time derivations (server v0.12+)."""
+    attachment_ref: str | None = None
+    """``sha256:<hex>`` of an attachment in the agent's namespace (server v0.12+)."""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"content": self.content, "memory_type": self.memory_type}
+        if self.lang is not None:
+            d["lang"] = self.lang
+        if self.attachment_ref is not None:
+            d["attachment_ref"] = self.attachment_ref
         if self.importance is not None:
             d["importance"] = self.importance
         if self.metadata is not None:
@@ -766,8 +1273,7 @@ class RecallResponse:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
         memories = [
-            RecalledMemory.from_dict(cls._normalize_memory(m))
-            for m in data.get("memories", [])
+            RecalledMemory.from_dict(cls._normalize_memory(m)) for m in data.get("memories", [])
         ]
         raw_assoc = data.get("associated_memories")
         associated_memories = (
@@ -1621,6 +2127,9 @@ class BatchStoreMemoryItem:
     """Optional explicit expiry as a Unix timestamp (seconds)."""
     id: str | None = None
     """Optional custom ID. Auto-generated if not provided."""
+    attachment_ref: str | None = None
+    """``sha256:<hex>`` of an attachment already uploaded to the agent's namespace
+    (server v0.12+, needs ``DAKERA_ATTACHMENTS``)."""
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -1628,6 +2137,8 @@ class BatchStoreMemoryItem:
             "memory_type": self.memory_type,
             "importance": self.importance,
         }
+        if self.attachment_ref is not None:
+            d["attachment_ref"] = self.attachment_ref
         if self.tags is not None:
             d["tags"] = self.tags
         if self.session_id is not None:
@@ -1656,12 +2167,17 @@ class BatchStoreMemoryRequest:
     """Agent namespace to store the memories in."""
     memories: list[BatchStoreMemoryItem]
     """Memories to store (1–1000 items)."""
+    lang: str | None = None
+    """Language of the whole batch (server v0.12+); applies to every item."""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "agent_id": self.agent_id,
             "memories": [m.to_dict() for m in self.memories],
         }
+        if self.lang is not None:
+            d["lang"] = self.lang
+        return d
 
 
 @dataclass
@@ -2494,7 +3010,7 @@ class AuditListResponse:
 
 @dataclass
 class AuditExportResponse:
-    """Response from ``POST /v1/audit/export`` (OBS-1)."""
+    """Response from ``GET /v1/audit/export`` (OBS-1)."""
 
     data: str
     format: str
@@ -2603,9 +3119,7 @@ class FulltextReindexResponse:
             namespaces_processed=data.get("namespaces_processed", 0),
             total_indexed=data.get("total_indexed", 0),
             total_skipped=data.get("total_skipped", 0),
-            details=[
-                FulltextReindexNamespaceResult.from_dict(d) for d in data.get("details", [])
-            ],
+            details=[FulltextReindexNamespaceResult.from_dict(d) for d in data.get("details", [])],
         )
 
 
@@ -3249,3 +3763,264 @@ class StaticCountResponse:
     def from_dict(cls, data: dict[str, Any]) -> "StaticCountResponse":
         """Construct from API response dict."""
         return cls(static_count=int(data["static_count"]))
+
+
+# ============================================================================
+# Attachments, transcription / image-index jobs (server v0.12, opt-in)
+# ============================================================================
+
+
+@dataclass
+class AttachmentUploadResponse:
+    """Answer of ``POST /v1/namespaces/{ns}/attachments``."""
+
+    attachment_ref: str
+    """``sha256:<hex of the bytes>`` — what a memory's ``attachment_ref`` carries."""
+    content_type: str
+    size_bytes: int
+    created: bool
+    """``False`` when the namespace already held these bytes (HTTP 200, a no-op)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentUploadResponse":
+        return cls(
+            attachment_ref=str(data["attachment_ref"]),
+            content_type=str(data.get("content_type", "")),
+            size_bytes=int(data.get("size_bytes", 0) or 0),
+            created=bool(data.get("created", True)),
+        )
+
+
+@dataclass
+class AttachmentInfo:
+    """One entry of ``GET /v1/namespaces/{ns}/attachments`` (no bytes)."""
+
+    attachment_ref: str
+    content_type: str
+    size_bytes: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentInfo":
+        return cls(
+            attachment_ref=str(data["attachment_ref"]),
+            content_type=str(data.get("content_type", "")),
+            size_bytes=int(data.get("size_bytes", 0) or 0),
+        )
+
+
+@dataclass
+class AttachmentContent:
+    """The bytes of an attachment, as downloaded."""
+
+    data: bytes
+    content_type: str
+    etag: str | None = None
+    """The attachment hash (the server's ``ETag``, quotes stripped)."""
+
+    @property
+    def size_bytes(self) -> int:
+        return len(self.data)
+
+
+@dataclass
+class JobAccepted:
+    """``202`` answer of the ``…/transcribe`` and ``…/index`` routes."""
+
+    job_id: str
+    attachment_ref: str
+    agent_id: str
+    memory_id: str
+    """Id of the memory the job stores — keep it: jobs live in server memory, so
+    after a restart this is how to find what a completed job stored."""
+    model: str
+    status_url: str
+    """Server-relative route to poll (``GET``)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "JobAccepted":
+        return cls(
+            job_id=str(data["job_id"]),
+            attachment_ref=str(data.get("attachment_ref", "")),
+            agent_id=str(data.get("agent_id", "")),
+            memory_id=str(data.get("memory_id", "")),
+            model=str(data.get("model", "")),
+            status_url=str(data.get("status_url", "")),
+        )
+
+
+@dataclass
+class AttachmentJob:
+    """A transcription / image-index job (``GET …/transcribe/{job_id}``,
+    ``GET …/index/{job_id}``). ``status`` is ``Pending``, ``Running``,
+    ``Completed``, ``Failed`` or ``Cancelled`` (kept as the server's string)."""
+
+    id: str
+    job_type: str
+    status: str
+    progress: int = 0
+    message: str | None = None
+    created_at: int = 0
+    started_at: int | None = None
+    completed_at: int | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
+    error_status: int | None = None
+    """On a failed job: the HTTP status the synchronous request would have answered."""
+    error_code: str | None = None
+    """On a failed job: its error code (``INVALID_REQUEST``, ``SERVICE_UNAVAILABLE``, …)."""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    TERMINAL = ("Completed", "Failed", "Cancelled")
+
+    @property
+    def is_done(self) -> bool:
+        """The job reached a final state (completed, failed or cancelled)."""
+        return self.status in self.TERMINAL
+
+    @property
+    def succeeded(self) -> bool:
+        return self.status == "Completed"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AttachmentJob":
+        err = data.get("error")
+        err = err if isinstance(err, dict) else {}
+        meta = data.get("metadata")
+        return cls(
+            id=str(data.get("id", "")),
+            job_type=str(data.get("job_type", "")),
+            status=str(data.get("status", "")),
+            progress=int(data.get("progress", 0) or 0),
+            message=data.get("message"),
+            created_at=int(data.get("created_at", 0) or 0),
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            metadata={str(k): str(v) for k, v in meta.items()} if isinstance(meta, dict) else {},
+            error_status=err.get("status"),
+            error_code=err.get("code"),
+            raw=dict(data),
+        )
+
+
+# ============================================================================
+# Records: one vector plus named representations (server v0.12, opt-in)
+# ============================================================================
+
+
+@dataclass
+class Representation:
+    """An extra named representation of a record (write side)."""
+
+    name: str
+    """Slot name, unique within the record and never ``"dense"``."""
+    vectors: list[list[float]]
+    """Row-major vectors; all rows the same, non-zero length."""
+    kind: "RepresentationKind | str" = RepresentationKind.DENSE
+    """``dense``, ``token_multivector`` or ``patch_multivector``."""
+    model: str = ""
+    """Model that produced the vectors; empty ⇒ the namespace's default."""
+    store_as: "BlockDType | str" = BlockDType.F32
+    """On-disk packing: ``f32`` (lossless), ``f16`` or ``i8``."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "name": self.name,
+            "kind": wire_value(self.kind),
+            "vectors": self.vectors,
+            "store_as": wire_value(self.store_as),
+        }
+        if self.model:
+            d["model"] = self.model
+        return d
+
+
+@dataclass
+class Record:
+    """One record: a primary dense vector (indexed and searched) plus extras."""
+
+    id: str
+    values: list[float]
+    representations: list[Representation] = field(default_factory=list)
+    metadata: dict[str, Any] | None = None
+    ttl_seconds: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"id": self.id, "values": self.values}
+        if self.representations:
+            d["representations"] = [r.to_dict() for r in self.representations]
+        if self.metadata is not None:
+            d["metadata"] = self.metadata
+        if self.ttl_seconds is not None:
+            d["ttl_seconds"] = self.ttl_seconds
+        return d
+
+
+@dataclass
+class RepresentationInfo:
+    """A representation as a record read describes it."""
+
+    name: str
+    kind: RepresentationKind
+    dim: int
+    count: int
+    dtype: BlockDType
+    bytes: int
+    model: str = ""
+    vectors: list[list[float]] | None = None
+    """Decoded rows — only with ``include_vectors=True``."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RepresentationInfo":
+        vectors = data.get("vectors")
+        return cls(
+            name=str(data.get("name", "")),
+            kind=RepresentationKind(str(data.get("kind", "dense"))),
+            dim=int(data.get("dim", 0) or 0),
+            count=int(data.get("count", 0) or 0),
+            dtype=BlockDType(str(data.get("dtype", "f32"))),
+            bytes=int(data.get("bytes", 0) or 0),
+            model=str(data.get("model", "")),
+            vectors=vectors if isinstance(vectors, list) else None,
+        )
+
+
+@dataclass
+class RecordView:
+    """``GET /v1/namespaces/{ns}/records/{id}``."""
+
+    id: str
+    dimension: int
+    values: list[float] | None = None
+    """The primary vector — only with ``include_vectors=True``."""
+    representations: list[RepresentationInfo] = field(default_factory=list)
+    unsupported_representations: int = 0
+    """Slots the server skipped because a newer Dakera wrote them."""
+    metadata: dict[str, Any] | None = None
+    ttl_seconds: int | None = None
+    expires_at: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecordView":
+        reps = data.get("representations")
+        return cls(
+            id=str(data["id"]),
+            dimension=int(data.get("dimension", 0) or 0),
+            values=data.get("values"),
+            representations=[RepresentationInfo.from_dict(r) for r in reps if isinstance(r, dict)]
+            if isinstance(reps, list)
+            else [],
+            unsupported_representations=int(data.get("unsupported_representations", 0) or 0),
+            metadata=data.get("metadata"),
+            ttl_seconds=data.get("ttl_seconds"),
+            expires_at=data.get("expires_at"),
+        )
+
+
+@dataclass
+class RecordUpsertResponse:
+    """Answer of ``POST /v1/namespaces/{ns}/records``."""
+
+    upserted_count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RecordUpsertResponse":
+        return cls(upserted_count=int(data.get("upserted_count", 0) or 0))

@@ -49,7 +49,7 @@ curl http://localhost:3000/health  # → {"status":"ok"}
 For persistent storage with Docker Compose:
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker-compose.yml \
+curl -sSfL https://raw.githubusercontent.com/Dakera-AI/dakera-deploy/main/docker/docker-compose.yml \
   -o docker-compose.yml
 DAKERA_API_KEY=dk-mykey docker compose up -d
 ```
@@ -146,8 +146,73 @@ asyncio.run(main())
 - **Streaming** — SSE event subscriptions for real-time memory updates
 - **Sync + Async** — full parity between `DakeraClient` and `AsyncDakeraClient`
 - **Typed Models** — full type annotations with strict mypy, PEP 561 `py.typed` marker
-- **Retry & Rate Limiting** — built-in exponential backoff and rate-limit header tracking
+- **Retry & Rate Limiting** — built-in exponential backoff, `Retry-After` honoured on `503`/`429`, and rate-limit header tracking
+- **Attachments & Records** — upload audio/images, transcribe or index them into memories, store multi-representation records (server v0.12+)
 - **Filter DSL** — `F.eq()`, `F.gt()`, `F.contains()` typed filter builder
+
+---
+
+## What's new for Dakera server v0.12.0
+
+Version 0.13.0 of this SDK adds support for Dakera server **v0.12.0**
+(operator upgrade guide: `docs/v0.12/UPGRADE.md` in the server release; release notes in the
+[Dakera changelog](https://dakera.ai/docs/changelog)).
+
+**Compatible with both v0.11.108 and v0.12.0 servers.** Everything new is additive:
+calls that do not use a v0.12 feature send exactly what they sent before, and
+the v0.12-only calls fail with a clear error (`NotFoundError` / `405`) on a v0.11
+server.
+
+- **Health and readiness** — a v0.12 server binds its port while models load and
+  answers `503` + `Retry-After` on `/health`. `client.is_ready()` /
+  `client.wait_until_ready()` use `/health/ready` (a `503` is never "healthy");
+  `health_ready()` and `health_live()` map to `/health/ready` and `/health/live`.
+- **Errors and retries** — every error body is JSON. `503` raises
+  `ServiceUnavailableError` (a `ServerError`) and the retry logic waits for the
+  server's `Retry-After`. `413` raises `PayloadTooLargeError` (`.is_quota` for a
+  namespace quota, `.is_oversize` for an over-size request), `501` raises
+  `FeatureNotAvailableError` (`details` names the `DAKERA_*` switch), `409`
+  raises `ConflictError`; `NotFoundError.resource` says what was not found.
+- **`GET /v1/capabilities`** — `client.capabilities()`: models (`bge-m3`,
+  `colbert-small`), index kinds (`ivfpq`), search mode (`rabitq`), record kinds and
+  dtypes, query languages, plus `scoring`, `attachments`, `vision`. Unknown
+  strings parse as unknown enum members instead of raising.
+- **Attachments** (opt-in on the server, `DAKERA_ATTACHMENTS`) —
+  `upload_attachment`, `list_attachments`, `download_attachment`,
+  `delete_attachment`, `store_memory(..., attachment_ref=...)`,
+  `transcribe_attachment` / `get_transcription_job` / `wait_for_transcription`
+  and, with `DAKERA_VISION`, `index_attachment` / `wait_for_index`.
+- **Records** (opt-in, `DAKERA_RECORDS`) — `upsert_records` / `get_record`: one
+  primary vector plus named `dense`, `token_multivector` or `patch_multivector`
+  representations stored as `f32`, `f16` or `i8`.
+- **Per-request `lang`** on `store_memory`, `store_memories_batch`,
+  `update_memory`, `recall`, `search_memories` and `extract_entities`.
+- **Namespace config** — `replace_namespace_ner_config()` (`PUT`) replaces the
+  entity-extraction config; the v0.12 server's `PATCH` merges and refuses unknown
+  fields.
+- **Fix** — async `extract_entities()` sent `text` instead of `content`.
+
+```python
+from dakera import DakeraClient, Record, Representation, RepresentationKind, BlockDType
+
+client = DakeraClient("http://localhost:3000", api_key="your-key")
+client.wait_until_ready(timeout=120)
+
+caps = client.capabilities()
+if caps.supports_attachments:
+    up = client.upload_attachment("_dakera_agent_a1", "note.wav")
+    job = client.transcribe_attachment("_dakera_agent_a1", up.attachment_ref, "a1", lang="en")
+    done = client.wait_for_transcription("_dakera_agent_a1", up.attachment_ref, job.job_id)
+
+if caps.supports_records:
+    client.upsert_records("docs", [Record(
+        id="r1", values=[0.1, 0.2, 0.3, 0.4],
+        representations=[Representation(
+            "tokens", [[0.1, 0.2], [0.3, 0.4]],
+            kind=RepresentationKind.TOKEN_MULTIVECTOR, store_as=BlockDType.F16)])])
+```
+
+Note: the v0.12 server's gRPC port requires an API key. This SDK speaks REST only.
 
 ---
 
@@ -233,7 +298,7 @@ See the [`examples/`](examples/) directory:
 | | |
 |---|---|
 | [Documentation](https://dakera.ai/docs) | Full API reference and guides |
-| [Python SDK docs](https://dakera.ai/docs/sdk/python) | Python-specific reference |
+| [Python SDK docs](https://dakera.ai/docs/python-sdk) | Python-specific reference |
 | [Benchmark](https://dakera.ai/benchmark) | LoCoMo evaluation results |
 | [dakera.ai](https://dakera.ai) | Website and early access |
 | [GitHub Org](https://github.com/dakera-ai) | All public repos |
