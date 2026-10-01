@@ -87,14 +87,17 @@ class TestPlaygroundWorkflow:
             assert m.get("content"), "each search result must have content"
 
     def test_step4_knowledge_graph_link(self, client):
-        """Link two stored memories with a related_to edge."""
+        """Link two stored memories (an explicit linked_by edge)."""
         mem1_id = getattr(TestPlaygroundWorkflow, "_mem1_id", None)
         mem2_id = getattr(TestPlaygroundWorkflow, "_mem2_id", None)
         if not mem1_id or not mem2_id:
             pytest.skip("memory IDs unavailable — step1 must run first")
 
-        link = client.memory_link(mem1_id, mem2_id, edge_type="related_to")
+        # The server records explicit links as `linked_by` (it cannot store a
+        # caller-chosen edge type) and needs the owning agent.
+        link = client.memory_link(mem1_id, mem2_id, agent_id=AGENT_ID, label="related")
         assert link.edge is not None, "memory_link must return an edge object"
-        assert link.edge.edge_type == "related_to", (
-            f"expected edge_type=related_to, got {link.edge.edge_type}"
+        assert link.edge.edge_type == "linked_by", (
+            f"expected edge_type=linked_by, got {link.edge.edge_type}"
         )
+        assert (link.edge.source_id, link.edge.target_id) == (mem1_id, mem2_id)

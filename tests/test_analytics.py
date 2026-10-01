@@ -218,7 +218,13 @@ class TestKnowledgeGraph:
             status=500,
         )
         with pytest.raises(ServerError):
+            client.knowledge_graph("agent-1", memory_id="mem-1")
+
+    def test_knowledge_graph_requires_memory_id(self, client, mock_responses):
+        """The server builds the graph from a seed memory: memory_id is required."""
+        with pytest.raises(ValueError, match="memory_id"):
             client.knowledge_graph("agent-1")
+        assert len(mock_responses.calls) == 0
 
 
 class TestKnowledgeSummarize:
@@ -241,18 +247,23 @@ class TestKnowledgeSummarize:
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["agent_id"] == "agent-1"
         assert req_body["memory_ids"] == ["m1", "m2"]
-        assert req_body["dry_run"] is False
+        # The server's SummarizeRequest has no dry_run field.
+        assert "dry_run" not in req_body
 
-    def test_summarize_dry_run(self, client, mock_responses):
-        """Test summarize in dry run mode."""
-        mock_responses.add(
-            responses.POST,
-            "http://localhost:3000/v1/knowledge/summarize",
-            json={"summary": "preview", "source_count": 3, "dry_run": True},
-            status=200,
-        )
-        result = client.summarize("agent-1", dry_run=True)
-        assert result["dry_run"] is True
+    def test_summarize_dry_run_is_refused(self, client, mock_responses):
+        """The server has no dry run for summarize (it always stores the summary),
+        so dry_run=True must fail before any request instead of writing."""
+        with pytest.raises(ValueError, match="dry run"):
+            client.summarize("agent-1", memory_ids=["m1", "m2"], dry_run=True)
+        assert len(mock_responses.calls) == 0
+
+    def test_summarize_needs_two_memory_ids(self, client, mock_responses):
+        """The server needs at least two memory ids."""
+        with pytest.raises(ValueError, match="two memory_ids"):
+            client.summarize("agent-1", memory_ids=["m1"])
+        with pytest.raises(ValueError, match="two memory_ids"):
+            client.summarize("agent-1")
+        assert len(mock_responses.calls) == 0
 
 
 class TestKnowledgeDeduplicate:
@@ -466,91 +477,75 @@ class TestMemoryKnowledgeGraph:
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/memories/mem-1/graph",
+            # The server's shape: edges are listed per node, as from_id/to_id.
             json={
                 "root_id": "mem-1",
                 "depth": 2,
+                "node_count": 3,
                 "nodes": [
-                    {"memory_id": "mem-1", "content_preview": "first",
-                     "importance": 0.9, "depth": 0},
-                    {"memory_id": "mem-2", "content_preview": "second",
-                     "importance": 0.7, "depth": 1},
-                ],
-                "edges": [
-                    {
-                        "id": "edge-1",
-                        "source_id": "mem-1",
-                        "target_id": "mem-2",
-                        "edge_type": "related_to",
-                        "weight": 0.8,
-                        "created_at": 1700000000,
-                    }
+                    {"memory_id": "mem-1", "depth": 0, "edges": []},
+                    {"memory_id": "mem-2", "depth": 1, "edges": [
+                        {"from_id": "mem-1", "to_id": "mem-2", "edge_type": "related_to",
+                         "weight": 0.8, "created_at": 1700000000}]},
+                    {"memory_id": "mem-3", "depth": 1, "edges": [
+                        {"from_id": "mem-1", "to_id": "mem-3", "edge_type": "linked_by",
+                         "weight": 1.0, "created_at": 1700000001}]},
                 ],
             },
             status=200,
         )
         result = client.memory_graph("mem-1", depth=2, types=["related_to"])
         assert result.root_id == "mem-1"
-        assert len(result.nodes) == 2
+        assert len(result.nodes) == 3
+        assert result.node_count == 3
+        # types is applied client-side (the server returns every type).
+        assert [(e.source_id, e.target_id) for e in result.edges] == [("mem-1", "mem-2")]
+        assert result.nodes[2].edges == []
+        assert "types" not in mock_responses.calls[0].request.url
 
     def test_memory_path(self, client, mock_responses):
         """Test finding path between memories."""
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/memories/mem-1/path",
+            # The server's shape.
             json={
-                "source_id": "mem-1",
-                "target_id": "mem-5",
+                "from_id": "mem-1",
+                "to_id": "mem-5",
                 "path": ["mem-1", "mem-3", "mem-5"],
-                "hops": 2,
-                "edges": [
-                    {
-                        "id": "edge-1",
-                        "source_id": "mem-1",
-                        "target_id": "mem-3",
-                        "edge_type": "related_to",
-                        "weight": 0.9,
-                        "created_at": 1700000000,
-                    },
-                    {
-                        "id": "edge-2",
-                        "source_id": "mem-3",
-                        "target_id": "mem-5",
-                        "edge_type": "related_to",
-                        "weight": 0.7,
-                        "created_at": 1700000001,
-                    },
-                ],
+                "hop_count": 2,
             },
             status=200,
         )
         result = client.memory_path("mem-1", "mem-5")
         assert result.hops == 2
+        assert result.source_id == "mem-1"
+        assert result.target_id == "mem-5"
+        assert result.path == ["mem-1", "mem-3", "mem-5"]
+        # The server reads the target from `to`.
+        assert "to=mem-5" in mock_responses.calls[0].request.url
 
     def test_memory_link(self, client, mock_responses):
         """Test creating explicit link between memories."""
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/memories/mem-1/links",
-            json={
-                "edge": {
-                    "id": "edge-new",
-                    "source_id": "mem-1",
-                    "target_id": "mem-2",
-                    "edge_type": "linked_by",
-                    "weight": 1.0,
-                    "created_at": 1700000000,
-                }
-            },
+            # The server's answer is flat.
+            json={"from_id": "mem-1", "to_id": "mem-2", "edge_type": "linked_by"},
             status=200,
         )
         from dakera.models import EdgeType
 
-        result = client.memory_link("mem-1", "mem-2", edge_type=EdgeType.LINKED_BY)
+        result = client.memory_link(
+            "mem-1", "mem-2", edge_type=EdgeType.LINKED_BY, agent_id="agent-1"
+        )
         assert result.edge.source_id == "mem-1"
         assert result.edge.target_id == "mem-2"
+        assert result.edge.edge_type == EdgeType.LINKED_BY
+        assert result.from_id == "mem-1"
         req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body["target_id"] == "mem-2"
-        assert req_body["edge_type"] == "linked_by"
+        # The server's MemoryLinkRequest: {target_id, agent_id, label?}.
+        assert req_body == {"target_id": "mem-2", "agent_id": "agent-1"}
 
     def test_agent_graph_export(self, client, mock_responses):
         """Test exporting agent graph."""
@@ -569,3 +564,26 @@ class TestMemoryKnowledgeGraph:
         result = client.agent_graph_export("agent-1", format="json")
         assert result.node_count == 2
         assert result.agent_id == "agent-1"
+
+    def test_agent_graph_export_server_shape(self, client, mock_responses):
+        """The server answers {agent_id, namespace, node_count, edge_count, edges}."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/agents/agent-1/graph/export",
+            json={
+                "agent_id": "agent-1",
+                "namespace": "_dakera_agent_agent-1",
+                "node_count": 2,
+                "edge_count": 1,
+                "edges": [{"from_id": "mem-1", "to_id": "mem-2", "edge_type": "supersedes",
+                           "weight": 0.97, "created_at": 1700000000}],
+            },
+            status=200,
+        )
+        result = client.agent_graph_export("agent-1")
+        assert result.format == "json"
+        assert result.namespace == "_dakera_agent_agent-1"
+        assert result.edge_count == 1
+        assert result.edges[0].source_id == "mem-1"
+        assert result.edges[0].edge_type == "supersedes"
+        assert json.loads(result.data)["edge_count"] == 1

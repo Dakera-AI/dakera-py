@@ -509,8 +509,9 @@ class DakeraDecisionStore:
 class DakeraDelegationHelper:
     """Manages agent delegation chains using the Dakera memory knowledge graph.
 
-    Creates typed ``delegated_from`` edges between decision memory nodes,
-    enabling audit-trail traversal across arbitrarily deep delegation hierarchies.
+    Links decision memory nodes with explicit knowledge-graph links (the server
+    records them as ``linked_by`` edges, labelled ``delegated_from``), enabling
+    audit-trail traversal across delegation hierarchies.
 
     Args:
         client: An initialised :class:`~dakera.DakeraClient`.
@@ -520,29 +521,37 @@ class DakeraDelegationHelper:
         helper = DakeraDelegationHelper(client)
 
         # Link child decision to parent
-        await helper.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
+        await helper.link_delegation(
+            child_id=child_mem_id, parent_id=parent_mem_id, agent_id="my-agent"
+        )
 
         # Traverse the full chain
         chain = await helper.get_delegation_chain("my-agent", root_mem_id, max_depth=5)
         # ["root-mem-id", "parent-mem-id", "grandparent-mem-id"]
     """
 
-    _EDGE_TYPE = "delegated_from"
+    _LABEL = "delegated_from"
+    # The server records every explicit link as `linked_by`; it cannot store a
+    # custom edge type, so the chain follows `linked_by` edges.
+    _EDGE_TYPE = "linked_by"
 
     def __init__(self, client: AsyncDakeraClient) -> None:
         self._client = client
 
-    async def link_delegation(self, child_id: str, parent_id: str) -> None:
-        """Create a ``delegated_from`` KG edge from *child_id* to *parent_id*.
+    async def link_delegation(self, child_id: str, parent_id: str, *, agent_id: str) -> None:
+        """Link *child_id* to *parent_id* (a ``linked_by`` edge labelled ``delegated_from``).
 
         Args:
             child_id: Dakera memory ID of the child (delegated) decision.
             parent_id: Dakera memory ID of the parent (delegating) decision.
+            agent_id: Dakera namespace (agent) owning both decision memories;
+                the server requires it to authorise the link.
         """
         await self._client.memory_link(
             source_id=child_id,
             target_id=parent_id,
-            edge_type=self._EDGE_TYPE,
+            agent_id=agent_id,
+            label=self._LABEL,
         )
 
     async def get_delegation_chain(
@@ -553,8 +562,10 @@ class DakeraDelegationHelper:
     ) -> list[str]:
         """Traverse the delegation chain from a root decision memory.
 
-        Performs a BFS traversal over ``delegated_from`` edges in the memory KG,
-        returning an ordered list of memory IDs from root outward.
+        Performs a BFS traversal over explicit (``linked_by``) edges in the memory
+        KG, returning an ordered list of memory IDs from root outward.  Other
+        explicit links of the same memories are followed too: the server does
+        not return link labels.
 
         Args:
             agent_id: Dakera namespace containing the decision memories.

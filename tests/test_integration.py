@@ -243,6 +243,86 @@ class TestKnowledgeGraph:
         assert result is not None
 
 
+class TestMemoryAndGraphContract:
+    """Round trip over the routes whose request or response shapes the SDK
+    got wrong before 0.13.1 (agent_id query / body, flat link answer, edges as
+    from_id/to_id, path `to`, export shape, entities without memory_id)."""
+
+    AGENT = f"integ-graph-{uuid.uuid4().hex[:8]}"
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def pair(cls, client):
+        a = client.store_memory(
+            agent_id=cls.AGENT, content="Anna lives in Berlin", tags=["city", "anna"]
+        )["id"]
+        b = client.store_memory(
+            agent_id=cls.AGENT, content="Anna works at Siemens in Munich", tags=["work"]
+        )["id"]
+        return a, b
+
+    def test_update_and_get(self, client, pair):
+        a, _ = pair
+        updated = client.update_memory(self.AGENT, a, content="Anna lives in Hamburg")
+        assert updated["content"] == "Anna lives in Hamburg"
+        assert client.get_memory(self.AGENT, a)["content"] == "Anna lives in Hamburg"
+
+    def test_async_update_and_get(self, pair):
+        import asyncio
+
+        from dakera import AsyncDakeraClient
+
+        a, _ = pair
+
+        async def run() -> str:
+            ac = AsyncDakeraClient(DAKERA_URL, api_key=os.environ.get("DAKERA_API_KEY", "test-key"))
+            await ac.update_memory(self.AGENT, a, content="Anna lives in Bremen")
+            got = await ac.get_memory(self.AGENT, a)
+            return str(got["content"])
+
+        assert asyncio.run(run()) == "Anna lives in Bremen"
+
+    def test_recall_with_tags(self, client, pair):
+        time.sleep(0.5)
+        a, b = pair
+        result = client.recall(self.AGENT, "Anna", top_k=10, tags=["work"])
+        ids = {m.id for m in result.memories}
+        assert b in ids, "the memory tagged `work` must be returned"
+        assert a not in ids, "the tag filter must exclude the untagged memory"
+
+    def test_link_graph_path_export_query(self, client, pair):
+        a, b = pair
+        link = client.memory_link(a, b, agent_id=self.AGENT, label="same person")
+        assert (link.from_id, link.to_id, link.edge_type) == (a, b, "linked_by")
+        assert link.edge.source_id == a
+
+        graph = client.memory_graph(a, depth=2)
+        assert graph.root_id == a
+        assert any(e.source_id == a and e.target_id == b for e in graph.edges)
+        linked_only = client.memory_graph(a, depth=2, types=["linked_by"])
+        assert linked_only.edges
+        assert all(str(e.edge_type.value) == "linked_by" for e in linked_only.edges)
+
+        path = client.memory_path(a, b)
+        assert path.path[0] == a and path.path[-1] == b
+        assert path.hops >= 1
+
+        export = client.agent_graph_export(self.AGENT)
+        assert export.agent_id == self.AGENT
+        assert export.edge_count >= 1
+        assert any(e.source_id == a and e.target_id == b for e in export.edges)
+
+        kg = client.knowledge_query(self.AGENT, edge_type="linked_by")
+        assert any(e.source_id == a and e.target_id == b for e in kg.edges)
+
+    def test_memory_entities(self, client, pair):
+        a, _ = pair
+        result = client.memory_entities(a)
+        assert result.memory_id == a
+        assert isinstance(result.entities, list)
+        assert result.count == len(result.entities)
+
+
 # ---------------------------------------------------------------------------
 # Consolidate / Deduplicate
 # ---------------------------------------------------------------------------

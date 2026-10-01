@@ -4,6 +4,7 @@ Dakera SDK Data Models
 Dataclasses representing Dakera data structures.
 """
 
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -2228,31 +2229,41 @@ class BatchStoreMemoryResponse:
 # ============================================================================
 
 
-class EdgeType(str, Enum):
+class EdgeType(LenientStrEnum):
     """Edge type for memory knowledge graph relationships (CE-5).
 
     - ``related_to``: Cosine similarity ≥ 0.85 — two memories are semantically similar.
     - ``shares_entity``: Both memories reference the same named entity (CE-4 tags).
     - ``precedes``: Temporal ordering — one memory was created before the other.
     - ``linked_by``: Explicit user/agent-created link via ``POST /v1/memories/{id}/links``.
+    - ``supersedes``: The newer memory (``source_id``) supersedes the older one.
+
+    A type this SDK does not know yet parses as an unknown member
+    (``is_known == False``) instead of raising.
     """
 
     RELATED_TO = "related_to"
     SHARES_ENTITY = "shares_entity"
     PRECEDES = "precedes"
     LINKED_BY = "linked_by"
+    SUPERSEDES = "supersedes"
 
 
 @dataclass
 class GraphEdge:
-    """A directed edge in the memory knowledge graph."""
+    """A directed edge in the memory knowledge graph.
+
+    The server sends edges as ``{from_id, to_id, edge_type, weight, created_at}``
+    with no edge id; ``source_id`` / ``target_id`` carry ``from_id`` / ``to_id``
+    (the older ``source_id`` / ``target_id`` spellings are accepted too).
+    """
 
     id: str
-    """Unique edge identifier."""
+    """Edge identifier. The server assigns none, so this is ``""`` unless an id is sent."""
     source_id: str
-    """Source memory ID."""
+    """Source memory ID (the server's ``from_id``)."""
     target_id: str
-    """Target memory ID."""
+    """Target memory ID (the server's ``to_id``)."""
     edge_type: EdgeType
     """Relationship type between the two memories."""
     weight: float
@@ -2263,9 +2274,9 @@ class GraphEdge:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphEdge":
         return cls(
-            id=data["id"],
-            source_id=data["source_id"],
-            target_id=data["target_id"],
+            id=data.get("id", ""),
+            source_id=data.get("from_id", data.get("source_id", "")),
+            target_id=data.get("to_id", data.get("target_id", "")),
             edge_type=EdgeType(data["edge_type"]),
             weight=data.get("weight", 0.0),
             created_at=data.get("created_at", 0),
@@ -2284,6 +2295,8 @@ class GraphNode:
     """Memory importance score."""
     depth: int
     """Traversal depth from the root node (root = 0)."""
+    edges: list[GraphEdge] = field(default_factory=list)
+    """Edges through which this node was reached (the server lists them per node)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphNode":
@@ -2292,6 +2305,7 @@ class GraphNode:
             content_preview=data.get("content_preview", ""),
             importance=data.get("importance", 0.0),
             depth=data.get("depth", 0),
+            edges=[GraphEdge.from_dict(e) for e in data.get("edges", [])],
         )
 
 
@@ -2306,15 +2320,56 @@ class MemoryGraph:
     nodes: list[GraphNode]
     """All memory nodes reachable within the requested depth."""
     edges: list[GraphEdge]
-    """All edges connecting the returned nodes."""
+    """All edges connecting the returned nodes. The server lists edges per node;
+    this is their union (de-duplicated), or a top-level ``edges`` list if sent."""
+    node_count: int = 0
+    """Number of nodes the server reports."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryGraph":
+        nodes = [GraphNode.from_dict(n) for n in data.get("nodes", [])]
+        if "edges" in data:
+            edges = [GraphEdge.from_dict(e) for e in data.get("edges", [])]
+        else:
+            edges = []
+            seen: set[tuple[str, str, str]] = set()
+            for node in nodes:
+                for edge in node.edges:
+                    key = (edge.source_id, edge.target_id, str(edge.edge_type.value))
+                    if key not in seen:
+                        seen.add(key)
+                        edges.append(edge)
         return cls(
             root_id=data["root_id"],
             depth=data.get("depth", 1),
-            nodes=[GraphNode.from_dict(n) for n in data.get("nodes", [])],
-            edges=[GraphEdge.from_dict(e) for e in data.get("edges", [])],
+            nodes=nodes,
+            edges=edges,
+            node_count=data.get("node_count", len(nodes)),
+        )
+
+    def only_edge_types(self, types: list[str]) -> "MemoryGraph":
+        """A copy keeping only edges whose type is in *types* (nodes are kept)."""
+        wanted = {t.value if isinstance(t, EdgeType) else str(t) for t in types}
+
+        def keep(edges: list[GraphEdge]) -> list[GraphEdge]:
+            return [e for e in edges if str(e.edge_type.value) in wanted]
+
+        nodes = [
+            GraphNode(
+                memory_id=n.memory_id,
+                content_preview=n.content_preview,
+                importance=n.importance,
+                depth=n.depth,
+                edges=keep(n.edges),
+            )
+            for n in self.nodes
+        ]
+        return MemoryGraph(
+            root_id=self.root_id,
+            depth=self.depth,
+            nodes=nodes,
+            edges=keep(self.edges),
+            node_count=self.node_count,
         )
 
 
@@ -2335,27 +2390,56 @@ class GraphPath:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphPath":
+        # The server answers {from_id, to_id, path, hop_count} and sends no edges.
         edges = [GraphEdge.from_dict(e) for e in data.get("edges", [])]
         path: list[str] = data.get("path", [])
         return cls(
-            source_id=data["source_id"],
-            target_id=data["target_id"],
+            source_id=data.get("from_id", data.get("source_id", "")),
+            target_id=data.get("to_id", data.get("target_id", "")),
             path=path,
-            hops=data.get("hops", max(0, len(path) - 1)),
+            hops=data.get("hop_count", data.get("hops", max(0, len(path) - 1))),
             edges=edges,
         )
 
 
 @dataclass
 class GraphLinkResponse:
-    """Response from ``POST /v1/memories/{id}/links``."""
+    """Response from ``POST /v1/memories/{id}/links``.
+
+    The server answers ``{from_id, to_id, edge_type}``; :attr:`edge` is built
+    from it (explicit links weigh 1.0; ``created_at`` is 0 because the server
+    does not return it).
+    """
 
     edge: GraphEdge
     """The newly created edge."""
+    from_id: str = ""
+    """Source memory ID."""
+    to_id: str = ""
+    """Target memory ID."""
+    edge_type: str = ""
+    """Edge type the server recorded (``linked_by``)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphLinkResponse":
-        return cls(edge=GraphEdge.from_dict(data["edge"]))
+        if "edge" in data:
+            edge = GraphEdge.from_dict(data["edge"])
+        else:
+            edge = GraphEdge.from_dict(
+                {
+                    "from_id": data.get("from_id", ""),
+                    "to_id": data.get("to_id", ""),
+                    "edge_type": data.get("edge_type", EdgeType.LINKED_BY.value),
+                    "weight": data.get("weight", 1.0),
+                    "created_at": data.get("created_at", 0),
+                }
+            )
+        return cls(
+            edge=edge,
+            from_id=edge.source_id,
+            to_id=edge.target_id,
+            edge_type=str(edge.edge_type.value),
+        )
 
 
 @dataclass
@@ -2365,22 +2449,34 @@ class GraphExport:
     agent_id: str
     """Agent whose graph was exported."""
     format: str
-    """Export format: ``json``, ``graphml``, or ``csv``."""
+    """Export format. The server always answers JSON, so this is ``"json"``."""
     data: str
-    """Serialised graph in the requested format."""
+    """The export serialised as a JSON string (``{agent_id, namespace, node_count,
+    edge_count, edges}``)."""
     node_count: int
     """Total number of memory nodes in the export."""
     edge_count: int
     """Total number of edges in the export."""
+    namespace: str = ""
+    """The agent's memory namespace."""
+    edges: list[GraphEdge] = field(default_factory=list)
+    """All graph edges for the agent."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphExport":
+        # The server answers {agent_id, namespace, node_count, edge_count, edges}
+        # and ignores `format`; older shapes carried format/data.
+        raw = data.get("data")
+        if not isinstance(raw, str):
+            raw = json.dumps(data)
         return cls(
             agent_id=data["agent_id"],
-            format=data["format"],
-            data=data["data"],
+            format=data.get("format", "json"),
+            data=raw,
             node_count=data.get("node_count", 0),
             edge_count=data.get("edge_count", 0),
+            namespace=data.get("namespace", ""),
+            edges=[GraphEdge.from_dict(e) for e in data.get("edges", [])],
         )
 
 
@@ -2529,16 +2625,24 @@ class EntityExtractionResponse:
 
 @dataclass
 class MemoryEntitiesResponse:
-    """Response from GET /v1/memory/entities/:id."""
+    """Response from GET /v1/memory/entities/:id.
+
+    The server answers ``{entities, count}``; ``memory_id`` is the id that was
+    requested (filled in by the client).
+    """
 
     memory_id: str
     entities: list[ExtractedEntity]
+    count: int = 0
+    """Number of entities the server reports."""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MemoryEntitiesResponse":
+    def from_dict(cls, data: dict[str, Any], memory_id: str = "") -> "MemoryEntitiesResponse":
+        entities = [ExtractedEntity.from_dict(e) for e in data.get("entities", [])]
         return cls(
-            memory_id=data["memory_id"],
-            entities=[ExtractedEntity.from_dict(e) for e in data.get("entities", [])],
+            memory_id=data.get("memory_id", memory_id),
+            entities=entities,
+            count=data.get("count", len(entities)),
         )
 
 

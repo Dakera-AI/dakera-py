@@ -111,7 +111,8 @@ def main() -> None:
         )
         m2_id = m2.get("id")
 
-        client.memory_link(m1_id, m2_id, "related_to")
+        link = client.memory_link(m1_id, m2_id, agent_id=agent_id, label="background")
+        print(f"Linked {link.from_id} -> {link.to_id} ({link.edge_type})")
 
         graph = client.memory_graph(m1_id, depth=2)
         print(f"Graph nodes: {len(graph.nodes)}, edges: {len(graph.edges)}")

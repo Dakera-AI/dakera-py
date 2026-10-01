@@ -164,6 +164,7 @@ async def main() -> None:
     #   await delegation_helper.link_delegation(
     #       child_id=child_receipt_mem_id,
     #       parent_id=parent_receipt_mem_id,
+    #       agent_id="research-agent",
     #   )
     #   chain = await delegation_helper.get_delegation_chain(
     #       agent_id="research-agent",

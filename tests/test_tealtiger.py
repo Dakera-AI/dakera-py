@@ -563,13 +563,21 @@ class TestDakeraDelegationHelperLink:
         client = _make_client()
         helper = DakeraDelegationHelper(client)
 
-        await helper.link_delegation(child_id="child-mem", parent_id="parent-mem")
+        await helper.link_delegation(child_id="child-mem", parent_id="parent-mem", agent_id="ag-1")
 
+        # The server requires agent_id and records explicit links as linked_by;
+        # the delegation is carried by the label.
         client.memory_link.assert_called_once_with(
             source_id="child-mem",
             target_id="parent-mem",
-            edge_type="delegated_from",
+            agent_id="ag-1",
+            label="delegated_from",
         )
+
+    async def test_link_delegation_requires_agent_id(self) -> None:
+        helper = DakeraDelegationHelper(_make_client())
+        with pytest.raises(TypeError):
+            await helper.link_delegation(child_id="c", parent_id="p")  # type: ignore[call-arg]
 
 
 class TestDakeraDelegationHelperGetChain:
@@ -615,6 +623,8 @@ class TestDakeraDelegationHelperGetChain:
 
         call_kwargs = client.knowledge_query.call_args.kwargs
         assert call_kwargs["max_depth"] <= 5
+        # Queries the edge type the server actually stores for explicit links.
+        assert call_kwargs["edge_type"] == "linked_by"
 
     async def test_no_edges_returns_single_item_chain(self) -> None:
         client = _make_client()

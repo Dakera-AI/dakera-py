@@ -271,7 +271,7 @@ decision_store = DakeraDecisionStore(client)
 
 # Multi-hop delegation chain traversal via memory knowledge graph
 delegation = DakeraDelegationHelper(client)
-await delegation.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id)
+await delegation.link_delegation(child_id=child_mem_id, parent_id=parent_mem_id, agent_id="my-agent")
 chain = await delegation.get_delegation_chain("my-agent", root_id, max_depth=5)
 ```
 

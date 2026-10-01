@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-01
+
+Request and response shapes checked against a live v0.12.0 server (the same contracts as
+v0.11.108). Every fix below was a call that failed or a field that was wrong on both servers.
+
+### Changed (signatures)
+
+- **`memory_link()` (sync and async) takes a required keyword `agent_id`** and an optional
+  `label`. The server's `POST /v1/memories/{id}/links` requires `agent_id`; without it every
+  call failed with `422`, so no working code breaks. `edge_type` is still accepted but not sent:
+  the server records every explicit link as `linked_by`.
+- **`DakeraDelegationHelper.link_delegation()` (TealTiger integration) takes a required keyword
+  `agent_id`.** Links are `linked_by` edges labelled `delegated_from` (the server cannot store a
+  custom edge type, so the old `delegated_from` edges were never created) and
+  `get_delegation_chain()` follows `linked_by` edges.
+- `summarize(dry_run=True)` raises `ValueError` before sending anything: the server has no dry
+  run and always stores the summary memory (`dry_run` was silently ignored). `summarize()` also
+  raises `ValueError` with fewer than two `memory_ids`, and `knowledge_graph()` without
+  `memory_id`; the server answered both with `422`.
+
+### Added
+
+- `tags` on `recall()` and `search_memories()` (sync and async): memories carrying at least one
+  of the tags. The server accepts it; the SDK had no way to send it.
+- `EdgeType.SUPERSEDES` (edges the server creates when a newer memory supersedes an older one);
+  `EdgeType` is now lenient, so a type this SDK does not know parses instead of raising.
+- `GraphNode.edges`, `MemoryGraph.node_count`, `GraphLinkResponse.from_id` / `to_id` /
+  `edge_type`, `GraphExport.namespace` / `edges`, `MemoryEntitiesResponse.count`.
+
+### Fixed
+
+- `update_memory()` (sync and async) sends `agent_id` as a query parameter. `PUT
+  /v1/memory/update/{id}` reads it from the query string, so every update failed with
+  `400 INVALID_REQUEST` (missing field `agent_id`).
+- `AsyncDakeraClient.get_memory()` sends `agent_id` as a query parameter too (the sync client
+  already did); `GET /v1/memory/get/{id}` needs it.
+- Graph edges: the server sends `{from_id, to_id, edge_type, weight, created_at}` with no edge
+  id. `GraphEdge.from_dict()` required `id`, `source_id` and `target_id`, so `memory_graph()`,
+  `knowledge_query()`, `knowledge_export()` and `agent_graph_export()` raised `KeyError` on any
+  graph with edges. `source_id` / `target_id` now carry `from_id` / `to_id`; `id` is `""`.
+- `memory_graph()`: the server lists edges per node; `MemoryGraph.edges` is now their union
+  (it was always empty). `types` is applied client-side (the server ignores it and returns
+  every type).
+- `memory_path()` sent the target as `target`; the server reads `to`, so every call failed with
+  `400`. The answer `{from_id, to_id, path, hop_count}` is parsed into `GraphPath`.
+- `memory_link()` parsed `{"edge": ...}`; the server answers `{from_id, to_id, edge_type}`
+  (`KeyError` after the request). `GraphLinkResponse.edge` is built from it (weight 1.0).
+- `agent_graph_export()` read `format` and `data`; the server answers `{agent_id, namespace,
+  node_count, edge_count, edges}` and ignores `format` (`KeyError`). `GraphExport.data` holds the
+  answer as a JSON string.
+- `memory_entities()`: the server answers `{entities, count}` without `memory_id` (`KeyError`);
+  `memory_id` is now the requested id.
+- Examples: `advanced.py` and `playground/quickstart.py` link with `agent_id`;
+  `knowledge_graph.py` is rewritten against the real API (it called methods with arguments the
+  SDK does not have).
+- Integration tests cover update/get (sync and async), recall with tags, link, graph, path,
+  agent export, knowledge query and memory entities against the real server.
+
 ## [0.13.0] - 2026-10-01
 
 Dakera server **v0.12.0** support. Works against v0.11.108 and v0.12.0 servers: every

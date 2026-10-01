@@ -120,6 +120,8 @@ class TestGetUpdateMemory:
         result = client.get_memory("agent-1", "mem-1")
         assert result["id"] == "mem-1"
         assert result["importance"] == 0.9
+        # The server reads agent_id from the query string.
+        assert "agent_id=agent-1" in mock_responses.calls[0].request.url
 
     def test_get_memory_not_found(self, client, mock_responses):
         """Test getting non-existent memory."""
@@ -147,6 +149,8 @@ class TestGetUpdateMemory:
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["content"] == "updated content"
         assert req_body["memory_type"] == "semantic"
+        # The v0.12.0 server answers 400 (missing field agent_id) without it.
+        assert "agent_id=agent-1" in mock_responses.calls[0].request.url
 
 
 class TestForgetMemory:
