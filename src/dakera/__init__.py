@@ -197,7 +197,7 @@ with contextlib.suppress(ImportError):
 
     _optional_exports += ["DakeraCostStorage", "DakeraDecisionStore", "DakeraDelegationHelper"]
 
-__version__ = "0.13.1"
+__version__ = "0.13.2"
 __all__ = [
     # Clients
     "DakeraClient",

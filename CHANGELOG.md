@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-10-02
+
+### Fixed
+
+- `from dakera import *` no longer raises `AttributeError: module 'dakera' has no attribute 'DakeraCostStorage'` when the optional TealTiger extra is not installed. The TealTiger integration classes are exported only when their import succeeds (#201).
+
 ## [0.13.1] - 2026-10-01
 
 Request and response shapes checked against a live v0.12.0 server (the same contracts as
