@@ -181,12 +181,21 @@ from dakera.models import (
     wire_value,
 )
 
+# Optional integrations: exported only when their extra dependencies are installed,
+# so ``from dakera import *`` never names a symbol that failed to import.
+_optional_exports: list[str] = []
 with contextlib.suppress(ImportError):
     from dakera.integrations.tealtiger import (
-        DakeraCostStorage,
-        DakeraDecisionStore,
-        DakeraDelegationHelper,
+        DakeraCostStorage as DakeraCostStorage,
     )
+    from dakera.integrations.tealtiger import (
+        DakeraDecisionStore as DakeraDecisionStore,
+    )
+    from dakera.integrations.tealtiger import (
+        DakeraDelegationHelper as DakeraDelegationHelper,
+    )
+
+    _optional_exports += ["DakeraCostStorage", "DakeraDecisionStore", "DakeraDelegationHelper"]
 
 __version__ = "0.13.1"
 __all__ = [
@@ -371,8 +380,5 @@ __all__ = [
     # CE-79: filter builder helpers
     "F",
     "FilterDict",
-    # Integrations (optional — requires extra deps)
-    "DakeraCostStorage",
-    "DakeraDecisionStore",
-    "DakeraDelegationHelper",
 ]
+__all__ += _optional_exports
