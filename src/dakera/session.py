@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from dakera.async_client import AsyncDakeraClient
     from dakera.client import DakeraClient
-    from dakera.models import RecalledMemory
+    from dakera.models import RecalledMemory, SessionTouchResponse
 
 
 class ChatMemorySession:
@@ -71,6 +71,7 @@ class ChatMemorySession:
         client: DakeraClient,
         agent_id: str,
         metadata: dict[str, Any] | None = None,
+        idle_timeout_secs: int | None = None,
     ) -> ChatMemorySession:
         """Create a new Dakera session and return a ``ChatMemorySession``.
 
@@ -78,6 +79,9 @@ class ChatMemorySession:
             client: Configured :class:`~dakera.DakeraClient` instance.
             agent_id: Identifier for the agent whose memory to use.
             metadata: Optional metadata attached to the session record.
+            idle_timeout_secs: The session's own idle timeout (server v0.12.2+;
+                ``0`` = never ended for inactivity). Omitted = the server's
+                (default 4 h). Call :meth:`touch` to keep an idle session open.
 
         Returns:
             A ``ChatMemorySession`` bound to the new session.
@@ -91,7 +95,10 @@ class ChatMemorySession:
             finally:
                 session.close()
         """
-        raw = client.start_session(agent_id, metadata=metadata)
+        kwargs: dict[str, Any] = {"metadata": metadata}
+        if idle_timeout_secs is not None:
+            kwargs["idle_timeout_secs"] = idle_timeout_secs
+        raw = client.start_session(agent_id, **kwargs)
         session_id = raw["id"] if isinstance(raw, dict) else raw.id
         return cls(client, agent_id, session_id)
 
@@ -169,6 +176,14 @@ class ChatMemorySession:
         """
         return self._client.end_session(self._session_id, summary=summary)
 
+    def touch(self) -> SessionTouchResponse:
+        """Record activity so the server does not end the session while idle.
+
+        Server v0.12.2+. ``session_state == "ended"`` means the server already
+        ended it (a touch never re-opens a session).
+        """
+        return self._client.touch_session(self._session_id)
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -240,6 +255,7 @@ class AsyncChatMemorySession:
         client: AsyncDakeraClient,
         agent_id: str,
         metadata: dict[str, Any] | None = None,
+        idle_timeout_secs: int | None = None,
     ) -> AsyncChatMemorySession:
         """Create a new Dakera session and return an ``AsyncChatMemorySession``.
 
@@ -247,11 +263,15 @@ class AsyncChatMemorySession:
             client: Configured :class:`~dakera.AsyncDakeraClient` instance.
             agent_id: Identifier for the agent whose memory to use.
             metadata: Optional metadata attached to the session record.
+            idle_timeout_secs: The session's own idle timeout (server v0.12.2+).
 
         Returns:
             An ``AsyncChatMemorySession`` bound to the new session.
         """
-        raw = await client.start_session(agent_id, metadata=metadata)
+        kwargs: dict[str, Any] = {"metadata": metadata}
+        if idle_timeout_secs is not None:
+            kwargs["idle_timeout_secs"] = idle_timeout_secs
+        raw = await client.start_session(agent_id, **kwargs)
         session_id = raw["id"] if isinstance(raw, dict) else raw.id
         return cls(client, agent_id, session_id)
 
@@ -325,6 +345,10 @@ class AsyncChatMemorySession:
             Server response dict.
         """
         return await self._client.end_session(self._session_id, summary=summary)
+
+    async def touch(self) -> SessionTouchResponse:
+        """Record activity so the server does not end the session while idle (v0.12.2+)."""
+        return await self._client.touch_session(self._session_id)
 
     # ------------------------------------------------------------------
     # Properties

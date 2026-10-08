@@ -7,6 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-08
+
+Dakera server **v0.12.2** support (Dakera-AI/dakera#916). Works against v0.12.0, v0.12.1
+and v0.12.2 servers: new request fields are sent only when set, new response fields are
+optional (`None` / `[]` from an older server), and the v0.12.2-only routes answer `404` /
+`405` on an older one. Request and response shapes follow the v0.12.2 server source.
+
+### Added
+
+- **Agents**: `create_agent(agent_id)` (`POST /v1/agents`) → `CreateAgentResponse`
+  (`agent_id`, `namespace`, `created`, `dimension`, `model`). `AgentSummary.unavailable` /
+  `vector_count`.
+- **Keys**: `update_key(key_id, name=, namespaces=, all_namespaces=)` (`PATCH
+  /admin/keys/{id}`) and `update_namespace_key(namespace, key_id, ...)` (`PATCH
+  /v1/namespaces/{ns}/keys/{id}`) → `KeyInfo`; only the fields given are sent and
+  `all_namespaces=True` sends `"namespaces": null` (every namespace). `rotate_key(key_id,
+  grace_secs=)`; the answer's `old_key_id` / `old_key_expires_at` are typed by
+  `RotateKeyResponse`. `whoami()` (`GET /v1/auth/whoami`) → `WhoamiResponse`. `KeyInfo`
+  (`grants_version`, `inert_namespaces`), also on `NamespaceKeyInfo`.
+- **Namespaces**: `NamespaceInfo.kind` (`agent` / `data` / `system`), read from
+  `GET /v1/namespaces/{ns}` and from the `kinds` map of `GET /v1/namespaces`.
+- **Capabilities v2**: `ServerCapabilities.auth` (`AuthCapabilities`), `.naming`
+  (`NamingCapabilities`), `.sessions` (`SessionCapabilities`); `supports_prefix_grants`,
+  `supports_key_update`, `supports_session_touch`.
+- **Sessions**: `start_session(..., idle_timeout_secs=)`; `touch_session(session_id)`
+  (`POST /v1/sessions/{id}/touch`) → `SessionTouchResponse` (`session`, `session_state`,
+  `idle_deadline_at`); `Session` gains `summary`, `memory_count`, `last_activity_at`,
+  `ended_reason`, `idle_since`, `idle_timeout_secs` and reads the server's `id`.
+  `store_memory()` returns the response's `session_state` on the memory dict;
+  `BatchStoreMemoryResponse.ended_sessions`. `update_config(session_idle_timeout_secs=)`.
+  `MemoryEvent.reason` (`session_ended`). `ChatMemorySession.create(...,
+  idle_timeout_secs=)` and `ChatMemorySession.touch()` (sync and async).
+- **Listings**: `agent_memories(..., offset=, include_derived=, content_preview_chars=)`,
+  `session_memories(..., limit=, offset=, content_preview_chars=)`, `wake_up(...,
+  include_derived=)`, `full_knowledge_graph(..., content_preview_chars=)`,
+  `cross_agent_network(..., content_preview_chars=)`; `Memory` and `AgentNetworkNode` gain
+  `content_len` / `content_truncated`.
+- **Derived data**: `derivations_status()` (`GET /admin/derivations/status`) →
+  `DerivationStatus` (with `DerivationHeal`, `DerivationReconciler`) and
+  `drain_derivations(timeout_secs=)` (`POST /admin/derivations/drain`) →
+  `DerivationDrainResponse`.
+- **Additive response fields**: `DeduplicateResponse.duplicates_merged` /
+  `duplicates_skipped_changed`; `CompressResponse` gains the fields the v0.12 server sends
+  (`memories_scanned`, `clusters_found`, `summaries_created`, `originals_deprecated`,
+  `summary_ids`, `deprecated_ids`) and `summaries_skipped` (`CompressSkippedSummary`);
+  `unavailable` (`NamespaceUnavailable`) on `TtlStatsResponse`, `MemoryTypeStatsResponse`
+  and `StorageTierOverview`.
+- Exported: the new models plus `MemoryTypeStatsResponse`, `TtlStatsResponse`,
+  `StorageTierOverview`.
+
+### Changed
+
+- `create_key()` (sync and async) sends `scope` (keyword, default `"read"`) and accepts
+  `namespaces` and `expires_in_days`. The server requires `scope`, so calls without it
+  failed with `422`; `permissions` and `expires_at` are still sent but ignored by the
+  server (deprecated).
+- `create_namespace_key()` sends `scope` (keyword, default `"read"`, required by the server)
+  and accepts `extra_namespaces`.
+
+### Fixed
+
+- `CreateNamespaceKeyResponse`, `ListNamespaceKeysResponse`, `NamespaceKeyInfo` and
+  `NamespaceKeyUsageResponse` no longer raise `KeyError` on the server's answers, which
+  carry no `namespace` field: the requested namespace is filled in.
+- `AsyncDakeraClient.list_namespaces()` parsed each name as an object (`AttributeError`);
+  it now matches the sync client.
+- `AsyncDakeraClient.session_memories()` returns the memories list, like the sync client
+  (it returned the whole response).
+- The route snapshot test (`tests/v0_12_routes.txt`) covers the v0.12.2 router.
+
+### Server behaviour changes to review (v0.12.2)
+
+The SDK does not hide these; see the README section "Behaviour changes you may hit".
+
+- Sessions are authorized by their agent's namespace; `_dakera_sessions` grants are inert;
+  `end_session()` with a Read key is `403`.
+- Sessions end automatically after 4 h without activity by default
+  (`ended_reason: "idle"`); storing into an ended session still succeeds and reports
+  `session_state: "ended"`.
+- Stricter validation (`400` naming the field): key `namespaces` entries, reserved markers
+  (`dakera-curated` tag, `_dakera_*` metadata keys, `mem_s` + 24 hex ids), metadata,
+  `ttl_seconds`, agent ids up to 241 bytes.
+- The memory content limit is counted in UTF-8 bytes (default 100000) and applies to
+  updates and session summaries too.
+- `agent_memories()` and `wake_up()` exclude derived sentence sub-memories unless
+  `include_derived=True`.
+
 ## [0.13.2] - 2026-10-02
 
 ### Fixed

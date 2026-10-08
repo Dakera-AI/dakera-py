@@ -1,8 +1,8 @@
 # ruff: noqa: E501
-"""Every route the SDK calls exists on the v0.12.0 server, and the calls fixed by the
+"""Every route the SDK calls exists on the v0.12.2 server, and the calls fixed by the
 v0.12 route sweep send the bodies the server reads.
 
-``tests/v0_12_routes.txt`` is the v0.12.0 router (``crates/api/src/lib.rs``), one
+``tests/v0_12_routes.txt`` is the v0.12.2 router (``crates/api/src/lib.rs``), one
 ``METHOD /path`` per line with path parameters normalised to ``{}``.
 """
 

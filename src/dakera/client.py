@@ -16,7 +16,14 @@ from urllib.parse import urljoin
 
 import requests
 
-from dakera._util import _attachment_body, _audit_export_response, _memory_job_body
+from dakera._util import (
+    _attachment_body,
+    _audit_export_response,
+    _key_update_body,
+    _listing_params,
+    _memory_job_body,
+    _store_memory_result,
+)
 from dakera.exceptions import (
     AuthorizationError,
     ConnectionError,
@@ -52,9 +59,12 @@ from dakera.models import (
     ConfigureNamespaceResponse,
     # CE-6
     ConsolidationConfig,
+    CreateAgentResponse,
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
+    DerivationDrainResponse,
+    DerivationStatus,
     DistanceMetric,
     Document,
     DocumentInput,
@@ -83,6 +93,7 @@ from dakera.models import (
     ImportJobStatus,
     IndexStats,
     JobAccepted,
+    KeyInfo,
     # KG-2
     KgExportResponse,
     KgPathResponse,
@@ -118,6 +129,7 @@ from dakera.models import (
     RoutingMode,
     SearchResult,
     ServerCapabilities,
+    SessionTouchResponse,
     StalenessConfig,
     StaticCountResponse,
     StorageTierOverview,
@@ -135,6 +147,7 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    WhoamiResponse,
     wire_value,
 )
 
@@ -925,14 +938,8 @@ class DakeraClient:
             List of NamespaceInfo objects
         """
         response = self._request("GET", "/v1/namespaces")
-        namespaces = response.get("namespaces", [])
-        result = []
-        for ns in namespaces:
-            if isinstance(ns, str):
-                result.append(NamespaceInfo(name=ns, vector_count=0))
-            else:
-                result.append(NamespaceInfo.from_dict(ns))
-        return result
+        # Server v0.12.2+ adds a ``kinds`` map (name -> agent/data), set as ``kind``.
+        return NamespaceInfo.list_from_response(response)
 
     def get_namespace(self, namespace: str) -> NamespaceInfo:
         """
@@ -1422,6 +1429,18 @@ class DakeraClient:
                 this agent's namespace (``_dakera_agent_{agent_id}``) with
                 :meth:`upload_attachment`. Server v0.12+, needs
                 ``DAKERA_ATTACHMENTS``.
+
+        Returns:
+            The stored memory. From server v0.12.2, when the memory went into a
+            started session the dict also carries ``session_state``
+            (``"active"`` or ``"ended"``): storing into an ended session still
+            succeeds, so check it if your agent keeps a session open.
+
+        The server limits ``content`` in UTF-8 **bytes** (v0.12.2:
+        ``DAKERA_MAX_MEMORY_CONTENT_BYTES``, default 100000) and refuses reserved
+        markers (the ``dakera-curated`` tag, ``_dakera_*`` metadata keys other
+        than ``_dakera_content_date`` / ``_dakera_lang``, ids ``mem_s`` + 24 hex)
+        with ``400``.
         """
         data: dict[str, Any] = {"content": content, "memory_type": memory_type}
         if importance is not None:
@@ -1444,10 +1463,7 @@ class DakeraClient:
             data["attachment_ref"] = attachment_ref
         data["agent_id"] = agent_id
         response = self._request("POST", "/v1/memory/store", data=data)
-        # Server wraps the memory in {"memory": {...}, "embedding_time_ms": ...}
-        if isinstance(response, dict) and "memory" in response:
-            return response["memory"]
-        return response
+        return _store_memory_result(response)
 
     def recall(
         self,
@@ -1652,7 +1668,9 @@ class DakeraClient:
                 :class:`BatchStoreMemoryItem` (1–1000 items).
 
         Returns:
-            :class:`BatchStoreMemoryResponse` with stored memories and timing.
+            :class:`BatchStoreMemoryResponse` with stored memories and timing;
+            ``ended_sessions`` (server v0.12.2+) lists ended sessions the batch
+            stored into.
 
         Example:
             >>> items = [
@@ -1717,7 +1735,9 @@ class DakeraClient:
             agent_id: The agent whose namespace to compress.
 
         Returns:
-            :class:`CompressResponse` with before/after counts and timing.
+            :class:`CompressResponse`. From server v0.12.2 each summary is
+            validated before it is written; a refused one is listed in
+            ``summaries_skipped`` and the originals of its cluster are kept.
         """
         result = self._request("POST", f"/v1/agents/{agent_id}/compress")
         return CompressResponse.from_dict(result)
@@ -2151,20 +2171,55 @@ class DakeraClient:
         self,
         agent_id: str,
         metadata: dict[str, Any] | None = None,
+        idle_timeout_secs: int | None = None,
     ) -> dict[str, Any]:
-        """Start a new session. Returns the session dict (unwrapped from the server response)."""
+        """Start a new session. Returns the session dict (unwrapped from the server response).
+
+        Sessions are authorized by their agent (server v0.12.2+): the key needs
+        Write on ``_dakera_agent_<agent_id>``, no ``_dakera_sessions`` grant.
+
+        Args:
+            agent_id: The agent the session belongs to.
+            metadata: Optional session metadata.
+            idle_timeout_secs: The session's own idle timeout (server v0.12.2+):
+                the server ends it this long after its last activity. ``0`` =
+                never ended for inactivity; at most 2592000 (30 days). Omitted =
+                the server's timeout (``DAKERA_SESSION_IDLE_TIMEOUT_SECS``,
+                default 4 h). Keep an idle session open with
+                :meth:`touch_session`.
+        """
         data: dict[str, Any] = {"agent_id": agent_id}
         if metadata is not None:
             data["metadata"] = metadata
+        if idle_timeout_secs is not None:
+            data["idle_timeout_secs"] = idle_timeout_secs
         result = self._request("POST", "/v1/sessions/start", data=data)
         return result["session"]
 
     def end_session(self, session_id: str, summary: str | None = None) -> dict[str, Any]:
-        """End a session."""
+        """End a session.
+
+        Server v0.12.2+: needs Write scope (a Read key gets ``403``). Ending a
+        session the server already ended (idle) returns its persisted state
+        (``ended_reason`` / ``summary`` are kept); a ``summary`` above the
+        content limit is a ``400``.
+        """
         data: dict[str, Any] = {}
         if summary is not None:
             data["summary"] = summary
         return self._request("POST", f"/v1/sessions/{session_id}/end", data=data)
+
+    def touch_session(self, session_id: str) -> SessionTouchResponse:
+        """Heartbeat for a session kept open while idle — ``POST /v1/sessions/{id}/touch``.
+
+        Server v0.12.2+. Records activity so the server does not end the session
+        for inactivity. Never re-opens an ended session: check
+        ``session_state`` (``"active"`` / ``"ended"``). Needs Write on the
+        session's agent (a session of another agent is a ``404``, like an
+        unknown one).
+        """
+        result = self._request("POST", f"/v1/sessions/{session_id}/touch")
+        return SessionTouchResponse.from_dict(result or {})
 
     def get_session(self, session_id: str) -> dict[str, Any]:
         """Get session details."""
@@ -2189,9 +2244,28 @@ class DakeraClient:
             params["offset"] = offset
         return self._request("GET", "/v1/sessions", params=params)
 
-    def session_memories(self, session_id: str) -> list[dict[str, Any]]:
-        """Get memories for a session."""
-        result = self._request("GET", f"/v1/sessions/{session_id}/memories")
+    def session_memories(
+        self,
+        session_id: str,
+        limit: int | None = None,
+        offset: int | None = None,
+        content_preview_chars: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get memories for a session.
+
+        Args:
+            session_id: The session.
+            limit: Page size (server default 50, at most 500).
+            offset: Memories to skip.
+            content_preview_chars: Server v0.12.2+: cut each memory's
+                ``content`` to this many characters (1..=10000) and add
+                ``content_len`` / ``content_truncated``. Read a truncated memory
+                in full with :meth:`get_memory` before showing or editing it.
+        """
+        params = _listing_params(
+            {}, limit=limit, offset=offset, content_preview_chars=content_preview_chars
+        )
+        result = self._request("GET", f"/v1/sessions/{session_id}/memories", params=params or None)
         if isinstance(result, dict):
             return result.get("memories", [])
         return result
@@ -2201,21 +2275,61 @@ class DakeraClient:
     # =========================================================================
 
     def list_agents(self) -> list[dict[str, Any]]:
-        """List all agents."""
+        """List all agents.
+
+        Server v0.12.2+: an entry whose namespace could not be counted carries
+        ``unavailable`` (the reason) and zero counts.
+        """
         return self._request("GET", "/v1/agents")
+
+    def create_agent(self, agent_id: str) -> CreateAgentResponse:
+        """Create an agent (its memory namespace) before its first memory — ``POST /v1/agents``.
+
+        Server v0.12.2+. Needs Write on ``_dakera_agent_<agent_id>`` (a key
+        granted ``_dakera_agent_mlx-*`` can create ``mlx-dev``). An existing
+        agent is left untouched and answered with ``created=False``.
+
+        Args:
+            agent_id: ``[A-Za-z0-9][A-Za-z0-9_.-]*``, at most 241 bytes, not
+                starting with ``_dakera_``.
+        """
+        result = self._request("POST", "/v1/agents", data={"agent_id": agent_id})
+        return CreateAgentResponse.from_dict(result or {})
 
     def agent_memories(
         self,
         agent_id: str,
         memory_type: str | None = None,
         limit: int | None = None,
+        offset: int | None = None,
+        include_derived: bool | None = None,
+        content_preview_chars: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Get memories for an agent."""
+        """Get memories for an agent, newest first.
+
+        Args:
+            agent_id: The agent.
+            memory_type: Sent as a query parameter (not applied by v0.12 servers).
+            limit: Page size (server default 50, at most 1000).
+            offset: Memories to skip.
+            include_derived: Server v0.12.2+ lists the agent's memories only;
+                ``True`` also lists the derived sentence sub-memories (the
+                listing before v0.12.2).
+            content_preview_chars: Server v0.12.2+: cut each memory's
+                ``content`` to this many characters (1..=10000) and add
+                ``content_len`` / ``content_truncated``. Read a truncated memory
+                in full with :meth:`get_memory` before showing or editing it.
+        """
         params: dict[str, Any] = {}
         if memory_type is not None:
             params["memory_type"] = memory_type
-        if limit is not None:
-            params["limit"] = limit
+        _listing_params(
+            params,
+            limit=limit,
+            offset=offset,
+            include_derived=include_derived,
+            content_preview_chars=content_preview_chars,
+        )
         return self._request("GET", f"/v1/agents/{agent_id}/memories", params=params)
 
     def agent_stats(self, agent_id: str) -> dict[str, Any]:
@@ -2241,6 +2355,7 @@ class DakeraClient:
         agent_id: str,
         top_n: int = 20,
         min_importance: float = 0.0,
+        include_derived: bool | None = None,
     ) -> WakeUpResponse:
         """Return top-N wake-up context memories for an agent (DAK-1690).
 
@@ -2253,12 +2368,16 @@ class DakeraClient:
             top_n: Maximum number of memories to return (default 20, max 100).
             min_importance: Only return memories with importance ≥ this value
                 (default 0.0).
+            include_derived: Server v0.12.2+ ranks the agent's memories only
+                (``total_available`` counts memories); ``True`` also ranks the
+                derived sentence sub-memories (the behaviour before v0.12.2).
 
         Returns:
             :class:`~dakera.models.WakeUpResponse` with ranked memories and
             ``total_available`` count.
         """
         params: dict[str, Any] = {"top_n": top_n, "min_importance": min_importance}
+        _listing_params(params, include_derived=include_derived)
         result = self._request("GET", f"/v1/agents/{agent_id}/wake-up", params=params)
         return WakeUpResponse.from_dict(result)
 
@@ -2616,8 +2735,14 @@ class DakeraClient:
         min_similarity: float | None = None,
         cluster_threshold: float | None = None,
         max_edges_per_node: int | None = None,
+        content_preview_chars: int | None = None,
     ) -> dict[str, Any]:
-        """Build a full knowledge graph for an agent."""
+        """Build a full knowledge graph for an agent.
+
+        ``content_preview_chars`` (server v0.12.2+, 1..=10000) cuts each node's
+        ``content`` to that many characters; v0.12.2 nodes carry ``content_len``
+        and ``content_truncated`` either way.
+        """
         data: dict[str, Any] = {"agent_id": agent_id}
         if max_nodes is not None:
             data["max_nodes"] = max_nodes
@@ -2627,6 +2752,8 @@ class DakeraClient:
             data["cluster_threshold"] = cluster_threshold
         if max_edges_per_node is not None:
             data["max_edges_per_node"] = max_edges_per_node
+        if content_preview_chars is not None:
+            data["content_preview_chars"] = content_preview_chars
         return self._request("POST", "/v1/knowledge/graph/full", data=data)
 
     def summarize(
@@ -2657,7 +2784,12 @@ class DakeraClient:
         memory_type: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Deduplicate memories."""
+        """Deduplicate memories.
+
+        Server v0.12.2+ adds ``duplicates_skipped_changed`` (duplicates not
+        merged because a record changed between the scan and the write) and
+        caps a merged tag union at 50 tags.
+        """
         data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
         if threshold is not None:
             data["threshold"] = threshold
@@ -2820,6 +2952,10 @@ class DakeraClient:
 
         Requires Read scope — works with read-only API keys, unlike cluster_status.
         The ``state`` field is ``"healthy"`` when storage is accessible, ``"degraded"`` otherwise.
+        Server v0.12.2+: ``unavailable`` (``[{namespace, reason}]``) lists namespaces
+        left out of ``total_vectors``; absent when every namespace answered (as on
+        the other node-wide endpoints: index/TTL/memory-type stats, cluster,
+        shards, storage tiers, analytics overview/storage).
         """
         return self._request("GET", "/v1/ops/stats")
 
@@ -2882,9 +3018,24 @@ class DakeraClient:
         """Get server configuration."""
         return self._request("GET", "/v1/admin/config")
 
-    def update_config(self, config: dict[str, Any]) -> dict[str, Any]:
-        """Update server configuration."""
-        return self._request("PUT", "/v1/admin/config", data=config)
+    def update_config(
+        self,
+        config: dict[str, Any] | None = None,
+        *,
+        session_idle_timeout_secs: int | None = None,
+    ) -> dict[str, Any]:
+        """Update server configuration (``PUT /admin/config``; only the keys sent change).
+
+        Args:
+            config: Settings to change, by name.
+            session_idle_timeout_secs: Server v0.12.2+: the server-wide session
+                idle timeout (``0`` = sessions without their own timeout are never
+                ended; at most 2592000). Persisted as a runtime override.
+        """
+        data: dict[str, Any] = dict(config or {})
+        if session_idle_timeout_secs is not None:
+            data["session_idle_timeout_secs"] = session_idle_timeout_secs
+        return self._request("PUT", "/v1/admin/config", data=data)
 
     def get_quotas(self) -> dict[str, Any]:
         """Get quota settings."""
@@ -3074,13 +3225,34 @@ class DakeraClient:
         name: str,
         permissions: list[str] | None = None,
         expires_at: str | None = None,
+        *,
+        scope: str = "read",
+        namespaces: list[str] | None = None,
+        expires_in_days: int | None = None,
     ) -> dict[str, Any]:
-        """Create a new API key."""
-        data: dict[str, Any] = {"name": name}
+        """Create a new API key (super_admin). The ``key`` in the answer is shown once.
+
+        Args:
+            name: Human-readable name.
+            permissions: Deprecated, ignored by the server (use ``scope``).
+            expires_at: Deprecated, ignored by the server (use ``expires_in_days``).
+            scope: ``read``, ``write``, ``admin`` or ``super_admin`` (the server
+                requires it; default ``read``).
+            namespaces: Namespaces the key reaches: exact names or, from server
+                v0.12.2, ``p*`` prefix patterns (``["_dakera_agent_mlx-*"]`` lets
+                a key create and use its own agents). Omitted = every namespace;
+                ``[]`` = none. Invalid entries are a ``400``.
+            expires_in_days: Expiry in days from now.
+        """
+        data: dict[str, Any] = {"name": name, "scope": scope}
         if permissions is not None:
             data["permissions"] = permissions
         if expires_at is not None:
             data["expires_at"] = expires_at
+        if namespaces is not None:
+            data["namespaces"] = list(namespaces)
+        if expires_in_days is not None:
+            data["expires_in_days"] = expires_in_days
         return self._request("POST", "/admin/keys", data=data)
 
     def list_keys(self) -> list[dict[str, Any]]:
@@ -3099,9 +3271,58 @@ class DakeraClient:
         """Deactivate an API key."""
         return self._request("POST", f"/admin/keys/{key_id}/deactivate")
 
-    def rotate_key(self, key_id: str) -> dict[str, Any]:
-        """Rotate an API key."""
-        return self._request("POST", f"/admin/keys/{key_id}/rotate")
+    def update_key(
+        self,
+        key_id: str,
+        *,
+        name: str | None = None,
+        namespaces: list[str] | None = None,
+        all_namespaces: bool = False,
+    ) -> KeyInfo:
+        """Rename a key or replace its namespaces — ``PATCH /admin/keys/{key_id}``.
+
+        Server v0.12.2+, unrestricted super_admin. Only the fields given are
+        sent. ``namespaces`` replaces the list (``[]`` = no namespace);
+        ``all_namespaces=True`` grants every namespace (sends ``null``). Saving
+        the namespaces activates prefix patterns on a pre-v0.12.2 key. The scope
+        cannot be changed. The root key is a ``400``, an inactive key ``409``.
+
+        Raises:
+            ValueError: nothing to change, or both ``namespaces`` and
+                ``all_namespaces``.
+        """
+        body = _key_update_body(name, namespaces, all_namespaces)
+        result = self._request("PATCH", f"/admin/keys/{key_id}", data=body)
+        return KeyInfo.from_dict(result or {})
+
+    def rotate_key(self, key_id: str, grace_secs: int | None = None) -> dict[str, Any]:
+        """Rotate an API key: a new key with the same name, scope and namespaces.
+
+        Args:
+            key_id: The key to rotate.
+            grace_secs: Server v0.12.2+: seconds the old key keeps working (up
+                to 604800 = 7 days). Omitted or ``0``: the old key is
+                deactivated at once.
+
+        Returns:
+            ``{"new_key", "key_id", "warning"}``; ``key_id`` is the NEW key's
+            id. Server v0.12.2+ adds ``old_key_id`` and ``old_key_expires_at``
+            (``None`` without a grace period). Parse with
+            :meth:`RotateKeyResponse.from_dict <dakera.RotateKeyResponse.from_dict>`
+            for a typed view.
+        """
+        data = {"grace_secs": grace_secs} if grace_secs is not None else None
+        return self._request("POST", f"/admin/keys/{key_id}/rotate", data=data)
+
+    def whoami(self) -> WhoamiResponse:
+        """The key this client authenticates with, as the server reads it — ``GET /v1/auth/whoami``.
+
+        Server v0.12.2+; any valid key, no scope needed. With authentication
+        off the server answers an unrestricted identity with
+        ``auth_enabled=False``.
+        """
+        result = self._request("GET", "/v1/auth/whoami")
+        return WhoamiResponse.from_dict(result or {})
 
     def key_usage(self, key_id: str) -> dict[str, Any]:
         """Get usage statistics for an API key."""
@@ -3282,6 +3503,7 @@ class DakeraClient:
         max_nodes_per_agent: int = 50,
         min_importance: float = 0.0,
         max_cross_edges: int = 200,
+        content_preview_chars: int | None = None,
     ) -> CrossAgentNetworkResponse:
         """Build the cross-agent memory similarity network.
 
@@ -3300,6 +3522,9 @@ class DakeraClient:
                 included (0–1, default 0.0).
             max_cross_edges: Maximum number of cross-agent edges to return
                 (default 200).
+            content_preview_chars: Server v0.12.2+: cut each node's ``content``
+                to this many characters (1..=10000); nodes carry ``content_len``
+                and ``content_truncated``.
 
         Returns:
             :class:`~dakera.models.CrossAgentNetworkResponse` with ``agents``,
@@ -3319,6 +3544,8 @@ class DakeraClient:
         }
         if agent_ids is not None:
             payload["agent_ids"] = agent_ids
+        if content_preview_chars is not None:
+            payload["content_preview_chars"] = content_preview_chars
 
         data = self._request("POST", "/v1/knowledge/network/cross-agent", data=payload)
         return CrossAgentNetworkResponse.from_dict(data)
@@ -3332,6 +3559,9 @@ class DakeraClient:
         namespace: str,
         name: str,
         expires_in_days: int | None = None,
+        *,
+        scope: str = "read",
+        extra_namespaces: list[str] | None = None,
     ) -> CreateNamespaceKeyResponse:
         """Create a namespace-scoped API key (SEC-1).
 
@@ -3341,15 +3571,22 @@ class DakeraClient:
             namespace: The namespace to scope this key to.
             name: Human-readable label for the key.
             expires_in_days: Optional expiry in days from now.
+            scope: ``read``, ``write`` or ``admin`` (the server requires it;
+                default ``read``).
+            extra_namespaces: More namespaces the key reaches; from server
+                v0.12.2 they may be ``p*`` patterns and must be contained in the
+                caller's own grants.
 
         Returns:
             :class:`CreateNamespaceKeyResponse` containing the raw API key.
         """
-        data: dict[str, Any] = {"name": name}
+        data: dict[str, Any] = {"name": name, "scope": scope}
         if expires_in_days is not None:
             data["expires_in_days"] = expires_in_days
+        if extra_namespaces is not None:
+            data["extra_namespaces"] = list(extra_namespaces)
         result = self._request("POST", f"/v1/namespaces/{namespace}/keys", data=data)
-        return CreateNamespaceKeyResponse.from_dict(result)
+        return CreateNamespaceKeyResponse.from_dict(result, namespace=namespace)
 
     def list_namespace_keys(self, namespace: str) -> ListNamespaceKeysResponse:
         """List all API keys scoped to a namespace (SEC-1).
@@ -3361,7 +3598,7 @@ class DakeraClient:
             :class:`ListNamespaceKeysResponse` with key metadata (no secrets).
         """
         result = self._request("GET", f"/v1/namespaces/{namespace}/keys")
-        return ListNamespaceKeysResponse.from_dict(result)
+        return ListNamespaceKeysResponse.from_dict(result, namespace=namespace)
 
     def delete_namespace_key(self, namespace: str, key_id: str) -> dict[str, Any]:
         """Revoke a namespace-scoped API key (SEC-1).
@@ -3375,6 +3612,27 @@ class DakeraClient:
         """
         return self._request("DELETE", f"/v1/namespaces/{namespace}/keys/{key_id}")
 
+    def update_namespace_key(
+        self,
+        namespace: str,
+        key_id: str,
+        *,
+        name: str | None = None,
+        namespaces: list[str] | None = None,
+        all_namespaces: bool = False,
+    ) -> KeyInfo:
+        """Rename or re-grant a key as a namespace admin — ``PATCH /v1/namespaces/{ns}/keys/{id}``.
+
+        Server v0.12.2+. Same body and answer as :meth:`update_key`, checked by
+        containment: every new grant must be within the caller's own grants
+        (a ``team-*`` admin can grant ``team-a*`` but never ``t*``); otherwise
+        ``403``. ``all_namespaces=True`` needs an unrestricted caller. A key the
+        caller cannot manage is a ``404``.
+        """
+        body = _key_update_body(name, namespaces, all_namespaces)
+        result = self._request("PATCH", f"/v1/namespaces/{namespace}/keys/{key_id}", data=body)
+        return KeyInfo.from_dict(result or {})
+
     def get_namespace_key_usage(self, namespace: str, key_id: str) -> NamespaceKeyUsageResponse:
         """Get usage statistics for a namespace-scoped API key (SEC-1).
 
@@ -3386,7 +3644,7 @@ class DakeraClient:
             :class:`NamespaceKeyUsageResponse` with request counts and latency.
         """
         result = self._request("GET", f"/v1/namespaces/{namespace}/keys/{key_id}/usage")
-        return NamespaceKeyUsageResponse.from_dict(result)
+        return NamespaceKeyUsageResponse.from_dict(result, namespace=namespace)
 
     # =========================================================================
     # DX-1: Memory Import / Export
@@ -4110,6 +4368,29 @@ class DakeraClient:
         """
         resp = self._request("GET", "/v1/admin/reembed/static-count")
         return StaticCountResponse.from_dict(resp)
+
+    def derivations_status(self) -> DerivationStatus:
+        """``GET /admin/derivations/status`` — derived data owed across agent namespaces.
+
+        Server v0.12.2+, global admin. Counts sentence sub-memories, full-text
+        entries and graph edges still owed; ``settled`` when nothing is owed or
+        in flight.
+        """
+        resp = self._request("GET", "/v1/admin/derivations/status")
+        return DerivationStatus.from_dict(resp or {})
+
+    def drain_derivations(self, timeout_secs: int | None = None) -> DerivationDrainResponse:
+        """``POST /admin/derivations/drain`` — settle all derived data now, on this node.
+
+        Server v0.12.2+, global admin. Runs the one-time heal and every agent
+        namespace's reconciliation until nothing is owed or ``timeout_secs``
+        (server default 600, capped below the request timeout). A drain already
+        running is a ``409`` (:class:`~dakera.ConflictError`). Bench harnesses
+        call it after :meth:`drain_reembed`.
+        """
+        body = {"timeout_secs": timeout_secs} if timeout_secs is not None else None
+        resp = self._request("POST", "/v1/admin/derivations/drain", data=body)
+        return DerivationDrainResponse.from_dict(resp or {})
 
     # =========================================================================
     # Context Manager Support
