@@ -56,6 +56,7 @@ from dakera.models import (
     AuditEvent,
     AuditExportResponse,
     AuditListResponse,
+    AuthCapabilities,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchMemoryFilter,
@@ -68,16 +69,22 @@ from dakera.models import (
     BlockDType,
     # CE-12
     CompressResponse,
+    CompressSkippedSummary,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
     ConsolidateResponse,
     # CE-6
     ConsolidationConfig,
     ConsolidationLogEntry,
+    CreateAgentResponse,
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
     DeduplicateResponse,
+    DerivationDrainResponse,
+    DerivationHeal,
+    DerivationReconciler,
+    DerivationStatus,
     DistanceMetric,
     Document,
     EdgeType,
@@ -112,6 +119,7 @@ from dakera.models import (
     IndexKind,
     IndexStats,
     JobAccepted,
+    KeyInfo,
     # KG-2
     KgExportResponse,
     KgPathResponse,
@@ -133,11 +141,14 @@ from dakera.models import (
     MemoryImportResponse,
     # COG-1
     MemoryPolicy,
+    MemoryTypeStatsResponse,
     ModelCapability,
     NamespaceInfo,
     NamespaceKeyInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
+    NamespaceUnavailable,
+    NamingCapabilities,
     OdeEntity,
     OpStatus,
     QueryResult,
@@ -157,6 +168,7 @@ from dakera.models import (
     # SEC-3
     RotateEncryptionKeyRequest,
     RotateEncryptionKeyResponse,
+    RotateKeyResponse,
     # CE-10
     RoutingMode,
     ScoringCapabilities,
@@ -164,11 +176,15 @@ from dakera.models import (
     SearchResult,
     ServerCapabilities,
     Session,
+    SessionCapabilities,
+    SessionTouchResponse,
     StalenessConfig,
+    StorageTierOverview,
     StoreMemoryRequest,
     SummarizeResponse,
     TifScore,
     TranscriptionCapabilities,
+    TtlStatsResponse,
     Vector,
     VectorMutationOp,
     VisionCapabilities,
@@ -177,6 +193,7 @@ from dakera.models import (
     WarmCacheResponse,
     WarmingPriority,
     WarmingTargetTier,
+    WhoamiResponse,
     parse_accepted_values,
     wire_value,
 )
@@ -197,7 +214,7 @@ with contextlib.suppress(ImportError):
 
     _optional_exports += ["DakeraCostStorage", "DakeraDecisionStore", "DakeraDelegationHelper"]
 
-__version__ = "0.13.2"
+__version__ = "0.14.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -380,5 +397,23 @@ __all__ = [
     # CE-79: filter builder helpers
     "F",
     "FilterDict",
+    # Server v0.12.2: agents, keys, whoami, sessions lifecycle, derived data
+    "CreateAgentResponse",
+    "KeyInfo",
+    "RotateKeyResponse",
+    "WhoamiResponse",
+    "AuthCapabilities",
+    "NamingCapabilities",
+    "SessionCapabilities",
+    "SessionTouchResponse",
+    "CompressSkippedSummary",
+    "NamespaceUnavailable",
+    "DerivationStatus",
+    "DerivationHeal",
+    "DerivationReconciler",
+    "DerivationDrainResponse",
+    "MemoryTypeStatsResponse",
+    "TtlStatsResponse",
+    "StorageTierOverview",
 ]
 __all__ += _optional_exports

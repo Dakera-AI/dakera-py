@@ -148,7 +148,98 @@ asyncio.run(main())
 - **Typed Models** — full type annotations with strict mypy, PEP 561 `py.typed` marker
 - **Retry & Rate Limiting** — built-in exponential backoff, `Retry-After` honoured on `503`/`429`, and rate-limit header tracking
 - **Attachments & Records** — upload audio/images, transcribe or index them into memories, store multi-representation records (server v0.12+)
+- **Agents, Keys & Session Lifecycle** — create agents, edit keys and grant prefix patterns, rotate with a grace period, `whoami`, session idle timeouts and `touch` (server v0.12.2+)
 - **Filter DSL** — `F.eq()`, `F.gt()`, `F.contains()` typed filter builder
+
+---
+
+## What's new for Dakera server v0.12.2
+
+Version 0.14.0 of this SDK adds support for Dakera server **v0.12.2** and stays
+**compatible with v0.12.0 and v0.12.1 servers**: every new request field is sent
+only when you set it, and every new response field is optional (`None` / `[]`
+from an older server). The v0.12.2-only routes answer `404` / `405` on an older
+server.
+
+- **Agents** — `create_agent(agent_id)` (`POST /v1/agents`) creates an agent's
+  memory namespace before its first memory (`created=False` for an existing one).
+- **Keys** — `update_key()` / `update_namespace_key()` rename a key or replace its
+  `namespaces` (`all_namespaces=True` grants every namespace); `rotate_key(key_id,
+  grace_secs=N)` keeps the old key working up to 7 days (`old_key_id`,
+  `old_key_expires_at` in the answer; `RotateKeyResponse.from_dict()` types it);
+  `whoami()` (`GET /v1/auth/whoami`); `KeyInfo.grants_version` /
+  `inert_namespaces`; `create_key()` sends `scope` (default `read`),
+  `namespaces` (exact names or `p*` prefix patterns such as
+  `["_dakera_agent_mlx-*"]`) and `expires_in_days`.
+- **Sessions** — `start_session(..., idle_timeout_secs=N)`, `touch_session()`
+  (`SessionTouchResponse`: `session_state`, `idle_deadline_at`), and the session
+  fields `last_activity_at`, `ended_reason` (`client` | `idle`), `idle_since`,
+  `idle_timeout_secs` (`Session.from_dict()` types them). `store_memory()`
+  returns `session_state` when the memory went into a session;
+  `BatchStoreMemoryResponse.ended_sessions` lists ended sessions a batch stored
+  into. `update_config(session_idle_timeout_secs=N)` sets the server-wide timeout.
+  `ChatMemorySession.create(..., idle_timeout_secs=N)` and `.touch()`.
+- **Listings** — `agent_memories(..., include_derived=, content_preview_chars=,
+  offset=)`, `session_memories(..., content_preview_chars=, limit=, offset=)`,
+  `wake_up(..., include_derived=)`, and `content_preview_chars` on
+  `full_knowledge_graph()` / `cross_agent_network()`. With a preview each memory
+  or node carries `content_len` and `content_truncated`; read a truncated memory
+  in full with `get_memory()` before showing or editing it.
+- **Derived data** — `derivations_status()` and `drain_derivations(timeout_secs=)`
+  (`GET /admin/derivations/status`, `POST /admin/derivations/drain`; a running
+  drain is a `ConflictError`).
+- **Capabilities v2** — `capabilities().auth`, `.naming`, `.sessions`;
+  `NamespaceInfo.kind` (`agent` / `data` / `system`).
+- **Additive fields** — `duplicates_skipped_changed` (deduplicate),
+  `CompressResponse.summaries_skipped`, `unavailable` on node-wide endpoints
+  (`NamespaceUnavailable` on `ttl_stats()`, `memory_type_stats()`,
+  `storage_tier_overview()`; passed through on the dict-returning ones such as
+  `ops_stats()`), `unavailable` on `list_agents()` entries, `MemoryEvent.reason`.
+
+### Behaviour changes you may hit with a v0.12.2 server
+
+These are server changes; the SDK does not hide them.
+
+- **Sessions are authorized by their agent.** A key needs Read/Write on
+  `_dakera_agent_<agent_id>`; a `_dakera_sessions` grant is no longer needed and
+  is reported in `inert_namespaces`. A key without grants lists no sessions.
+  `end_session()` with a Read key is a `403`.
+- **Sessions end automatically after 4 h without activity** by default
+  (`DAKERA_SESSION_IDLE_TIMEOUT_SECS`), with `ended_reason: "idle"`. Activity is a
+  memory stored / updated with the session, a session-scoped recall or search, or
+  `touch_session()`. Storing into an ended session still succeeds: check
+  `session_state` / `ended_sessions`. On upgrade, sessions already idle longer
+  than the timeout are closed on the first passes.
+- **Stricter validation (`400`, the message names the field).** Invalid key
+  `namespaces` entries; reserved markers (the `dakera-curated` tag, `_dakera_*`
+  metadata keys other than `_dakera_content_date` / `_dakera_lang`, ids
+  `mem_s` + 24 hex characters); metadata over 100 fields; `ttl_seconds` over 100
+  years; agent ids over 241 bytes; `_dakera_embedding_models` is reserved.
+- **The memory content limit is in UTF-8 bytes** (default 100000,
+  `DAKERA_MAX_MEMORY_CONTENT_BYTES`), not characters. It now also applies to
+  `update_memory()` (a memory stored above the limit may only be updated to
+  content no larger than it is) and to the `end_session()` summary.
+- **Listings exclude derived records by default.** `agent_memories()` and
+  `wake_up()` no longer return the derived sentence sub-memories; pass
+  `include_derived=True` for the previous listing.
+- **Legacy `foo*` key entries stay inert** until the key's `namespaces` are saved
+  again (`update_key(..., namespaces=[...])`); `grants_version` is `0` for such keys.
+
+```python
+from dakera import DakeraClient
+
+client = DakeraClient("http://localhost:3000", api_key="your-key")
+
+client.create_agent("mlx-dev")
+session = client.start_session("mlx-dev", idle_timeout_secs=2 * 3600)
+stored = client.store_memory("mlx-dev", "User prefers dark mode", session_id=session["id"])
+if stored.get("session_state") == "ended":
+    session = client.start_session("mlx-dev")
+
+client.touch_session(session["id"])  # keep an idle session open
+page = client.agent_memories("mlx-dev", limit=50, content_preview_chars=200)
+print(client.whoami().scope)
+```
 
 ---
 

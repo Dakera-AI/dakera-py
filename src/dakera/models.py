@@ -400,6 +400,10 @@ class NamespaceInfo:
     created_at: str | None = None
     updated_at: str | None = None
     metadata: dict[str, Any] | None = None
+    kind: str | None = None
+    """What the namespace is (server v0.12.2+): ``"agent"`` (an agent's memory
+    namespace), ``"data"`` (a client namespace) or ``"system"`` (server-internal,
+    admin listings only). ``None`` from older servers."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "NamespaceInfo":
@@ -412,7 +416,26 @@ class NamespaceInfo:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             metadata=data.get("metadata"),
+            kind=data.get("kind"),
         )
+
+    @classmethod
+    def list_from_response(cls, data: Any) -> list["NamespaceInfo"]:
+        """Parse ``GET /v1/namespaces``: names (with the v0.12.2 ``kinds`` map) or objects."""
+        if not isinstance(data, dict):
+            return []
+        kinds = data.get("kinds")
+        kinds = kinds if isinstance(kinds, dict) else {}
+        out: list[NamespaceInfo] = []
+        for ns in data.get("namespaces", []):
+            if isinstance(ns, str):
+                out.append(cls(name=ns, vector_count=0, kind=kinds.get(ns)))
+            elif isinstance(ns, dict):
+                info = cls.from_dict(ns)
+                if info.kind is None:
+                    info.kind = kinds.get(info.name)
+                out.append(info)
+        return out
 
 
 @dataclass
@@ -821,6 +844,108 @@ class VisionCapabilities:
         )
 
 
+def _opt_int(value: Any) -> int | None:
+    """``int(value)``, or ``None`` when absent / not a number."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass
+class AuthCapabilities:
+    """Key and grant features (``capabilities.auth``, server v0.12.2+).
+
+    All ``False`` / ``0`` when the server predates the block.
+    """
+
+    prefix_patterns: bool = False
+    """A key's ``namespaces`` may hold ``p*`` prefix patterns."""
+    sessions_by_agent: bool = False
+    """Sessions are authorized by their agent's namespace alone (no ``_dakera_sessions`` grant)."""
+    key_update: bool = False
+    """``PATCH /admin/keys/{id}`` and ``PATCH /v1/namespaces/{ns}/keys/{id}`` exist."""
+    rotation_grace_max_secs: int = 0
+    """Longest ``grace_secs`` a key rotation accepts."""
+    max_grants: int = 0
+    """Most entries a key's ``namespaces`` may hold."""
+    max_grant_len: int = 0
+    """Longest grant entry, in bytes."""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AuthCapabilities":
+        return cls(
+            prefix_patterns=bool(data.get("prefix_patterns", False)),
+            sessions_by_agent=bool(data.get("sessions_by_agent", False)),
+            key_update=bool(data.get("key_update", False)),
+            rotation_grace_max_secs=int(data.get("rotation_grace_max_secs", 0) or 0),
+            max_grants=int(data.get("max_grants", 0) or 0),
+            max_grant_len=int(data.get("max_grant_len", 0) or 0),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class NamingCapabilities:
+    """Identifier rules (``capabilities.naming``, server v0.12.2+)."""
+
+    agent_id_pattern: str = ""
+    agent_id_max_bytes: int = 0
+    agent_namespace_prefix: str = ""
+    agent_namespace_max_bytes: int = 0
+    namespace_pattern: str = ""
+    namespace_max_bytes: int = 0
+    reserved_prefixes: list[str] = field(default_factory=list)
+    internal_namespaces: list[str] = field(default_factory=list)
+    internal_prefixes: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NamingCapabilities":
+        return cls(
+            agent_id_pattern=str(data.get("agent_id_pattern", "")),
+            agent_id_max_bytes=int(data.get("agent_id_max_bytes", 0) or 0),
+            agent_namespace_prefix=str(data.get("agent_namespace_prefix", "")),
+            agent_namespace_max_bytes=int(data.get("agent_namespace_max_bytes", 0) or 0),
+            namespace_pattern=str(data.get("namespace_pattern", "")),
+            namespace_max_bytes=int(data.get("namespace_max_bytes", 0) or 0),
+            reserved_prefixes=_str_list(data.get("reserved_prefixes")),
+            internal_namespaces=_str_list(data.get("internal_namespaces")),
+            internal_prefixes=_str_list(data.get("internal_prefixes")),
+            raw=dict(data),
+        )
+
+
+@dataclass
+class SessionCapabilities:
+    """Session lifecycle (``capabilities.sessions``, server v0.12.2+)."""
+
+    idle_timeout_secs: int | None = None
+    """The live server-wide idle timeout (``0`` = sessions without their own
+    timeout are never ended for inactivity). ``None`` when the server predates
+    automatic session ends."""
+    max_idle_timeout_secs: int | None = None
+    """Largest ``idle_timeout_secs`` a session start accepts."""
+    touch: bool = False
+    """``POST /v1/sessions/{id}/touch`` exists."""
+    ended_reason: bool = False
+    """Sessions carry ``ended_reason`` / ``idle_since`` / ``last_activity_at``."""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SessionCapabilities":
+        return cls(
+            idle_timeout_secs=_opt_int(data.get("idle_timeout_secs")),
+            max_idle_timeout_secs=_opt_int(data.get("max_idle_timeout_secs")),
+            touch=bool(data.get("touch", False)),
+            ended_reason=bool(data.get("ended_reason", False)),
+            raw=dict(data),
+        )
+
+
 @dataclass
 class ServerCapabilities:
     """What the connected server can do — ``GET /v1/capabilities``.
@@ -859,6 +984,12 @@ class ServerCapabilities:
     unreadable_records: int = 0
     """Records the server skipped because a newer binary wrote them."""
     late_interaction_stats: dict[str, Any] = field(default_factory=dict)
+    auth: AuthCapabilities = field(default_factory=AuthCapabilities)
+    """Key grants, key edits and rotation grace (``capabilities_version`` 2, v0.12.2)."""
+    naming: NamingCapabilities = field(default_factory=NamingCapabilities)
+    """Agent id and namespace rules (``capabilities_version`` 2, v0.12.2)."""
+    sessions: SessionCapabilities = field(default_factory=SessionCapabilities)
+    """Session idle timeout, touch and ``ended_reason`` (v0.12.2)."""
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -892,10 +1023,28 @@ class ServerCapabilities:
             vision=VisionCapabilities.from_dict(_dict(data.get("vision"))),
             unreadable_records=int(data.get("unreadable_records", 0) or 0),
             late_interaction_stats=_dict(data.get("late_interaction_stats")),
+            auth=AuthCapabilities.from_dict(_dict(data.get("auth"))),
+            naming=NamingCapabilities.from_dict(_dict(data.get("naming"))),
+            sessions=SessionCapabilities.from_dict(_dict(data.get("sessions"))),
             raw=dict(data),
         )
 
     # -- discovery helpers ----------------------------------------------------
+
+    @property
+    def supports_prefix_grants(self) -> bool:
+        """Whether key ``namespaces`` may hold ``p*`` prefix patterns (v0.12.2+)."""
+        return self.auth.prefix_patterns
+
+    @property
+    def supports_key_update(self) -> bool:
+        """Whether keys can be renamed / re-granted with ``PATCH`` (v0.12.2+)."""
+        return self.auth.key_update
+
+    @property
+    def supports_session_touch(self) -> bool:
+        """Whether ``POST /v1/sessions/{id}/touch`` exists (v0.12.2+)."""
+        return self.sessions.touch
 
     @property
     def model_names(self) -> list[str]:
@@ -1183,6 +1332,12 @@ class Memory:
     created_at: str | None = None
     updated_at: str | None = None
     access_count: int | None = None
+    content_len: int | None = None
+    """Length of the full content in characters, present when the listing was
+    asked for a preview (``content_preview_chars``, server v0.12.2+)."""
+    content_truncated: bool | None = None
+    """``True`` when ``content`` is a preview cut to ``content_preview_chars``:
+    read the whole memory with ``get_memory()`` before showing or editing it."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Memory":
@@ -1195,6 +1350,8 @@ class Memory:
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             access_count=data.get("access_count"),
+            content_len=data.get("content_len"),
+            content_truncated=data.get("content_truncated"),
         )
 
 
@@ -1309,23 +1466,78 @@ class ConsolidateResponse:
 
 @dataclass
 class Session:
-    """A session."""
+    """A session, as every session route returns it.
+
+    The server names the id ``id``; it is exposed as :attr:`session_id`.
+    Times are unix seconds.  The lifecycle fields (``last_activity_at``,
+    ``ended_reason``, ``idle_since``, ``idle_timeout_secs``) are server
+    v0.12.2+ and ``None`` from older servers.
+    """
 
     session_id: str
     agent_id: str
-    started_at: str | None = None
-    ended_at: str | None = None
+    started_at: int | str | None = None
+    ended_at: int | str | None = None
     metadata: dict[str, Any] | None = None
+    summary: str | None = None
+    memory_count: int | None = None
+    last_activity_at: int | None = None
+    """The last activity the server knows of (a memory stored, updated or
+    recalled with the session, or a touch)."""
+    ended_reason: str | None = None
+    """``"client"`` (ended with ``end_session``) or ``"idle"`` (ended by the
+    server after its idle timeout). ``None`` while the session is open."""
+    idle_since: int | None = None
+    """For ``ended_reason == "idle"``: the last activity it was idle since."""
+    idle_timeout_secs: int | None = None
+    """The session's own idle timeout, when it set one at start (``0`` = never
+    ended for inactivity). ``None`` = the server's timeout applies."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Session":
         return cls(
-            session_id=data["session_id"],
-            agent_id=data["agent_id"],
+            session_id=data.get("session_id") or data.get("id", ""),
+            agent_id=data.get("agent_id", ""),
             started_at=data.get("started_at"),
             ended_at=data.get("ended_at"),
             metadata=data.get("metadata"),
+            summary=data.get("summary"),
+            memory_count=data.get("memory_count"),
+            last_activity_at=data.get("last_activity_at"),
+            ended_reason=data.get("ended_reason"),
+            idle_since=data.get("idle_since"),
+            idle_timeout_secs=data.get("idle_timeout_secs"),
         )
+
+    @property
+    def is_ended(self) -> bool:
+        """Whether the session has ended (by the client or the server)."""
+        return bool(self.ended_at) or self.ended_reason is not None
+
+
+@dataclass
+class SessionTouchResponse:
+    """Response from ``POST /v1/sessions/{id}/touch`` (server v0.12.2+)."""
+
+    session: Session
+    """The session; ``last_activity_at`` is raised to now when it is open."""
+    session_state: str
+    """``"active"``, or ``"ended"`` — a touch never re-opens an ended session."""
+    idle_deadline_at: int | None = None
+    """When the server ends the session if nothing else happens (unix seconds);
+    ``None`` when it never times out or has ended."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SessionTouchResponse":
+        return cls(
+            session=Session.from_dict(_dict(data.get("session"))),
+            session_state=str(data.get("session_state", "")),
+            idle_deadline_at=data.get("idle_deadline_at"),
+        )
+
+    @property
+    def is_active(self) -> bool:
+        return self.session_state == "active"
 
 
 # ===========================================================================
@@ -1341,6 +1553,10 @@ class AgentSummary:
     memory_count: int
     session_count: int
     active_sessions: int
+    vector_count: int | None = None
+    unavailable: str | None = None
+    """Why the agent's namespace could not be counted (server v0.12.2+); its
+    counts are then 0. ``None`` when it answered."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentSummary":
@@ -1349,6 +1565,33 @@ class AgentSummary:
             memory_count=data.get("memory_count", 0),
             session_count=data.get("session_count", 0),
             active_sessions=data.get("active_sessions", 0),
+            vector_count=data.get("vector_count"),
+            unavailable=data.get("unavailable"),
+        )
+
+
+@dataclass
+class CreateAgentResponse:
+    """Response from ``POST /v1/agents`` (server v0.12.2+)."""
+
+    agent_id: str
+    namespace: str
+    """The agent's memory namespace (``_dakera_agent_<agent_id>``)."""
+    created: bool
+    """``False`` when the agent already existed (it is left untouched)."""
+    dimension: int | None = None
+    """Vector dimension of the namespace (``None`` if the server cannot read it)."""
+    model: str | None = None
+    """The embedding model the agent's memories are embedded with."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CreateAgentResponse":
+        return cls(
+            agent_id=str(data.get("agent_id", "")),
+            namespace=str(data.get("namespace", "")),
+            created=bool(data.get("created", False)),
+            dimension=data.get("dimension"),
+            model=data.get("model"),
         )
 
 
@@ -1492,6 +1735,11 @@ class DeduplicateResponse:
     duplicates_found: int
     removed_count: int
     groups: list[list[str]]
+    duplicates_merged: int | None = None
+    duplicates_skipped_changed: int | None = None
+    """Duplicates not merged because a record changed (edited, expired,
+    forgotten) between the scan and the write (server v0.12.2+; ``0`` on a dry
+    run)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DeduplicateResponse":
@@ -1499,6 +1747,8 @@ class DeduplicateResponse:
             duplicates_found=data.get("duplicates_found", 0),
             removed_count=data.get("removed_count", 0),
             groups=data.get("groups", []),
+            duplicates_merged=data.get("duplicates_merged"),
+            duplicates_skipped_changed=data.get("duplicates_skipped_changed"),
         )
 
 
@@ -1520,6 +1770,19 @@ class CompressResponse:
     """Number of memories removed during compression."""
     duration_ms: float = 0.0
     """Wall-clock duration of the compression pass in milliseconds."""
+    memories_scanned: int | None = None
+    """Memories the pass looked at (the fields from here on are what the
+    v0.12 server reports; the four above are ``0`` from it)."""
+    clusters_found: int | None = None
+    summaries_created: int | None = None
+    """Summaries actually written."""
+    originals_deprecated: int | None = None
+    """Originals actually deprecated (only those of written summaries)."""
+    summary_ids: list[str] = field(default_factory=list)
+    deprecated_ids: list[str] = field(default_factory=list)
+    summaries_skipped: list["CompressSkippedSummary"] = field(default_factory=list)
+    """Summaries refused by validation or not storable (server v0.12.2+); the
+    originals of their clusters are not deprecated."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompressResponse":
@@ -1529,7 +1792,30 @@ class CompressResponse:
             memories_after=data.get("memories_after", 0),
             removed_count=data.get("removed_count", 0),
             duration_ms=float(data.get("duration_ms", 0.0)),
+            memories_scanned=data.get("memories_scanned"),
+            clusters_found=data.get("clusters_found"),
+            summaries_created=data.get("summaries_created"),
+            originals_deprecated=data.get("originals_deprecated"),
+            summary_ids=_str_list(data.get("summary_ids")),
+            deprecated_ids=_str_list(data.get("deprecated_ids")),
+            summaries_skipped=[
+                CompressSkippedSummary.from_dict(s)
+                for s in data.get("summaries_skipped") or []
+                if isinstance(s, dict)
+            ],
         )
+
+
+@dataclass
+class CompressSkippedSummary:
+    """A compression summary the server did not write (``summaries_skipped[]``)."""
+
+    summary_id: str
+    reason: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CompressSkippedSummary":
+        return cls(summary_id=str(data.get("summary_id", "")), reason=str(data.get("reason", "")))
 
 
 # ===========================================================================
@@ -1790,7 +2076,8 @@ class MemoryEvent:
     - ``consolidated`` — memories were merged (memory_id is the new memory)
     - ``importance_updated`` — importance score changed
     - ``session_started`` — an agent session began (session_id present)
-    - ``session_ended`` — an agent session ended (session_id present)
+    - ``session_ended`` — an agent session ended (session_id present; server
+      v0.12.2+ adds ``reason``: ``"client"`` or ``"idle"``)
     - ``stream_lagged`` — consumer fell behind; some events were dropped
 
     Example::
@@ -1808,6 +2095,8 @@ class MemoryEvent:
     importance: float | None = None
     tags: list[str] | None = None
     session_id: str | None = None
+    reason: str | None = None
+    """``session_ended`` only (server v0.12.2+): ``"client"`` or ``"idle"``."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryEvent":
@@ -1859,6 +2148,10 @@ class AgentNetworkNode:
     tags: list[str]
     memory_type: str
     created_at: int
+    content_len: int | None = None
+    """Length of the full content in characters (server v0.12.2+)."""
+    content_truncated: bool | None = None
+    """``True`` when ``content`` was cut to ``content_preview_chars`` (v0.12.2+)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentNetworkNode":
@@ -1870,6 +2163,8 @@ class AgentNetworkNode:
             tags=data.get("tags", []),
             memory_type=data["memory_type"],
             created_at=data["created_at"],
+            content_len=data.get("content_len"),
+            content_truncated=data.get("content_truncated"),
         )
 
 
@@ -2214,6 +2509,9 @@ class BatchStoreMemoryResponse:
     """Number of memories successfully stored."""
     total_embedding_time_ms: int
     """Time spent on ONNX embedding for the entire batch (milliseconds)."""
+    ended_sessions: list[str] = field(default_factory=list)
+    """Ended sessions this batch stored into (server v0.12.2+; the store still
+    succeeds). Empty when none, or from older servers."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchStoreMemoryResponse":
@@ -2221,6 +2519,7 @@ class BatchStoreMemoryResponse:
             stored=[BatchStoredMemory.from_dict(m) for m in data.get("stored", [])],
             stored_count=data.get("stored_count", 0),
             total_embedding_time_ms=data.get("total_embedding_time_ms", 0),
+            ended_sessions=_str_list(data.get("ended_sessions")),
         )
 
 
@@ -2878,6 +3177,122 @@ class TifScore:
 
 
 # =============================================================================
+# API keys: KeyInfo, rotation, whoami (server v0.12.2)
+# =============================================================================
+
+
+def _opt_str_list(value: Any) -> list[str] | None:
+    """A key's ``namespaces``: ``None`` (every namespace) or a list of strings."""
+    return None if value is None else _str_list(value)
+
+
+@dataclass
+class KeyInfo:
+    """An API key as the server describes it (never its secret).
+
+    Returned by :meth:`~dakera.DakeraClient.update_key` and
+    :meth:`~dakera.DakeraClient.update_namespace_key`; ``KeyInfo.from_dict``
+    also parses the entries of ``get_key()`` / ``list_keys()["keys"]``.
+    """
+
+    key_id: str
+    name: str
+    scope: str
+    namespaces: list[str] | None = None
+    """``None`` = every namespace; ``[]`` = none. Entries are exact names or
+    ``p*`` prefix patterns (v0.12.2+)."""
+    created_at: int = 0
+    expires_at: int | None = None
+    active: bool = True
+    grants_version: int | None = None
+    """Grant syntax (server v0.12.2+): ``1`` = prefix patterns active; ``0`` = a
+    key created before v0.12.2, whose ``foo*`` entries are literal names that
+    grant nothing until its ``namespaces`` are saved again. ``None`` from older
+    servers."""
+    inert_namespaces: list[str] = field(default_factory=list)
+    """Entries of ``namespaces`` that grant nothing (a legacy ``foo*``, or a
+    server-internal name such as ``_dakera_sessions``)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "KeyInfo":
+        return cls(
+            key_id=str(data.get("key_id", "")),
+            name=str(data.get("name", "")),
+            scope=str(data.get("scope", "")),
+            namespaces=_opt_str_list(data.get("namespaces")),
+            created_at=int(data.get("created_at", 0) or 0),
+            expires_at=data.get("expires_at"),
+            active=bool(data.get("active", True)),
+            grants_version=_opt_int(data.get("grants_version")),
+            inert_namespaces=_str_list(data.get("inert_namespaces")),
+        )
+
+
+@dataclass
+class RotateKeyResponse:
+    """Response from ``POST /admin/keys/{key_id}/rotate``.
+
+    :meth:`~dakera.DakeraClient.rotate_key` returns the response as a dict (as
+    it always has); ``RotateKeyResponse.from_dict(...)`` gives it a type.
+    """
+
+    new_key: str
+    """The new API key — shown only once."""
+    key_id: str
+    """The NEW key's id."""
+    warning: str = ""
+    old_key_id: str | None = None
+    """The id of the rotated key (server v0.12.2+)."""
+    old_key_expires_at: int | None = None
+    """With ``grace_secs``: when the old key stops working (unix seconds);
+    ``None`` when it was deactivated at once."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RotateKeyResponse":
+        return cls(
+            new_key=str(data.get("new_key", "")),
+            key_id=str(data.get("key_id", "")),
+            warning=str(data.get("warning", "")),
+            old_key_id=data.get("old_key_id"),
+            old_key_expires_at=data.get("old_key_expires_at"),
+        )
+
+
+@dataclass
+class WhoamiResponse:
+    """Response from ``GET /v1/auth/whoami`` (server v0.12.2+): the key the
+    request authenticated with, as the server reads it."""
+
+    key_id: str
+    name: str
+    scope: str
+    namespaces: list[str] | None = None
+    """``None`` = every namespace."""
+    unrestricted: bool = False
+    """Whether the key reaches every namespace (``null`` or ``["*"]``)."""
+    expires_at: int | None = None
+    grants_version: int | None = None
+    inert_namespaces: list[str] = field(default_factory=list)
+    auth_enabled: bool = True
+    """``False`` when the server runs with authentication off (every caller is
+    then an unrestricted super-admin)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "WhoamiResponse":
+        return cls(
+            key_id=str(data.get("key_id", "")),
+            name=str(data.get("name", "")),
+            scope=str(data.get("scope", "")),
+            namespaces=_opt_str_list(data.get("namespaces")),
+            unrestricted=bool(data.get("unrestricted", False)),
+            expires_at=data.get("expires_at"),
+            grants_version=_opt_int(data.get("grants_version")),
+            inert_namespaces=_str_list(data.get("inert_namespaces")),
+            auth_enabled=bool(data.get("auth_enabled", True)),
+        )
+
+
+# =============================================================================
 # Namespace API Keys (SEC-1)
 # =============================================================================
 
@@ -2893,19 +3308,31 @@ class NamespaceKeyInfo:
     key_id: str
     name: str
     namespace: str
+    """The namespace the key was listed under (the server's key record carries
+    ``namespaces``, not one ``namespace``; the SDK fills in the path namespace)."""
     created_at: int
     active: bool
     expires_at: int | None = None
+    scope: str | None = None
+    namespaces: list[str] | None = None
+    grants_version: int | None = None
+    """See :attr:`KeyInfo.grants_version` (server v0.12.2+)."""
+    inert_namespaces: list[str] = field(default_factory=list)
+    """See :attr:`KeyInfo.inert_namespaces` (server v0.12.2+)."""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "NamespaceKeyInfo":
+    def from_dict(cls, data: dict[str, Any], namespace: str = "") -> "NamespaceKeyInfo":
         return cls(
             key_id=data["key_id"],
-            name=data["name"],
-            namespace=data["namespace"],
-            created_at=data["created_at"],
+            name=data.get("name", ""),
+            namespace=data.get("namespace") or namespace,
+            created_at=int(data.get("created_at", 0) or 0),
             active=data.get("active", True),
             expires_at=data.get("expires_at"),
+            scope=data.get("scope"),
+            namespaces=_opt_str_list(data.get("namespaces")),
+            grants_version=_opt_int(data.get("grants_version")),
+            inert_namespaces=_str_list(data.get("inert_namespaces")),
         )
 
 
@@ -2924,17 +3351,23 @@ class CreateNamespaceKeyResponse:
     created_at: int
     warning: str
     expires_at: int | None = None
+    scope: str | None = None
+    namespaces: list[str] | None = None
+    """Every namespace the key reaches (the path namespace and any
+    ``extra_namespaces``)."""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CreateNamespaceKeyResponse":
+    def from_dict(cls, data: dict[str, Any], namespace: str = "") -> "CreateNamespaceKeyResponse":
         return cls(
             key_id=data["key_id"],
             key=data["key"],
-            name=data["name"],
-            namespace=data["namespace"],
-            created_at=data["created_at"],
+            name=data.get("name", ""),
+            namespace=data.get("namespace") or namespace,
+            created_at=int(data.get("created_at", 0) or 0),
             warning=data.get("warning", "Save this key — it will not be shown again."),
             expires_at=data.get("expires_at"),
+            scope=data.get("scope"),
+            namespaces=_opt_str_list(data.get("namespaces")),
         )
 
 
@@ -2947,10 +3380,11 @@ class ListNamespaceKeysResponse:
     total: int
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ListNamespaceKeysResponse":
+    def from_dict(cls, data: dict[str, Any], namespace: str = "") -> "ListNamespaceKeysResponse":
+        ns = data.get("namespace") or namespace
         return cls(
-            namespace=data["namespace"],
-            keys=[NamespaceKeyInfo.from_dict(k) for k in data.get("keys", [])],
+            namespace=ns,
+            keys=[NamespaceKeyInfo.from_dict(k, namespace=ns) for k in data.get("keys", [])],
             total=data.get("total", 0),
         )
 
@@ -2968,10 +3402,10 @@ class NamespaceKeyUsageResponse:
     avg_latency_ms: float
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "NamespaceKeyUsageResponse":
+    def from_dict(cls, data: dict[str, Any], namespace: str = "") -> "NamespaceKeyUsageResponse":
         return cls(
             key_id=data["key_id"],
-            namespace=data["namespace"],
+            namespace=data.get("namespace") or namespace,
             total_requests=data.get("total_requests", 0),
             successful_requests=data.get("successful_requests", 0),
             failed_requests=data.get("failed_requests", 0),
@@ -3532,6 +3966,29 @@ class FullTextIndexStats:
 
 
 @dataclass
+class NamespaceUnavailable:
+    """A namespace a node-wide endpoint could not include (server v0.12.2+).
+
+    Its records are not in the response's totals. ``reason`` never carries
+    paths, URLs or credentials.
+    """
+
+    namespace: str
+    reason: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "NamespaceUnavailable":
+        return cls(namespace=str(data.get("namespace", "")), reason=str(data.get("reason", "")))
+
+    @classmethod
+    def list_from(cls, value: Any) -> list["NamespaceUnavailable"]:
+        """Parse an ``unavailable`` array (absent ⇒ ``[]``)."""
+        if not isinstance(value, list):
+            return []
+        return [cls.from_dict(v) for v in value if isinstance(v, dict)]
+
+
+@dataclass
 class TtlNamespaceStats:
     """TTL stats for a single namespace."""
 
@@ -3560,6 +4017,8 @@ class TtlStatsResponse:
     namespaces: list[TtlNamespaceStats]
     total_with_ttl: int
     total_expired: int
+    unavailable: list[NamespaceUnavailable] = field(default_factory=list)
+    """Namespaces left out of the totals (server v0.12.2+)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TtlStatsResponse":
@@ -3568,6 +4027,7 @@ class TtlStatsResponse:
             namespaces=[TtlNamespaceStats.from_dict(n) for n in data["namespaces"]],
             total_with_ttl=int(data["total_with_ttl"]),
             total_expired=int(data["total_expired"]),
+            unavailable=NamespaceUnavailable.list_from(data.get("unavailable")),
         )
 
 
@@ -3745,6 +4205,8 @@ class StorageTierOverview:
     architecture: list[TierInfo]
     config: TierConfig
     activity: TierActivity
+    unavailable: list[NamespaceUnavailable] = field(default_factory=list)
+    """Namespaces left out of the counts (server v0.12.2+)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "StorageTierOverview":
@@ -3754,6 +4216,7 @@ class StorageTierOverview:
             architecture=[TierInfo.from_dict(t) for t in data["architecture"]],
             config=TierConfig.from_dict(data["config"]),
             activity=TierActivity.from_dict(data["activity"]),
+            unavailable=NamespaceUnavailable.list_from(data.get("unavailable")),
         )
 
 
@@ -3767,6 +4230,8 @@ class MemoryTypeStatsResponse:
     semantic: int
     procedural: int
     agent_namespaces: int
+    unavailable: list[NamespaceUnavailable] = field(default_factory=list)
+    """Agent namespaces left out of the counts (server v0.12.2+)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryTypeStatsResponse":
@@ -3778,6 +4243,7 @@ class MemoryTypeStatsResponse:
             semantic=int(data["semantic"]),
             procedural=int(data["procedural"]),
             agent_namespaces=int(data["agent_namespaces"]),
+            unavailable=NamespaceUnavailable.list_from(data.get("unavailable")),
         )
 
 
@@ -3867,6 +4333,158 @@ class StaticCountResponse:
     def from_dict(cls, data: dict[str, Any]) -> "StaticCountResponse":
         """Construct from API response dict."""
         return cls(static_count=int(data["static_count"]))
+
+
+# ============================================================================
+# Derived data: derivation status / drain (server v0.12.2+)
+# ============================================================================
+
+
+@dataclass
+class DerivationHeal:
+    """This node's one-time derivation heal (``status.heal``)."""
+
+    version: int = 0
+    complete: bool = False
+    namespace: str | None = None
+    cursor: str | None = None
+    parents_healed: int = 0
+    graph_adopted: int = 0
+    started_at: int | None = None
+    completed_at: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DerivationHeal":
+        return cls(
+            version=int(data.get("version", 0) or 0),
+            complete=bool(data.get("complete", False)),
+            namespace=data.get("namespace"),
+            cursor=data.get("cursor"),
+            parents_healed=int(data.get("parents_healed", 0) or 0),
+            graph_adopted=int(data.get("graph_adopted", 0) or 0),
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+        )
+
+
+@dataclass
+class DerivationReconciler:
+    """The leader-only derivation reconciler (``status.reconciler``)."""
+
+    state: str = ""
+    """``idle``, ``waiting``, ``standby``, ``deferred``, ``running`` or ``sleeping``."""
+    last_tick_at: int | None = None
+    ticks: int = 0
+    next_namespace: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DerivationReconciler":
+        return cls(
+            state=str(data.get("state", "")),
+            last_tick_at=data.get("last_tick_at"),
+            ticks=int(data.get("ticks", 0) or 0),
+            next_namespace=data.get("next_namespace"),
+        )
+
+
+@dataclass
+class DerivationStatus:
+    """Response from ``GET /admin/derivations/status``: the derived data
+    (sentence sub-memories, full-text entries, graph edges) owed across every
+    agent namespace. ``settled`` = nothing owed and nothing in flight."""
+
+    settled: bool = False
+    pending_sentences: int = 0
+    pending_parents: int = 0
+    unmarked_parents: int = 0
+    stale_children: int = 0
+    orphan_children: int = 0
+    remeta_children: int = 0
+    duplicate_children: int = 0
+    legacy_children: int = 0
+    bm25_missing: int = 0
+    graph_owed: int = 0
+    in_flight: int = 0
+    graph_queue_owed: int = 0
+    dirty_namespaces: list[str] = field(default_factory=list)
+    namespaces: int = 0
+    """Agent namespaces counted."""
+    unreadable_namespaces: list[str] = field(default_factory=list)
+    heal: DerivationHeal | None = None
+    """``None`` until this node has loaded its heal state."""
+    reconciler: DerivationReconciler = field(default_factory=DerivationReconciler)
+    counters: dict[str, int] = field(default_factory=dict)
+    """Per-process counters since start (``derived``, ``adopted``, ...)."""
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DerivationStatus":
+        def n(key: str) -> int:
+            return int(data.get(key, 0) or 0)
+
+        heal = data.get("heal")
+        counters = _dict(data.get("counters"))
+        return cls(
+            settled=bool(data.get("settled", False)),
+            pending_sentences=n("pending_sentences"),
+            pending_parents=n("pending_parents"),
+            unmarked_parents=n("unmarked_parents"),
+            stale_children=n("stale_children"),
+            orphan_children=n("orphan_children"),
+            remeta_children=n("remeta_children"),
+            duplicate_children=n("duplicate_children"),
+            legacy_children=n("legacy_children"),
+            bm25_missing=n("bm25_missing"),
+            graph_owed=n("graph_owed"),
+            in_flight=n("in_flight"),
+            graph_queue_owed=n("graph_queue_owed"),
+            dirty_namespaces=_str_list(data.get("dirty_namespaces")),
+            namespaces=n("namespaces"),
+            unreadable_namespaces=_str_list(data.get("unreadable_namespaces")),
+            heal=DerivationHeal.from_dict(heal) if isinstance(heal, dict) else None,
+            reconciler=DerivationReconciler.from_dict(_dict(data.get("reconciler"))),
+            counters={
+                k: int(v)
+                for k, v in counters.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            },
+            raw=dict(data),
+        )
+
+
+@dataclass
+class DerivationDrainResponse:
+    """Response from ``POST /admin/derivations/drain``."""
+
+    settled: bool = False
+    timed_out: bool = False
+    """``True`` only when the drain stopped on its timeout unsettled."""
+    rounds: int = 0
+    elapsed_ms: int = 0
+    parents_run: int = 0
+    pending_left: int = 0
+    """Sentences the last round could not derive (the model refusing them)."""
+    deleted: int = 0
+    """Stale / orphaned / duplicate children deleted."""
+    bm25_restored: int = 0
+    graph_queued: int = 0
+    status: DerivationStatus = field(default_factory=DerivationStatus)
+    """The derivation status after the drain."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DerivationDrainResponse":
+        return cls(
+            settled=bool(data.get("settled", False)),
+            timed_out=bool(data.get("timed_out", False)),
+            rounds=int(data.get("rounds", 0) or 0),
+            elapsed_ms=int(data.get("elapsed_ms", 0) or 0),
+            parents_run=int(data.get("parents_run", 0) or 0),
+            pending_left=int(data.get("pending_left", 0) or 0),
+            deleted=int(data.get("deleted", 0) or 0),
+            bm25_restored=int(data.get("bm25_restored", 0) or 0),
+            graph_queued=int(data.get("graph_queued", 0) or 0),
+            status=DerivationStatus.from_dict(_dict(data.get("status"))),
+        )
 
 
 # ============================================================================

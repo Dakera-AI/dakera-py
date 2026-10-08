@@ -1,4 +1,6 @@
-# Routes served by Dakera server v0.12.0 (crates/api/src/lib.rs router; admin routes under /admin and /v1/admin).
+# Routes served by Dakera server v0.12.2 (crates/api/src/lib.rs router; admin routes under /admin and /v1/admin).
+# v0.12.2 adds: POST /v1/agents, PATCH /admin/keys/{}, PATCH /v1/namespaces/{}/keys/{}, GET /v1/auth/whoami,
+# POST /v1/sessions/{}/touch, GET /admin/derivations/status, POST /admin/derivations/drain (and their /v1/admin mounts).
 # Path params are normalised to {}. Regenerate when the server router changes.
 DELETE /admin/backups/{}
 DELETE /admin/keys/{}
@@ -30,6 +32,7 @@ GET /admin/cluster/status
 GET /admin/config
 GET /admin/decay/config
 GET /admin/decay/stats
+GET /admin/derivations/status
 GET /admin/encryption/status
 GET /admin/indexes/stats
 GET /admin/keys
@@ -79,6 +82,7 @@ GET /v1/admin/cluster/status
 GET /v1/admin/config
 GET /v1/admin/decay/config
 GET /v1/admin/decay/stats
+GET /v1/admin/derivations/status
 GET /v1/admin/encryption/status
 GET /v1/admin/indexes/stats
 GET /v1/admin/keys
@@ -113,6 +117,7 @@ GET /v1/analytics/throughput
 GET /v1/audit
 GET /v1/audit/export
 GET /v1/audit/stream
+GET /v1/auth/whoami
 GET /v1/capabilities
 GET /v1/events/stream
 GET /v1/export
@@ -146,12 +151,14 @@ GET /v1/ops/stats
 GET /v1/sessions
 GET /v1/sessions/{}
 GET /v1/sessions/{}/memories
+PATCH /admin/keys/{}
 PATCH /admin/slow-queries/config
 PATCH /v1/admin/slow-queries/config
 PATCH /v1/agents/{}/consolidation/config
 PATCH /v1/memories/{}/importance
 PATCH /v1/namespaces/{}/config
 PATCH /v1/namespaces/{}/extractor
+PATCH /v1/namespaces/{}/keys/{}
 POST /admin/autopilot/trigger
 POST /admin/backups
 POST /admin/backups/restore
@@ -162,6 +169,7 @@ POST /admin/cache/warm
 POST /admin/cluster/maintenance/disable
 POST /admin/cluster/maintenance/enable
 POST /admin/cluster/shards/rebalance
+POST /admin/derivations/drain
 POST /admin/encryption/keys/{}/revoke-master
 POST /admin/encryption/reseal
 POST /admin/encryption/rotate-key
@@ -213,6 +221,7 @@ POST /v1/admin/cache/warm
 POST /v1/admin/cluster/maintenance/disable
 POST /v1/admin/cluster/maintenance/enable
 POST /v1/admin/cluster/shards/rebalance
+POST /v1/admin/derivations/drain
 POST /v1/admin/encryption/keys/{}/revoke-master
 POST /v1/admin/encryption/reseal
 POST /v1/admin/encryption/rotate-key
@@ -227,6 +236,7 @@ POST /v1/admin/quotas/{}/check
 POST /v1/admin/reembed/drain
 POST /v1/admin/ttl/cleanup
 POST /v1/admin/vectors/{}/import
+POST /v1/agents
 POST /v1/agents/{}/compress
 POST /v1/agents/{}/consolidate
 POST /v1/extract
@@ -279,6 +289,7 @@ POST /v1/namespaces/{}/warm
 POST /v1/route
 POST /v1/sessions/start
 POST /v1/sessions/{}/end
+POST /v1/sessions/{}/touch
 PUT /admin/autopilot/config
 PUT /admin/config
 PUT /admin/decay/config
