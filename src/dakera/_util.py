@@ -94,7 +94,7 @@ def _create_key_body(
 ) -> dict[str, Any]:
     """Body of ``POST /admin/keys``: exactly the server's ``CreateKeyRequest``.
 
-    The server refuses an unknown field with ``422`` (after v0.12.2), so the
+    The server refuses an unknown field with ``422`` (from v0.12.3), so the
     deprecated ``permissions`` / ``expires_at`` arguments are never sent.
     """
     if permissions is not None:
@@ -379,3 +379,50 @@ def _listing_params(
     if content_preview_chars is not None:
         params["content_preview_chars"] = content_preview_chars
     return params
+
+
+# Shortest wait between two polls of a background job.
+_MIN_POLL_INTERVAL = 0.1
+
+
+def _path_segment(value: str) -> str:
+    """``value`` percent-encoded for one URL path segment (``:`` kept)."""
+    from urllib.parse import quote
+
+    return quote(value, safe=":")
+
+
+def _document_fields(
+    memory_type: str | None,
+    session_id: str | None,
+    importance: float | None,
+    tags: list[str] | None,
+    metadata: dict[str, Any] | None,
+    ttl_seconds: int | None,
+    expires_at: int | None,
+    lang: str | None,
+    chunking: Any,
+    decompose: bool | None,
+) -> dict[str, Any]:
+    """The shared fields of the two document import requests.
+
+    ``chunking`` may be a :class:`~dakera.models.ChunkingOptions` or a dict of
+    its fields; any other key is a ``TypeError`` here (the server refuses it
+    with ``422``).
+    """
+    from dakera.models import ChunkingOptions
+
+    if isinstance(chunking, dict):
+        chunking = ChunkingOptions(**chunking)
+    return {
+        "memory_type": memory_type,
+        "session_id": session_id,
+        "importance": importance,
+        "tags": tags,
+        "metadata": metadata,
+        "ttl_seconds": ttl_seconds,
+        "expires_at": expires_at,
+        "lang": lang,
+        "chunking": chunking,
+        "decompose": decompose,
+    }

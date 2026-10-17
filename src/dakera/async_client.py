@@ -42,12 +42,14 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 from dakera._util import (
+    _MIN_POLL_INTERVAL,
     _attachment_body,
     _audit_export_response,
     _create_backup_body,
     _create_key_body,
     _create_namespace_key_body,
     _dakera_event,
+    _document_fields,
     _export_response,
     _import_upload,
     _key_update_body,
@@ -55,6 +57,7 @@ from dakera._util import (
     _memory_event,
     _memory_job_body,
     _not_sent,
+    _path_segment,
     _redacted_repr,
     _retry_safe,
     _SSEDecoder,
@@ -90,6 +93,7 @@ from dakera.models import (
     BatchStoreMemoryRequest,
     BatchStoreMemoryResponse,
     BatchTextQueryResponse,
+    ChunkingOptions,
     CompressResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
@@ -99,11 +103,17 @@ from dakera.models import (
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
+    DeleteDocumentResponse,
     DerivationDrainResponse,
     DerivationStatus,
     DistanceMetric,
     Document,
+    DocumentDetail,
+    DocumentImportAccepted,
     DocumentInput,
+    DocumentJob,
+    DocumentListResponse,
+    DocumentSummary,
     DrainReembedResponse,
     EdgeType,
     EmbeddingModel,
@@ -126,6 +136,8 @@ from dakera.models import (
     GraphLinkResponse,
     GraphPath,
     HybridSearchResult,
+    ImportAttachmentDocumentRequest,
+    ImportDocumentRequest,
     ImportJobStatus,
     IndexStats,
     JobAccepted,
@@ -241,7 +253,9 @@ class AsyncDakeraClient:
             headers: Additional headers to include in all requests
             ode_url: Base URL of the dakera-ode sidecar
                 (e.g., ``"http://localhost:8080"``).  Required to call
-                :meth:`extract_entities`.
+                :meth:`ode_extract_entities`. Requests to the sidecar currently
+                carry the Dakera API key (tracked in
+                https://github.com/Dakera-AI/dakera/issues/924).
             preflight: Validate the requested embedding model, index kind and
                 distance metric against ``GET /v1/capabilities`` *before* sending
                 a request (see :class:`dakera.DakeraClient` for the full contract).
@@ -1051,6 +1065,226 @@ class AsyncDakeraClient:
             await asyncio.sleep(poll_interval)
 
     # =========================================================================
+    # Documents (#923, server v0.12.3+): PDF / DOCX / HTML / Markdown / text
+    # imported as chunk memories
+    # =========================================================================
+
+    async def import_document(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        media_type: str | None = None,
+        title: str | None = None,
+        document_id: str | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
+        lang: str | None = None,
+        chunking: ChunkingOptions | dict[str, Any] | None = None,
+        decompose: bool | None = None,
+    ) -> DocumentImportAccepted:
+        """Import a document given as text — ``POST /v1/memory/documents`` (``202``).
+
+        The server splits it into chunk memories of the agent (each with its
+        heading breadcrumb and ``_dakera_document`` provenance) in a background
+        job: poll it with :meth:`get_document_job` or wait with
+        :meth:`wait_for_document_job`. Needs Write on the agent's namespace and
+        server v0.12.3+ (an older server answers ``404``; check
+        ``capabilities().documents.enabled``).
+
+        Args:
+            agent_id: The agent whose memories the chunks become.
+            content: The document (at most ``capabilities().documents.max_bytes``).
+            media_type: ``"text/plain"`` (server default), ``"text/markdown"``
+                or ``"text/html"``.
+            title: Title (else the document's own: front matter, first ``#``
+                heading, ``<title>``); the root of every chunk's breadcrumb.
+            document_id: Default: derived from the agent and the content hash,
+                so the same bytes imported again replace the document.
+            memory_type, session_id, importance, tags, metadata, ttl_seconds,
+                expires_at, lang: Carried by every chunk memory (as
+                :meth:`store_memory`).
+            chunking: :class:`ChunkingOptions` (or a dict with ``max_tokens``,
+                ``overlap_tokens``, ``strategy``).
+            decompose: Derive sentence sub-memories from every chunk (server
+                default ``False``).
+
+        Returns:
+            :class:`DocumentImportAccepted` (``job_id``, ``document_id``, ...).
+
+        Errors: ``501`` (:class:`~dakera.FeatureNotAvailableError`) when the
+        server runs with ``DAKERA_DOCUMENTS`` off; ``413`` for a document over
+        the size limit; ``503`` / ``429`` (retried, ``Retry-After``) when the
+        server cannot take the job now.
+        """
+        body = ImportDocumentRequest(
+            agent_id=agent_id,
+            content=content,
+            media_type=media_type,
+            title=title,
+            document_id=document_id,
+            **_document_fields(
+                memory_type, session_id, importance, tags, metadata, ttl_seconds,
+                expires_at, lang, chunking, decompose,
+            ),
+        ).to_dict()  # fmt: skip
+        result = await self._request("POST", "/v1/memory/documents", data=body)
+        return DocumentImportAccepted.from_dict(result)
+
+    async def import_attachment_document(
+        self,
+        namespace: str,
+        attachment_ref: str,
+        agent_id: str,
+        *,
+        title: str | None = None,
+        document_id: str | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
+        lang: str | None = None,
+        chunking: ChunkingOptions | dict[str, Any] | None = None,
+        decompose: bool | None = None,
+    ) -> DocumentImportAccepted:
+        """Import an uploaded attachment as a document —
+        ``POST /v1/namespaces/{namespace}/attachments/{attachment_ref}/document``.
+
+        Upload the file first with :meth:`upload_attachment`; its stored media
+        type picks the parser: PDF, DOCX, HTML, Markdown or text
+        (``capabilities().documents.media_types``). The chunks reference the
+        attachment (``attachment_ref``). Needs Read on ``namespace`` and Write
+        on the agent's namespace, the server's attachment lane
+        (``DAKERA_ATTACHMENTS``) and server v0.12.3+. The other arguments are
+        those of :meth:`import_document`.
+        """
+        body = ImportAttachmentDocumentRequest(
+            agent_id=agent_id,
+            title=title,
+            document_id=document_id,
+            **_document_fields(
+                memory_type, session_id, importance, tags, metadata, ttl_seconds,
+                expires_at, lang, chunking, decompose,
+            ),
+        ).to_dict()  # fmt: skip
+        result = await self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/attachments/{attachment_ref}/document",
+            data=body,
+        )
+        return DocumentImportAccepted.from_dict(result)
+
+    async def get_document_job(self, job_id: str, agent_id: str) -> DocumentJob:
+        """A document import job — ``GET /v1/memory/documents/jobs/{job_id}?agent_id=``.
+
+        ``status`` ``Pending`` / ``Running`` (``progress``, ``message``
+        ``chunks_stored n/total``) / ``Completed`` / ``Failed`` (``error_status``,
+        ``error_code``). Jobs live in server memory: after a restart this is a
+        ``NotFoundError``; the chunks a completed job stored are kept (see
+        :meth:`get_document`).
+        """
+        result = await self._request(
+            "GET",
+            f"/v1/memory/documents/jobs/{_path_segment(job_id)}",
+            params={"agent_id": agent_id},
+        )
+        return DocumentJob.from_dict(result)
+
+    async def wait_for_document_job(
+        self,
+        job_id: str,
+        agent_id: str,
+        timeout: float = 600.0,
+        poll_interval: float = 1.0,
+    ) -> DocumentJob:
+        """Poll a document import job until it completes, fails or is cancelled.
+
+        Polls every ``poll_interval`` seconds (at least 0.1) and returns the
+        final :class:`DocumentJob` (check ``succeeded`` / ``error_code``).
+        Raises :class:`~dakera.exceptions.TimeoutError` after ``timeout``
+        seconds; the job keeps running on the server.
+        """
+        interval = max(poll_interval, _MIN_POLL_INTERVAL)
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.get_document_job(job_id, agent_id)
+            if job.is_done:
+                return job
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"document import job {job_id} not done after {timeout:g}s")
+            await asyncio.sleep(min(interval, remaining))
+
+    async def list_documents(
+        self,
+        agent_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> DocumentListResponse:
+        """One page of the agent's documents — ``GET /v1/memory/documents``.
+
+        Sorted by document id; ``limit`` 1–500 (server default 50). Pass the
+        answer's ``next_cursor`` as ``cursor`` for the next page (``None`` on
+        the last one), or use :meth:`iter_documents`.
+        """
+        params: dict[str, Any] = {"agent_id": agent_id}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        result = await self._request("GET", "/v1/memory/documents", params=params)
+        return DocumentListResponse.from_dict(result or {})
+
+    async def iter_documents(
+        self, agent_id: str, page_size: int | None = None
+    ) -> AsyncGenerator[DocumentSummary, None]:
+        """Every document of the agent, following ``next_cursor`` page by page."""
+        cursor: str | None = None
+        while True:
+            page = await self.list_documents(agent_id, cursor=cursor, limit=page_size)
+            for document in page.documents:
+                yield document
+            if not page.next_cursor or page.next_cursor == cursor or not page.documents:
+                return
+            cursor = page.next_cursor
+
+    async def get_document(self, document_id: str, agent_id: str) -> DocumentDetail:
+        """One document and its chunks — ``GET /v1/memory/documents/{document_id}``.
+
+        Chunks: memory id, index, page range, heading path, character range.
+        A document the agent does not have is a ``NotFoundError``.
+        """
+        result = await self._request(
+            "GET",
+            f"/v1/memory/documents/{_path_segment(document_id)}",
+            params={"agent_id": agent_id},
+        )
+        return DocumentDetail.from_dict(result or {})
+
+    async def delete_document(self, document_id: str, agent_id: str) -> DeleteDocumentResponse:
+        """Delete every chunk of a document — ``DELETE /v1/memory/documents/{document_id}``.
+
+        The attachment it was imported from goes when no memory references it
+        any more. Needs Write on the agent's namespace; an unknown document is
+        a ``NotFoundError``.
+        """
+        result = await self._request(
+            "DELETE",
+            f"/v1/memory/documents/{_path_segment(document_id)}",
+            params={"agent_id": agent_id},
+        )
+        return DeleteDocumentResponse.from_dict(result or {})
+
+    # =========================================================================
     # Records: one vector plus named representations (server v0.12, DAKERA_RECORDS)
     # =========================================================================
 
@@ -1299,7 +1533,7 @@ class AsyncDakeraClient:
                 disable for latency-sensitive paths; ``False`` means
                 ``neighborhood_mode="off"`` and wins over it.
             neighborhood_mode: Where the neighbourhood context goes (server
-                after v0.12.2; older servers ignore it): ``"inline"`` (the
+                v0.12.3+; older servers ignore it): ``"inline"`` (the
                 server default, ``DAKERA_NEIGHBORHOOD_MODE``) appends it to
                 ``memories`` after the ``top_k`` ranked results, each with
                 ``retrieval == "neighborhood"``; ``"separate"`` keeps
@@ -1308,7 +1542,7 @@ class AsyncDakeraClient:
                 ``"off"`` fetches none. Pass ``"separate"`` when ``top_k``
                 must be the maximum number of results.
             include_summaries: Whether session-summary memories may be
-                recalled (server after v0.12.2). Omitted = the server's choice
+                recalled (server v0.12.3+). Omitted = the server's choice
                 (``DAKERA_RECALL_EXCLUDE_SUMMARIES``, default: they may).
             session_id: Recall within this session only.
 
@@ -1317,7 +1551,7 @@ class AsyncDakeraClient:
             ``associated_memories`` when ``include_associated`` is True.
             Each associated memory includes a ``depth`` field (KG-3). The
             first ``k`` results of a ``top_k=k`` recall are the first ``k``
-            of a ``top_k=10`` recall for ``k <= 10`` (server after v0.12.2).
+            of a ``top_k=10`` recall for ``k <= 10`` (server v0.12.3+).
         """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
@@ -1491,7 +1725,7 @@ class AsyncDakeraClient:
 
         Each result is the memory's fields plus ``score`` and the result fields
         the server sent (``smart_score``, ``weighted_score``, ``vector_score``,
-        ``text_score``; after v0.12.2 ``matched_ids`` / ``matched_text`` when
+        ``text_score``; from v0.12.3 ``matched_ids`` / ``matched_text`` when
         derived sentences are collapsed into their source).
         """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
@@ -2836,7 +3070,7 @@ class AsyncDakeraClient:
         Args:
             name: The backup's name (required by the server).
             include_data: Deprecated: not a server field and never sent (the
-                server refuses unknown fields here with ``422`` after v0.12.2).
+                server refuses unknown fields here with ``422`` from v0.12.3).
             backup_type: ``"full"``, ``"incremental"`` or ``"snapshot"``.
             namespaces: Back up only these namespaces (default: all).
             encrypt: Seal the backup with the encryption-at-rest key.
@@ -3931,7 +4165,7 @@ class AsyncDakeraClient:
     async def ops_shutdown(self) -> dict[str, Any]:
         """POST /ops/shutdown — request a graceful shutdown of the node.
 
-        Needs a global ``super_admin`` key from the server after v0.12.2 (a
+        Needs a global ``super_admin`` key on server v0.12.3+ (a
         global ``admin`` key gets ``403`` / :class:`~dakera.AuthorizationError`):
         a shutdown stops the node for every tenant.
         """

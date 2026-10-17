@@ -1,7 +1,8 @@
-# Routes served by the Dakera server router after v0.12.2 (crates/api/src/lib.rs; admin routes under /admin and /v1/admin,
+# Routes served by the Dakera server router v0.12.3 (crates/api/src/lib.rs; admin routes under /admin and /v1/admin,
 # API keys under /admin/keys only; node-to-node /internal routes omitted).
 # v0.12.2 adds: POST /v1/agents, PATCH /admin/keys/{}, PATCH /v1/namespaces/{}/keys/{}, GET /v1/auth/whoami,
 # POST /v1/sessions/{}/touch, GET /admin/derivations/status, POST /admin/derivations/drain (and their /v1/admin mounts).
+# v0.12.3 adds the document routes: /v1/memory/documents[/{}][/jobs/{}], POST /v1/namespaces/{}/attachments/{}/document.
 # Path params are normalised to {}. Regenerate when the server router changes.
 DELETE /admin/backups/{}
 DELETE /admin/keys/{}
@@ -13,6 +14,7 @@ DELETE /v1/admin/namespaces/{}
 DELETE /v1/admin/quotas/{}
 DELETE /v1/admin/slow-queries
 DELETE /v1/memories/forget/batch
+DELETE /v1/memory/documents/{}
 DELETE /v1/namespaces/{}
 DELETE /v1/namespaces/{}/attachments/{}
 DELETE /v1/namespaces/{}/keys/{}
@@ -122,6 +124,9 @@ GET /v1/kpis
 GET /v1/memories/{}/feedback
 GET /v1/memories/{}/graph
 GET /v1/memories/{}/path
+GET /v1/memory/documents
+GET /v1/memory/documents/jobs/{}
+GET /v1/memory/documents/{}
 GET /v1/memory/entities/{}
 GET /v1/memory/get/{}
 GET /v1/namespaces
@@ -216,6 +221,7 @@ POST /v1/memories/store/batch
 POST /v1/memories/{}/feedback
 POST /v1/memories/{}/links
 POST /v1/memory/consolidate
+POST /v1/memory/documents
 POST /v1/memory/feedback
 POST /v1/memory/forget
 POST /v1/memory/importance
@@ -225,6 +231,7 @@ POST /v1/memory/store
 POST /v1/namespaces
 POST /v1/namespaces/{}/aggregate
 POST /v1/namespaces/{}/attachments
+POST /v1/namespaces/{}/attachments/{}/document
 POST /v1/namespaces/{}/attachments/{}/index
 POST /v1/namespaces/{}/attachments/{}/transcribe
 POST /v1/namespaces/{}/batch-query

@@ -7,13 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Support for the next Dakera server release (Dakera-AI/dakera#917, #920; engine PR
+## [0.14.1] - Unreleased
+
+Dakera server **v0.12.3** support (Dakera-AI/dakera#917, #920; engine PR
 Dakera-AI/dakera#922), an API parity audit against the server's router and handlers,
-and request-safety fixes. Works with v0.12.x servers: new request fields are sent only
-when set and new response fields are `None` from an older server.
+and request-safety fixes. The new features need server **v0.12.3 or later**; the SDK keeps
+working with v0.12.0 – v0.12.2 servers: new request fields are sent only when set and new response
+fields are `None` from an older server.
 
 ### Added
 
+- **Document import** (Dakera-AI/dakera#923): PDF, DOCX, HTML, Markdown and text become
+  chunk memories of an agent, each with its heading breadcrumb and `_dakera_document`
+  provenance. Sync and async: `import_document(agent_id, content, media_type=, title=,
+  document_id=, chunking=, decompose=, ...)` (`POST /v1/memory/documents`),
+  `import_attachment_document(namespace, attachment_ref, agent_id, ...)` (an uploaded
+  attachment), `get_document_job()` / `wait_for_document_job()` (polls with a bounded
+  timeout, at least 0.1 s between polls), `list_documents(cursor=, limit=)` /
+  `iter_documents()`, `get_document()`, `delete_document()`. Both imports take the memory
+  fields of `store_memory()` that every chunk carries. Models: `ChunkingOptions`
+  (`ChunkStrategy`), `ImportDocumentRequest`, `ImportAttachmentDocumentRequest`,
+  `DocumentImportAccepted`, `DocumentJob`, `DocumentSummary`, `DocumentListResponse`,
+  `DocumentDetail`, `DocumentChunkInfo`, `DeleteDocumentResponse`, `DocumentChunkMeta`
+  (`RecalledMemory.document`, `document_chunk_meta()` read `_dakera_document` from a
+  result). `ServerCapabilities.documents` (`DocumentCapabilities`) and
+  `supports_documents`; a server before v0.12.3 answers the document routes `404`.
 - **Recall neighbourhood control**: `recall(..., neighborhood_mode="inline" | "separate" |
   "off", include_summaries=, session_id=)` (sync and async; `NeighborhoodMode`).
   `RecallResponse.context_memories` (under `"separate"`) and `RecallResponse.ranked` (the
@@ -37,7 +55,7 @@ when set and new response fields are `None` from an older server.
 ### Fixed
 
 - **Admin requests send only the server's fields** (the server refuses unknown fields with
-  `422` after v0.12.2): `create_key()` no longer sends `permissions` / `expires_at`
+  `422` from v0.12.3): `create_key()` no longer sends `permissions` / `expires_at`
   (deprecated, `DeprecationWarning`); `create_backup()` sent `{"include_data": ...}`
   without the required `name` and always failed: it now takes `name`, `backup_type`,
   `namespaces`, `encrypt`, `compression` like `admin_create_backup()` (`include_data` is
@@ -77,8 +95,13 @@ when set and new response fields are `None` from an older server.
   `RetryConfig(retry_non_idempotent=True)` restores the previous behaviour. The async
   client wraps a dropped connection in `ConnectionError` instead of raising the raw
   `httpx` error.
+- `ode_url` docs: requests to the ODE sidecar currently carry the Dakera API key (tracked in
+  Dakera-AI/dakera#924).
+- CI: the Dakera service container is health-checked from the host (polling `/health`)
+  instead of a `curl` inside the container, so the job works with images that ship no
+  `curl` (v0.12.3+); the pinned image is unchanged.
 - `ops_shutdown()` documents the server's global `super_admin` requirement (an `admin` key
-  gets `403` after v0.12.2).
+  gets `403` from v0.12.3).
 - `repr()` of the clients never shows the API key; the key fields of
   `CreateNamespaceKeyResponse`, `RotateKeyResponse` and `RotateEncryptionKeyRequest` are
   left out of `repr()`.

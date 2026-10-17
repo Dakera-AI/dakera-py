@@ -38,6 +38,9 @@ from dakera.exceptions import (
     ValidationError,
 )
 from dakera.models import (
+    DOCUMENT_META_KEY,
+    DOCUMENT_TAG_PREFIX,
+    DOCUMENT_TEXT_MEDIA_TYPES,
     # COG-2
     RETRIEVAL_NEIGHBORHOOD,
     AccessPatternHint,
@@ -69,6 +72,8 @@ from dakera.models import (
     BatchStoreMemoryRequest,
     BatchStoreMemoryResponse,
     BlockDType,
+    ChunkingOptions,
+    ChunkStrategy,
     # CE-12
     CompressResponse,
     CompressSkippedSummary,
@@ -83,12 +88,22 @@ from dakera.models import (
     CrossAgentNetworkResponse,
     DakeraEvent,
     DeduplicateResponse,
+    DeleteDocumentResponse,
     DerivationDrainResponse,
     DerivationHeal,
     DerivationReconciler,
     DerivationStatus,
     DistanceMetric,
     Document,
+    DocumentCapabilities,
+    DocumentChunkInfo,
+    DocumentChunkMeta,
+    DocumentDetail,
+    DocumentImportAccepted,
+    DocumentImportOptions,
+    DocumentJob,
+    DocumentListResponse,
+    DocumentSummary,
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
@@ -118,6 +133,8 @@ from dakera.models import (
     GraphNode,
     GraphPath,
     HybridSearchResult,
+    ImportAttachmentDocumentRequest,
+    ImportDocumentRequest,
     IndexKind,
     IndexStats,
     JobAccepted,
@@ -196,6 +213,7 @@ from dakera.models import (
     WarmingPriority,
     WarmingTargetTier,
     WhoamiResponse,
+    document_chunk_meta,
     parse_accepted_values,
     wire_value,
 )
@@ -216,7 +234,7 @@ with contextlib.suppress(ImportError):
 
     _optional_exports += ["DakeraCostStorage", "DakeraDecisionStore", "DakeraDelegationHelper"]
 
-__version__ = "0.14.0"
+__version__ = "0.14.1"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -251,6 +269,24 @@ __all__ = [
     "Memory",
     "RecalledMemory",
     "RecallResponse",
+    "ChunkStrategy",
+    "ChunkingOptions",
+    "DeleteDocumentResponse",
+    "DOCUMENT_META_KEY",
+    "DOCUMENT_TAG_PREFIX",
+    "DOCUMENT_TEXT_MEDIA_TYPES",
+    "DocumentCapabilities",
+    "DocumentChunkInfo",
+    "DocumentChunkMeta",
+    "DocumentDetail",
+    "DocumentImportAccepted",
+    "DocumentImportOptions",
+    "DocumentJob",
+    "DocumentListResponse",
+    "DocumentSummary",
+    "ImportAttachmentDocumentRequest",
+    "ImportDocumentRequest",
+    "document_chunk_meta",
     "RETRIEVAL_NEIGHBORHOOD",
     "ConsolidateResponse",
     # Batch memory operations (CE-2, DAK-5508)

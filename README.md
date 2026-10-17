@@ -153,11 +153,11 @@ asyncio.run(main())
 
 ---
 
-## Recall context and the next server release
+## What's new for Dakera server v0.12.3
 
-The next Dakera server release (after v0.12.2) changes how recall returns its
-neighbourhood context. This SDK works with it and with older servers: the new
-request fields are sent only when you set them, the new response fields are
+Version 0.14.1 of this SDK adds support for Dakera server **v0.12.3**; the features
+below need server **v0.12.3 or later**. It stays **compatible with v0.12.0 – v0.12.2 servers**:
+the new request fields are sent only when you set them, the new response fields are
 `None` from an older server.
 
 - `recall(..., neighborhood_mode=)`: `"inline"` (the server default) appends
@@ -182,6 +182,38 @@ for m in response.memories:          # at most 3, ranked
     print(m.score, m.content, m.matched_text)
 for c in response.context_memories or []:
     print("  context of", c.context_of, ":", c.content)
+```
+
+### Document import (server v0.12.3+)
+
+A document becomes chunk memories of an agent, sized for the embedding model, each
+with its heading breadcrumb and a `_dakera_document` provenance record (document,
+page range, heading path) that recall results carry. Imports run as server jobs.
+
+```python
+from dakera import ChunkingOptions
+
+caps = client.capabilities()
+if caps.supports_documents:
+    accepted = client.import_document(
+        "docs-bot", open("README.md").read(), media_type="text/markdown",
+        document_id="readme", tags=["docs"], chunking=ChunkingOptions(max_tokens=300),
+    )
+    job = client.wait_for_document_job(accepted.job_id, "docs-bot", timeout=120)
+    print(job.status, job.message)
+
+    # PDF / DOCX: upload the file, then import the attachment
+    ref = client.upload_attachment("library", "manual.pdf").attachment_ref
+    client.import_attachment_document("library", ref, "docs-bot", document_id="manual-v3")
+
+    for doc in client.iter_documents("docs-bot"):
+        print(doc.document_id, doc.title, doc.chunk_count)
+
+    for m in client.recall("docs-bot", "how do I install it?").ranked:
+        if m.document:  # cite the source
+            print(m.document.title, m.document.page_start, m.document.breadcrumb)
+
+    client.delete_document("manual-v3", "docs-bot")
 ```
 
 ---

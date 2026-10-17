@@ -8,7 +8,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Literal, Union
+from typing import Any, Literal, Union, cast
 
 from dakera.exceptions import UnsupportedCapabilityError
 
@@ -105,7 +105,7 @@ class RoutingMode(LenientStrEnum):
 
 NeighborhoodMode = Literal["inline", "separate", "off"]
 """Where a recall returns its neighbourhood context (``neighborhood_mode``, server
-after v0.12.2):
+v0.12.3+):
 
 - ``"inline"`` (the server default unless ``DAKERA_NEIGHBORHOOD_MODE`` says
   otherwise): appended to ``memories`` after the ``top_k`` ranked results, each
@@ -1012,6 +1012,8 @@ class ServerCapabilities:
     """Agent id and namespace rules (``capabilities_version`` 2, v0.12.2)."""
     sessions: SessionCapabilities = field(default_factory=SessionCapabilities)
     """Session idle timeout, touch and ``ended_reason`` (v0.12.2)."""
+    documents: "DocumentCapabilities" = field(default_factory=lambda: DocumentCapabilities())
+    """Document import (v0.12.3); ``documents.enabled`` is ``False`` on older servers."""
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -1048,6 +1050,7 @@ class ServerCapabilities:
             auth=AuthCapabilities.from_dict(_dict(data.get("auth"))),
             naming=NamingCapabilities.from_dict(_dict(data.get("naming"))),
             sessions=SessionCapabilities.from_dict(_dict(data.get("sessions"))),
+            documents=DocumentCapabilities.from_dict(_dict(data.get("documents"))),
             raw=dict(data),
         )
 
@@ -1062,6 +1065,11 @@ class ServerCapabilities:
     def supports_key_update(self) -> bool:
         """Whether keys can be renamed / re-granted with ``PATCH`` (v0.12.2+)."""
         return self.auth.key_update
+
+    @property
+    def supports_documents(self) -> bool:
+        """Whether the document import routes answer (v0.12.3+, ``DAKERA_DOCUMENTS`` on)."""
+        return self.documents.enabled
 
     @property
     def supports_session_touch(self) -> bool:
@@ -1414,6 +1422,13 @@ class RecalledMemory:
     context_of: str | None = None
     """On a ``RecallResponse.context_memories`` entry: the id of the ranked memory
     it is context for."""
+
+    @property
+    def document(self) -> "DocumentChunkMeta | None":
+        """The ``_dakera_document`` of a document chunk (server v0.12.3+): the
+        document, page range and heading path the result came from; ``None``
+        when the memory is not a document chunk."""
+        return DocumentChunkMeta.from_memory(self)
 
     @property
     def is_neighborhood(self) -> bool:
@@ -3787,7 +3802,7 @@ class RotateEncryptionKeyRequest:
 
     :meth:`to_dict` holds exactly the fields the server's
     ``RotateEncryptionKeyRequest`` reads (it refuses any other with ``422``
-    after v0.12.2), and only those that are set.
+    from v0.12.3), and only those that are set.
 
     Args:
         new_key: Passphrase or 64-char hex key the new data key is derived
@@ -4906,3 +4921,451 @@ class RecordUpsertResponse:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecordUpsertResponse":
         return cls(upserted_count=int(data.get("upserted_count", 0) or 0))
+
+
+# ============================================================================
+# Documents (#923, server v0.12.3+): import PDF / DOCX / HTML / Markdown / text
+# as chunk memories
+# ============================================================================
+
+DOCUMENT_META_KEY = "_dakera_document"
+"""Metadata key every chunk memory of an imported document carries
+(:class:`DocumentChunkMeta`)."""
+
+DOCUMENT_TAG_PREFIX = "document:"
+"""Prefix of the tag every chunk of a document carries: ``document:<document_id>``."""
+
+DOCUMENT_TEXT_MEDIA_TYPES = ("text/plain", "text/markdown", "text/html")
+"""Media types :meth:`~dakera.DakeraClient.import_document` takes as text."""
+
+
+class ChunkStrategy(LenientStrEnum):
+    """How an imported document's text is split (``chunking.strategy``)."""
+
+    STRUCTURE = "structure"
+    """Sections at headings, then paragraphs, sentences, words (server default)."""
+    FIXED = "fixed"
+    """Plain token windows with overlap; headings are text."""
+
+
+@dataclass
+class ChunkingOptions:
+    """The ``chunking`` field of a document import.
+
+    The server refuses an unknown field here (``deny_unknown_fields``), so
+    :meth:`to_dict` holds only these three, and only those that are set.
+    """
+
+    max_tokens: int | None = None
+    """Token budget of one chunk's text (server default
+    ``DAKERA_DOCUMENT_CHUNK_TOKENS``, 400; clamped to the embedding model's cap)."""
+    overlap_tokens: int | None = None
+    """Tokens repeated from the end of the previous chunk (server default
+    ``DAKERA_DOCUMENT_CHUNK_OVERLAP_TOKENS``, 50; at most a quarter of the budget)."""
+    strategy: ChunkStrategy | str | None = None
+    """``"structure"`` (server default) or ``"fixed"``."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.max_tokens is not None:
+            d["max_tokens"] = self.max_tokens
+        if self.overlap_tokens is not None:
+            d["overlap_tokens"] = self.overlap_tokens
+        if self.strategy is not None:
+            d["strategy"] = wire_value(self.strategy)
+        return d
+
+
+@dataclass
+class DocumentImportOptions:
+    """Fields both document imports share: the memory fields every chunk memory
+    carries (as ``POST /v1/memory/store``), ``chunking`` and ``decompose``.
+
+    Only the fields that are set are sent; the server's defaults apply to the
+    others (``memory_type`` episodic, ``importance`` 0.5, ``decompose`` false).
+    """
+
+    memory_type: str | None = None
+    session_id: str | None = None
+    importance: float | None = None
+    tags: list[str] | None = None
+    """Tags of every chunk; the server adds ``document:<document_id>``."""
+    metadata: dict[str, Any] | None = None
+    """Metadata of every chunk; the server adds ``_dakera_document``."""
+    ttl_seconds: int | None = None
+    expires_at: int | None = None
+    lang: str | None = None
+    """Language of the document for the write-time derivations."""
+    chunking: ChunkingOptions | None = None
+    decompose: bool | None = None
+    """Derive sentence sub-memories from every chunk (server default ``False``:
+    a chunk is already a retrieval unit)."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        for key in (
+            "memory_type",
+            "session_id",
+            "importance",
+            "tags",
+            "metadata",
+            "ttl_seconds",
+            "expires_at",
+            "lang",
+            "decompose",
+        ):
+            value = getattr(self, key)
+            if value is None:
+                continue
+            if key == "tags":
+                value = list(value)
+            elif key == "memory_type":
+                value = wire_value(value)
+            d[key] = value
+        if self.chunking is not None:
+            d["chunking"] = self.chunking.to_dict()
+        return d
+
+
+@dataclass
+class ImportDocumentRequest(DocumentImportOptions):
+    """Body of ``POST /v1/memory/documents``: a document given as text.
+
+    Use :meth:`~dakera.DakeraClient.import_document`, which builds it.
+    """
+
+    agent_id: str = ""
+    content: str = field(default="", repr=False)
+    media_type: str | None = None
+    """``text/plain`` (server default), ``text/markdown`` or ``text/html``."""
+    title: str | None = None
+    """Title of the document (else taken from the document itself)."""
+    document_id: str | None = None
+    """Id of the document; default: derived from the agent and the content hash,
+    so importing the same bytes again replaces the document with itself."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"agent_id": self.agent_id, "content": self.content}
+        for key in ("media_type", "title", "document_id"):
+            value = getattr(self, key)
+            if value is not None:
+                d[key] = value
+        d.update(super().to_dict())
+        return d
+
+
+@dataclass
+class ImportAttachmentDocumentRequest(DocumentImportOptions):
+    """Body of ``POST /v1/namespaces/{ns}/attachments/{ref}/document``.
+
+    Use :meth:`~dakera.DakeraClient.import_attachment_document`, which builds it.
+    """
+
+    agent_id: str = ""
+    title: str | None = None
+    document_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"agent_id": self.agent_id}
+        for key in ("title", "document_id"):
+            value = getattr(self, key)
+            if value is not None:
+                d[key] = value
+        d.update(super().to_dict())
+        return d
+
+
+@dataclass
+class DocumentImportAccepted:
+    """``202`` answer of both document imports."""
+
+    job_id: str
+    document_id: str
+    agent_id: str
+    status_url: str
+    """Server-relative route to poll (``GET``, a key that may read the agent)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentImportAccepted":
+        return cls(
+            job_id=str(data["job_id"]),
+            document_id=str(data.get("document_id", "")),
+            agent_id=str(data.get("agent_id", "")),
+            status_url=str(data.get("status_url", "")),
+        )
+
+
+@dataclass
+class DocumentJob(AttachmentJob):
+    """A document import job (``GET /v1/memory/documents/jobs/{job_id}``).
+
+    ``status`` is ``Pending``, ``Running``, ``Completed``, ``Failed`` or
+    ``Cancelled``. While running, ``progress`` (0–100) and ``message``
+    (``chunks_stored n/total``) report the writes; a failed job carries
+    ``error_status`` / ``error_code`` (``413`` too big / too many chunks, ``422``
+    ``UNPROCESSABLE_CONTENT``, ``504`` ``EXTRACTION_TIMEOUT``, …).
+    """
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentJob":
+        return cast("DocumentJob", super().from_dict(data))  # built as cls
+
+    @property
+    def document_id(self) -> str | None:
+        return self.metadata.get("document_id")
+
+    @property
+    def agent_id(self) -> str | None:
+        return self.metadata.get("agent_id")
+
+    @property
+    def media_type(self) -> str | None:
+        return self.metadata.get("media_type")
+
+    @property
+    def attachment_ref(self) -> str | None:
+        """The attachment imported (attachment route only)."""
+        return self.metadata.get("attachment_ref")
+
+
+@dataclass
+class DocumentChunkMeta:
+    """What ``_dakera_document`` holds on every chunk memory of a document.
+
+    The document-level fields (``title``, ``media_type``, ``chunk_count``,
+    ``bytes``, ``pages``, ``created_at``, ``updated_at``, ``sha256``) are
+    repeated on every chunk, so one recall result can cite its document, page
+    and section. Read it with :meth:`from_memory`.
+    """
+
+    id: str
+    """The document id."""
+    media_type: str
+    chunk_index: int
+    """Position of this chunk, from 0."""
+    chunk_count: int
+    char_start: int
+    """Character range of the chunk's text in the extracted text."""
+    char_end: int
+    sha256: str
+    """SHA-256 (hex) of the source document's bytes."""
+    title: str | None = None
+    page_start: int | None = None
+    """First page the chunk's text comes from (PDF; form-feed pages of text)."""
+    page_end: int | None = None
+    heading_path: list[str] = field(default_factory=list)
+    """Headings above the chunk, outermost first (the title included)."""
+    bytes: int = 0
+    pages: int | None = None
+    created_at: int = 0
+    updated_at: int = 0
+    decompose: bool = False
+    fingerprint: str = ""
+
+    @property
+    def breadcrumb(self) -> str:
+        """The heading path joined as the server shows it (``A › B › C``)."""
+        return " › ".join(self.heading_path)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentChunkMeta":
+        return cls(
+            id=str(data["id"]),
+            media_type=str(data.get("media_type", "")),
+            chunk_index=int(data.get("chunk_index", 0) or 0),
+            chunk_count=int(data.get("chunk_count", 0) or 0),
+            char_start=int(data.get("char_start", 0) or 0),
+            char_end=int(data.get("char_end", 0) or 0),
+            sha256=str(data.get("sha256", "")),
+            title=data.get("title"),
+            page_start=_opt_int(data.get("page_start")),
+            page_end=_opt_int(data.get("page_end")),
+            heading_path=_str_list(data.get("heading_path")),
+            bytes=int(data.get("bytes", 0) or 0),
+            pages=_opt_int(data.get("pages")),
+            created_at=int(data.get("created_at", 0) or 0),
+            updated_at=int(data.get("updated_at", 0) or 0),
+            decompose=bool(data.get("decompose", False)),
+            fingerprint=str(data.get("fingerprint", "")),
+        )
+
+    @classmethod
+    def from_memory(cls, memory: Any) -> "DocumentChunkMeta | None":
+        """The ``_dakera_document`` of a memory, or ``None`` when it is not a chunk.
+
+        ``memory`` is a :class:`RecalledMemory` / :class:`Memory`, a memory dict
+        (e.g. a :meth:`~dakera.DakeraClient.search_memories` item or a
+        ``{"memory": {...}}`` result), or a metadata dict.
+        """
+        if isinstance(memory, dict):
+            if isinstance(memory.get("memory"), dict):
+                memory = memory["memory"]
+            metadata = memory.get("metadata") if DOCUMENT_META_KEY not in memory else memory
+        else:
+            metadata = getattr(memory, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        value = metadata.get(DOCUMENT_META_KEY)
+        if not isinstance(value, dict) or "id" not in value:
+            return None
+        try:
+            return cls.from_dict(value)
+        except (TypeError, ValueError):
+            return None
+
+
+def document_chunk_meta(memory: Any) -> DocumentChunkMeta | None:
+    """The ``_dakera_document`` of a recalled / searched / listed memory, or
+    ``None`` when it is not a document chunk. See :meth:`DocumentChunkMeta.from_memory`."""
+    return DocumentChunkMeta.from_memory(memory)
+
+
+@dataclass
+class DocumentSummary:
+    """One document of ``GET /v1/memory/documents``."""
+
+    document_id: str
+    media_type: str
+    chunk_count: int
+    bytes: int
+    created_at: int
+    updated_at: int
+    sha256: str
+    title: str | None = None
+    pages: int | None = None
+    attachment_ref: str | None = None
+    """The attachment the document was imported from (attachment route)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentSummary":
+        return cls(
+            document_id=str(data["document_id"]),
+            media_type=str(data.get("media_type", "")),
+            chunk_count=int(data.get("chunk_count", 0) or 0),
+            bytes=int(data.get("bytes", 0) or 0),
+            created_at=int(data.get("created_at", 0) or 0),
+            updated_at=int(data.get("updated_at", 0) or 0),
+            sha256=str(data.get("sha256", "")),
+            title=data.get("title"),
+            pages=_opt_int(data.get("pages")),
+            attachment_ref=data.get("attachment_ref"),
+        )
+
+
+@dataclass
+class DocumentListResponse:
+    """``GET /v1/memory/documents``: one page, sorted by document id."""
+
+    documents: list[DocumentSummary]
+    next_cursor: str | None = None
+    """Pass as ``cursor`` for the next page; ``None`` on the last one."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentListResponse":
+        return cls(
+            documents=[
+                DocumentSummary.from_dict(d)
+                for d in data.get("documents") or []
+                if isinstance(d, dict)
+            ],
+            next_cursor=data.get("next_cursor"),
+        )
+
+
+@dataclass
+class DocumentChunkInfo:
+    """One chunk of ``GET /v1/memory/documents/{document_id}``."""
+
+    id: str
+    """The chunk's memory id (``doc_…``)."""
+    chunk_index: int
+    char_start: int
+    char_end: int
+    heading_path: list[str] = field(default_factory=list)
+    page_start: int | None = None
+    page_end: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentChunkInfo":
+        return cls(
+            id=str(data["id"]),
+            chunk_index=int(data.get("chunk_index", 0) or 0),
+            char_start=int(data.get("char_start", 0) or 0),
+            char_end=int(data.get("char_end", 0) or 0),
+            heading_path=_str_list(data.get("heading_path")),
+            page_start=_opt_int(data.get("page_start")),
+            page_end=_opt_int(data.get("page_end")),
+        )
+
+
+@dataclass
+class DocumentDetail:
+    """``GET /v1/memory/documents/{document_id}``: the document and its chunks."""
+
+    document: DocumentSummary
+    chunks: list[DocumentChunkInfo]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentDetail":
+        return cls(
+            document=DocumentSummary.from_dict(_dict(data.get("document"))),
+            chunks=[
+                DocumentChunkInfo.from_dict(c)
+                for c in data.get("chunks") or []
+                if isinstance(c, dict)
+            ],
+        )
+
+
+@dataclass
+class DeleteDocumentResponse:
+    """``DELETE /v1/memory/documents/{document_id}``."""
+
+    document_id: str
+    deleted_chunks: int
+    """Chunk memories removed."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DeleteDocumentResponse":
+        return cls(
+            document_id=str(data.get("document_id", "")),
+            deleted_chunks=int(data.get("deleted_chunks", 0) or 0),
+        )
+
+
+@dataclass
+class DocumentCapabilities:
+    """Document import (``capabilities.documents``, server v0.12.3+).
+
+    ``enabled`` is ``False`` on a server that predates document import (its
+    routes answer ``404``) or runs with ``DAKERA_DOCUMENTS`` off (``501``).
+    """
+
+    enabled: bool = False
+    text_media_types: list[str] = field(default_factory=list)
+    """Media types :meth:`~dakera.DakeraClient.import_document` takes."""
+    media_types: list[str] = field(default_factory=list)
+    """Attachment media types :meth:`~dakera.DakeraClient.import_attachment_document`
+    takes (PDF, DOCX, HTML, Markdown, text)."""
+    max_bytes: int = 0
+    max_text_bytes: int = 0
+    max_chunks: int = 0
+    default_chunk_tokens: int = 0
+    default_overlap_tokens: int = 0
+    strategies: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            text_media_types=_str_list(data.get("text_media_types")),
+            media_types=_str_list(data.get("media_types")),
+            max_bytes=int(data.get("max_bytes", 0) or 0),
+            max_text_bytes=int(data.get("max_text_bytes", 0) or 0),
+            max_chunks=int(data.get("max_chunks", 0) or 0),
+            default_chunk_tokens=int(data.get("default_chunk_tokens", 0) or 0),
+            default_overlap_tokens=int(data.get("default_overlap_tokens", 0) or 0),
+            strategies=_str_list(data.get("strategies")),
+            raw=dict(data),
+        )
