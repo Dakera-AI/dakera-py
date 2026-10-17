@@ -38,6 +38,8 @@ from dakera.exceptions import (
     ValidationError,
 )
 from dakera.models import (
+    # COG-2
+    RETRIEVAL_NEIGHBORHOOD,
     AccessPatternHint,
     AgentFeedbackSummary,
     AgentNetworkEdge,
@@ -149,13 +151,13 @@ from dakera.models import (
     NamespaceNerConfig,
     NamespaceUnavailable,
     NamingCapabilities,
+    NeighborhoodMode,
     OdeEntity,
     OpStatus,
     QueryResult,
     RateLimitHeaders,
     ReadConsistency,
     RecalledMemory,
-    # COG-2
     RecallResponse,
     Record,
     RecordCapabilities,
@@ -227,6 +229,7 @@ __all__ = [
     "QueryResult",
     "SearchResult",
     "NamespaceInfo",
+    "NeighborhoodMode",
     "IndexStats",
     "Document",
     "FullTextSearchResult",
@@ -248,6 +251,7 @@ __all__ = [
     "Memory",
     "RecalledMemory",
     "RecallResponse",
+    "RETRIEVAL_NEIGHBORHOOD",
     "ConsolidateResponse",
     # Batch memory operations (CE-2, DAK-5508)
     "BatchMemoryFilter",

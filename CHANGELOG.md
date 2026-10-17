@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Support for the next Dakera server release (Dakera-AI/dakera#917, #920; engine PR
+Dakera-AI/dakera#922), an API parity audit against the server's router and handlers,
+and request-safety fixes. Works with v0.12.x servers: new request fields are sent only
+when set and new response fields are `None` from an older server.
+
+### Added
+
+- **Recall neighbourhood control**: `recall(..., neighborhood_mode="inline" | "separate" |
+  "off", include_summaries=, session_id=)` (sync and async; `NeighborhoodMode`).
+  `RecallResponse.context_memories` (under `"separate"`) and `RecallResponse.ranked` (the
+  ranked results without inline neighbourhood items).
+- **Result fields** on `RecalledMemory`: `matched_text`, `matched_ids` (derived sentence
+  sub-memories collapsed into their source), `retrieval` (`"neighborhood"` for inline
+  context; `RETRIEVAL_NEIGHBORHOOD`), `context_of`, and `is_neighborhood`.
+  `search_memories()` results carry every result field the server sends (`smart_score`,
+  `weighted_score`, `vector_score`, `text_score`, `matched_ids`, `matched_text`), and take
+  `session_id=`.
+- `rotate_encryption_key(new_key=None, namespace=None, *, wait_secs=)`: `new_key` is
+  optional (the server generates a key); `RotateEncryptionKeyResponse` gains `key_id`,
+  `previous_key_id`, `scope`, `namespace`, `reseal`, `fulltext_indices_rotated`,
+  `failed_namespaces`, `action_required`, `status_url`.
+- `end_session(..., auto_summarize=)`, `update_memory(..., importance=, tags=)`,
+  `consolidate(..., memory_ids=, target_type=)`.
+- `RetryConfig.retry_non_idempotent` (default `False`, see Changed).
+- `MemoryImportResponse` job fields (`job_id`, `status`, `format`, `total`, `started_at`,
+  `finished_at`); `MemoryExportResponse.raw` and `.skipped`.
+
+### Fixed
+
+- **Admin requests send only the server's fields** (the server refuses unknown fields with
+  `422` after v0.12.2): `create_key()` no longer sends `permissions` / `expires_at`
+  (deprecated, `DeprecationWarning`); `create_backup()` sent `{"include_data": ...}`
+  without the required `name` and always failed: it now takes `name`, `backup_type`,
+  `namespaces`, `encrypt`, `compression` like `admin_create_backup()` (`include_data` is
+  deprecated and never sent). Tests pin the bodies to the engine's request structs.
+- `import_memories()` posted JSON; the server reads a `multipart/form-data` file with
+  `agent_id` / `format` in the query, and answers the job status (`imported`, `skipped`).
+  `export_memories()` expected a JSON wrapper; the server answers the file itself (JSON
+  lines, CSV, Mem0 / Zep JSON), which is now parsed into `data`. Both need `agent_id`
+  (`ValueError` without it); `namespace` is not a server parameter (deprecated, not sent)
+  and `limit` is applied client-side.
+- `consolidate(dry_run=True)` was sent to a server that has no dry run and merged (and
+  deleted) the memories: it now raises `ValueError`. `memory_type` / `config` were ignored
+  by the server and are no longer sent (`DeprecationWarning`).
+- `get_memory_feedback_history()` / `evaluate_tif()` take `agent_id` (the server answered
+  `400` without it). `patch_memory_importance()` returns the updated `Memory` the server
+  sends (it was parsed as a `FeedbackResponse` and raised `KeyError`).
+- `store_memory(valid_from=)` is sent as `metadata["valid_from"]`, where the server reads
+  it (a top-level field was ignored).
+- KG-3 `depth` of associated memories was dropped when flattening the result envelope.
+- `ChatMemorySession.recall()` / `AsyncChatMemorySession.recall()` return at most `top_k`
+  memories as documented: they request `neighborhood_mode="separate"` and return the ranked
+  results (a server up to v0.12.2, which appends the context inline, is cut at `top_k`).
+- SSE streams are decoded as UTF-8 (a `text/event-stream` without a charset was read as
+  Latin-1 by the sync client), accept CRLF / CR line ends, bound an event's size, apply
+  the connect timeout and release the connection when iteration stops.
+- `FusionStrategy` docs: the server default is `minmax` (since v0.11.2), not `rrf`.
+- `create_namespace()` docs: `dimensions` is required by the server.
+- Examples: `admin_operations.py` (`admin_create_backup`), `advanced.py`
+  (`get_memory_feedback_history`).
+
+### Changed
+
+- **Retries only where repeating is harmless.** `429` / `503` (with `Retry-After`) and
+  failed connects are retried for every request; a `5xx`, a read timeout or a dropped
+  connection only for `GET` / `PUT` / `DELETE` / `HEAD` and read-only `POST`s (recall,
+  search, queries, ...). A `store_memory()` that got a `500` is no longer sent again.
+  `RetryConfig(retry_non_idempotent=True)` restores the previous behaviour. The async
+  client wraps a dropped connection in `ConnectionError` instead of raising the raw
+  `httpx` error.
+- `ops_shutdown()` documents the server's global `super_admin` requirement (an `admin` key
+  gets `403` after v0.12.2).
+- `repr()` of the clients never shows the API key; the key fields of
+  `CreateNamespaceKeyResponse`, `RotateKeyResponse` and `RotateEncryptionKeyRequest` are
+  left out of `repr()`.
+- Dependencies: `urllib3>=2.8.0` (CVE-2026-97687, CVE-2026-97688, CVE-2026-97689; the
+  sync client streams SSE through urllib3); lock file: anyio 4.15.1, fsspec 2026.9.0
+  (dev / optional extras). `pip-audit` of the lock file finds no known vulnerability.
+- `tests/v0_12_routes.txt` follows the server router: API keys under `/admin/keys` only,
+  node-to-node `/internal` routes left out.
+
 ## [0.14.0] - 2026-10-08
 
 Dakera server **v0.12.2** support (Dakera-AI/dakera#916). Works against v0.12.0, v0.12.1

@@ -130,7 +130,7 @@ def main() -> None:
     try:
         if m1_id:
             client.feedback_memory(m1_id, agent_id, "upvote")
-            history = client.get_memory_feedback_history(m1_id)
+            history = client.get_memory_feedback_history(m1_id, agent_id)
             print(f"Feedback entries: {len(history.entries)}")
 
         summary = client.get_agent_feedback_summary(agent_id)

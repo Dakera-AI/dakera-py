@@ -153,6 +153,39 @@ asyncio.run(main())
 
 ---
 
+## Recall context and the next server release
+
+The next Dakera server release (after v0.12.2) changes how recall returns its
+neighbourhood context. This SDK works with it and with older servers: the new
+request fields are sent only when you set them, the new response fields are
+`None` from an older server.
+
+- `recall(..., neighborhood_mode=)`: `"inline"` (the server default) appends
+  session-adjacent context after the `top_k` ranked results, each marked
+  `retrieval == "neighborhood"` (its `score` is from a different search and is not
+  comparable); `"separate"` keeps `memories` to at most `top_k` results and puts
+  the context in `response.context_memories`, each with `context_of` (the ranked
+  memory it belongs to); `"off"` fetches none. `response.ranked` is the ranked
+  results alone. `include_summaries=False` keeps session summaries out.
+- Results (recall and `search_memories()`) carry `matched_ids` / `matched_text`
+  when the server collapses derived sentence sub-memories into their source.
+- `POST /admin/keys`, `POST /v1/namespaces/{ns}/keys`, `POST /admin/backups` and
+  `POST /admin/encryption/rotate-key` refuse unknown fields with `422`: the SDK
+  sends only the fields the server reads (`create_key(permissions=, expires_at=)`
+  and `create_backup(include_data=)` are deprecated and never sent).
+- `ops_shutdown()` needs a global `super_admin` key (`admin` gets `403`).
+
+```python
+response = client.recall("my-agent", "which port does the API use?", top_k=3,
+                         neighborhood_mode="separate")
+for m in response.memories:          # at most 3, ranked
+    print(m.score, m.content, m.matched_text)
+for c in response.context_memories or []:
+    print("  context of", c.context_of, ":", c.content)
+```
+
+---
+
 ## What's new for Dakera server v0.12.2
 
 Version 0.14.0 of this SDK adds support for Dakera server **v0.12.2** and stays

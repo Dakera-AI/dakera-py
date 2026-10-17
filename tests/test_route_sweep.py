@@ -53,6 +53,10 @@ class TestEveryCallHasARoute:
         assert len(routes) > 150
         assert ("PUT", "/v1/admin/quotas/default") in routes
         assert ("PUT", "/v1/admin/quotas") not in routes
+        # API keys are mounted under /admin/keys only; peer routes are not client routes.
+        assert ("POST", "/admin/keys") in routes
+        assert ("POST", "/v1/admin/keys") not in routes
+        assert not any(p.startswith("/internal") for _, p in routes)
 
     def test_sdk_calls_exist_on_the_server(self):
         routes = _server_routes()

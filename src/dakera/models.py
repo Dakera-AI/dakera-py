@@ -8,7 +8,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 from dakera.exceptions import UnsupportedCapabilityError
 
@@ -103,19 +103,35 @@ class RoutingMode(LenientStrEnum):
     """Fuse ANN and BM25 scores (RRF)."""
 
 
+NeighborhoodMode = Literal["inline", "separate", "off"]
+"""Where a recall returns its neighbourhood context (``neighborhood_mode``, server
+after v0.12.2):
+
+- ``"inline"`` (the server default unless ``DAKERA_NEIGHBORHOOD_MODE`` says
+  otherwise): appended to ``memories`` after the ``top_k`` ranked results, each
+  with ``retrieval == "neighborhood"``;
+- ``"separate"``: ``memories`` holds at most ``top_k`` results and the context is
+  in ``RecallResponse.context_memories``, each with ``context_of``;
+- ``"off"``: no neighbourhood context.
+"""
+
+RETRIEVAL_NEIGHBORHOOD = "neighborhood"
+"""``RecalledMemory.retrieval`` of a neighbourhood item returned inline."""
+
+
 class FusionStrategy(LenientStrEnum):
     """Fusion strategy for hybrid recall (CE-14).
 
     Controls how vector and BM25 scores are combined when ``routing=hybrid``.
-    ``rrf`` (default) uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009)
-    which is rank-based and scale-invariant. ``minmax`` uses legacy weighted
-    min-max normalization.
+    ``minmax`` (the server default since v0.11.2) uses weighted min-max
+    normalisation; ``rrf`` uses Reciprocal Rank Fusion (Cormack et al., SIGIR
+    2009), which is rank-based and scale-invariant.
     """
 
     RRF = "rrf"
-    """Reciprocal Rank Fusion — default, best for recall tasks."""
+    """Reciprocal Rank Fusion."""
     MINMAX = "minmax"
-    """Weighted min-max normalization — legacy behavior."""
+    """Weighted min-max normalisation — the server default since v0.11.2."""
 
 
 # ============================================================================
@@ -138,6 +154,12 @@ class RetryConfig:
 
     jitter: bool = True
     """Whether to add random jitter to backoff delay (default: True)."""
+
+    retry_non_idempotent: bool = False
+    """Also retry a request that may already have been acted on (a ``POST`` /
+    ``PATCH`` that got a ``5xx``, a read timeout or a dropped connection).
+    Off by default: repeating a write can store a memory twice. ``429`` /
+    ``503`` and failed connects are retried for every request either way."""
 
 
 @dataclass
@@ -1377,6 +1399,26 @@ class RecalledMemory:
     """Hybrid sub-score: vector similarity component (server v0.11.98+, absent when BM25-only)."""
     text_score: float | None = None
     """Hybrid sub-score: BM25 text component (server v0.11.98+, absent when vector-only)."""
+    matched_text: str | None = None
+    """When the server collapses derived sentence sub-memories into their source
+    (``DAKERA_RECALL_COLLAPSE_DERIVED``): the sentence that matched best, when it
+    outranked the source's own text. The memory itself is then the source."""
+    matched_ids: list[str] | None = None
+    """Ids of the derived sentence sub-memories collapsed into this result, best
+    first. ``None`` when none matched (and from servers up to v0.12.2)."""
+    retrieval: str | None = None
+    """How the item got into the response when it is not a ranked result:
+    ``"neighborhood"`` for neighbourhood context returned inline. Its ``score`` is
+    then the raw similarity of a different search and is NOT comparable with the
+    ranked results' scores. ``None`` for ranked results and on older servers."""
+    context_of: str | None = None
+    """On a ``RecallResponse.context_memories`` entry: the id of the ranked memory
+    it is context for."""
+
+    @property
+    def is_neighborhood(self) -> bool:
+        """Whether this item is neighbourhood context rather than a ranked result."""
+        return self.retrieval == RETRIEVAL_NEIGHBORHOOD or self.context_of is not None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
@@ -1401,7 +1443,42 @@ class RecalledMemory:
             depth=data.get("depth"),
             vector_score=data.get("vector_score"),
             text_score=data.get("text_score"),
+            matched_text=data.get("matched_text"),
+            matched_ids=data.get("matched_ids"),
+            retrieval=data.get("retrieval"),
+            context_of=data.get("context_of"),
         )
+
+
+# Keys of a recall/search result envelope (``{"memory": {...}, "score": ..., ...}``)
+# that are copied onto the flattened memory.
+_RESULT_ENVELOPE_KEYS = (
+    "smart_score",
+    "weighted_score",
+    "vector_score",
+    "text_score",
+    "depth",
+    "matched_text",
+    "matched_ids",
+    "retrieval",
+    "context_of",
+)
+
+
+def _flatten_result(m: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a ``{"memory": {...}, "score": ..., ...}`` result into one dict.
+
+    The memory's own fields come first; ``score`` and the envelope fields that
+    are present (:data:`_RESULT_ENVELOPE_KEYS`) are added next to them. A result
+    that is already flat is returned unchanged.
+    """
+    if "memory" in m and isinstance(m["memory"], dict):
+        flat = {**m["memory"], "score": m.get("score", 0.0)}
+        for key in _RESULT_ENVELOPE_KEYS:
+            if key in m:
+                flat[key] = m[key]
+        return flat
+    return m
 
 
 @dataclass
@@ -1412,34 +1489,45 @@ class RecallResponse:
     memories surfaced via configurable-depth KG traversal when
     ``include_associated`` is requested.  Each associated memory carries a
     ``depth`` field indicating the hop at which it was found (KG-3).
+
+    Under ``neighborhood_mode="inline"`` (the server default) ``memories`` may
+    hold more than ``top_k`` items: the neighbourhood context follows the ranked
+    results, each with ``retrieval == "neighborhood"`` (servers up to v0.12.2 do
+    not mark them). Under ``neighborhood_mode="separate"`` ``memories`` holds at
+    most ``top_k`` ranked results and the context is in ``context_memories``.
+    Use :attr:`ranked` for the ranked results alone.
     """
 
     memories: list["RecalledMemory"]
     associated_memories: list["RecalledMemory"] | None = None
+    context_memories: list["RecalledMemory"] | None = None
+    """Neighbourhood context under ``neighborhood_mode="separate"``, each entry
+    with ``context_of`` (the ranked memory it belongs to). ``None`` in the other
+    modes and from servers up to v0.12.2."""
+
+    @property
+    def ranked(self) -> list["RecalledMemory"]:
+        """The ranked results of ``memories``, without inline neighbourhood items."""
+        return [m for m in self.memories if not m.is_neighborhood]
 
     @classmethod
     def _normalize_memory(cls, m: dict[str, Any]) -> dict[str, Any]:
-        """Flatten nested memory envelope; promote sub-score fields to top level."""
-        if "memory" in m and isinstance(m["memory"], dict):
-            flat = {**m["memory"], "score": m.get("score", 0.0)}
-            for key in ("smart_score", "weighted_score", "vector_score", "text_score"):
-                if key in m:
-                    flat[key] = m[key]
-            return flat
-        return m
+        """Flatten nested memory envelope; promote the result fields to top level."""
+        return _flatten_result(m)
+
+    @classmethod
+    def _parse_list(cls, raw: Any) -> list["RecalledMemory"] | None:
+        if raw is None:
+            return None
+        return [RecalledMemory.from_dict(cls._normalize_memory(m)) for m in raw]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
-        memories = [
-            RecalledMemory.from_dict(cls._normalize_memory(m)) for m in data.get("memories", [])
-        ]
-        raw_assoc = data.get("associated_memories")
-        associated_memories = (
-            [RecalledMemory.from_dict(cls._normalize_memory(m)) for m in raw_assoc]
-            if raw_assoc is not None
-            else None
+        return cls(
+            memories=cls._parse_list(data.get("memories")) or [],
+            associated_memories=cls._parse_list(data.get("associated_memories")),
+            context_memories=cls._parse_list(data.get("context_memories")),
         )
-        return cls(memories=memories, associated_memories=associated_memories)
 
 
 @dataclass
@@ -3236,8 +3324,8 @@ class RotateKeyResponse:
     it always has); ``RotateKeyResponse.from_dict(...)`` gives it a type.
     """
 
-    new_key: str
-    """The new API key — shown only once."""
+    new_key: str = field(repr=False)
+    """The new API key — shown only once. Left out of ``repr()``."""
     key_id: str
     """The NEW key's id."""
     warning: str = ""
@@ -3345,7 +3433,8 @@ class CreateNamespaceKeyResponse:
     """
 
     key_id: str
-    key: str
+    key: str = field(repr=False)
+    """The raw API key, shown only once. Left out of ``repr()``."""
     name: str
     namespace: str
     created_at: int
@@ -3468,28 +3557,54 @@ class ConsolidationLogEntry:
 
 @dataclass
 class MemoryImportResponse:
-    """Response from ``POST /v1/import`` (DX-1)."""
+    """Response from ``POST /v1/import`` (DX-1): the import job's status.
+
+    ``imported_count`` / ``skipped_count`` are the server's ``imported`` /
+    ``skipped``; the job fields are ``None`` when the server did not send them.
+    """
 
     imported_count: int
     skipped_count: int
     errors: list[str]
+    job_id: str | None = None
+    status: str | None = None
+    """``"done"``, ``"failed"`` (every item skipped) or ``"running"``."""
+    format: str | None = None
+    total: int | None = None
+    started_at: int | None = None
+    finished_at: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryImportResponse":
         return cls(
-            imported_count=data.get("imported_count", 0),
-            skipped_count=data.get("skipped_count", 0),
-            errors=data.get("errors", []),
+            imported_count=data.get("imported", data.get("imported_count", 0)),
+            skipped_count=data.get("skipped", data.get("skipped_count", 0)),
+            errors=list(data.get("errors") or []),
+            job_id=data.get("job_id"),
+            status=data.get("status"),
+            format=data.get("format"),
+            total=data.get("total"),
+            started_at=data.get("started_at"),
+            finished_at=data.get("finished_at"),
         )
 
 
 @dataclass
 class MemoryExportResponse:
-    """Response from ``GET /v1/export`` (DX-1)."""
+    """Response from ``GET /v1/export`` (DX-1).
+
+    The server answers the export file itself; ``data`` is its memories as
+    dicts (CSV rows as string-valued dicts) and ``raw`` the file as received,
+    ready to pass back to :meth:`~dakera.DakeraClient.import_memories`.
+    """
 
     data: list[dict[str, Any]]
     format: str
     count: int
+    raw: str = field(default="", repr=False)
+    """The export file as the server sent it."""
+    skipped: int = 0
+    """Stored memories the server could not export (``x-dakera-export-skipped``)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryExportResponse":
@@ -3668,31 +3783,67 @@ class FulltextReindexResponse:
 
 @dataclass
 class RotateEncryptionKeyRequest:
-    """Request body for ``POST /v1/admin/encryption/rotate-key`` (SEC-3).
+    """Request body for ``POST /admin/encryption/rotate-key`` (SEC-3).
+
+    :meth:`to_dict` holds exactly the fields the server's
+    ``RotateEncryptionKeyRequest`` reads (it refuses any other with ``422``
+    after v0.12.2), and only those that are set.
 
     Args:
-        new_key: New passphrase or 64-char hex key to rotate to.
-        namespace: If set, rotate only memories in this namespace.
-            Omit to rotate all namespaces.
+        new_key: Passphrase or 64-char hex key the new data key is derived
+            from. ``None``: the server generates a random 256-bit key. Never
+            shown by ``repr()``.
+        namespace: If set, rotate only this namespace's key. Omit to rotate
+            the global key (every namespace moves to it).
+        wait_secs: How long the server waits for the re-seal before answering
+            (server default 10, at most 300; ``0`` = answer at once).
     """
 
-    new_key: str
+    new_key: str | None = field(default=None, repr=False)
     namespace: str | None = None
+    wait_secs: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"new_key": self.new_key}
+        d: dict[str, Any] = {}
+        if self.new_key is not None:
+            d["new_key"] = self.new_key
         if self.namespace is not None:
             d["namespace"] = self.namespace
+        if self.wait_secs is not None:
+            d["wait_secs"] = self.wait_secs
         return d
 
 
 @dataclass
 class RotateEncryptionKeyResponse:
-    """Response from ``POST /v1/admin/encryption/rotate-key`` (SEC-3)."""
+    """Response from ``POST /admin/encryption/rotate-key`` (SEC-3).
+
+    Key ids only, never key material. The fields after ``namespaces`` are
+    ``None`` / empty when the server did not send them.
+    """
 
     rotated: int
+    """Values re-sealed under the new key by the time of the answer."""
     skipped: int
+    """Values not re-sealed by the time of the answer (retried in the background)."""
     namespaces: list[str]
+    """Namespaces with values re-sealed by the time of the answer."""
+    key_id: str | None = None
+    """Id of the new active key."""
+    previous_key_id: str | None = None
+    """Id of the key it replaces for this scope."""
+    scope: str | None = None
+    """``"global"`` or ``"namespace"``."""
+    namespace: str | None = None
+    reseal: str | None = None
+    """``"completed"``, ``"running"`` or ``"partial"`` — see
+    ``GET /admin/encryption/status`` (``status_url``)."""
+    fulltext_indices_rotated: int | None = None
+    failed_namespaces: list[str] = field(default_factory=list)
+    action_required: str | None = None
+    """Set when the operator must act, e.g. set ``DAKERA_ENCRYPTION_KEY``
+    before the next restart."""
+    status_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RotateEncryptionKeyResponse":
@@ -3700,6 +3851,15 @@ class RotateEncryptionKeyResponse:
             rotated=data.get("rotated", 0),
             skipped=data.get("skipped", 0),
             namespaces=data.get("namespaces", []),
+            key_id=data.get("key_id"),
+            previous_key_id=data.get("previous_key_id"),
+            scope=data.get("scope"),
+            namespace=data.get("namespace"),
+            reseal=data.get("reseal"),
+            fulltext_indices_rotated=data.get("fulltext_indices_rotated"),
+            failed_namespaces=list(data.get("failed_namespaces") or []),
+            action_required=data.get("action_required"),
+            status_url=data.get("status_url"),
         )
 
 
