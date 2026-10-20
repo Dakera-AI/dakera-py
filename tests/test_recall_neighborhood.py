@@ -95,6 +95,30 @@ class TestParsing:
         assert ctx.retrieval == "neighborhood"
         assert ctx.is_neighborhood
 
+    def test_rank_score_is_the_ranking_score(self):
+        # #940: score inverts down the list; rank_score does not.
+        answer = {
+            "memories": [
+                {"memory": _mem("m1"), "score": 0.0001, "smart_score": 0.3, "rank_score": 0.62},
+                {"memory": _mem("m2"), "score": 0.0023, "smart_score": 0.5, "rank_score": 0.41},
+                {
+                    "memory": _mem("n1"),
+                    "score": 0.9,
+                    "retrieval": "neighborhood",
+                    "rank_score": 0.0,
+                },
+            ],
+            "query_embedding_time_ms": 1,
+            "search_time_ms": 1,
+        }
+        r = RecallResponse.from_dict(answer)
+        assert [m.rank_score for m in r.memories] == [0.62, 0.41, 0.0]
+        assert [m.score for m in r.memories] == [0.62, 0.41, 0.0]
+        scores = [m.score for m in r.memories]
+        assert scores == sorted(scores, reverse=True)
+        # Older servers send none: score falls back to smart_score.
+        assert RecallResponse.from_dict(INLINE_ANSWER).memories[0].rank_score is None
+
     def test_old_server_answer(self):
         r = RecallResponse.from_dict(OLD_ANSWER)
         assert [m.id for m in r.memories] == ["m1", "n1"]

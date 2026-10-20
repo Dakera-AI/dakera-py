@@ -1394,9 +1394,14 @@ class RecalledMemory:
     memory_type: str
     importance: float
     score: float
-    """Ranking score — equals smart_score when present, then weighted_score, then raw score."""
+    """Ranking score — the server's ``rank_score`` when present (v0.12.3+: non-increasing
+    over a recall's results, in order), else smart_score, then weighted_score, then raw
+    score."""
+    rank_score: float | None = None
+    """The server's ranking field (recall, v0.12.3+): non-increasing over ``memories`` in
+    response order — sort or threshold on this. ``None`` from older servers and search."""
     smart_score: float | None = None
-    """Raw smart_score from the server (the primary ranking key)."""
+    """Raw smart_score from the server."""
     weighted_score: float | None = None
     """Raw weighted_score from the server."""
     metadata: dict[str, Any] | None = None
@@ -1437,9 +1442,12 @@ class RecalledMemory:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
+        rank_score = data.get("rank_score")
         smart_score = data.get("smart_score")
         weighted_score = data.get("weighted_score")
-        if smart_score is not None:
+        if rank_score is not None:
+            score = rank_score
+        elif smart_score is not None:
             score = smart_score
         elif weighted_score is not None:
             score = weighted_score
@@ -1451,6 +1459,7 @@ class RecalledMemory:
             memory_type=data.get("memory_type", "episodic"),
             importance=data.get("importance", 0.5),
             score=score,
+            rank_score=rank_score,
             smart_score=smart_score,
             weighted_score=weighted_score,
             metadata=data.get("metadata"),
@@ -1468,6 +1477,7 @@ class RecalledMemory:
 # Keys of a recall/search result envelope (``{"memory": {...}, "score": ..., ...}``)
 # that are copied onto the flattened memory.
 _RESULT_ENVELOPE_KEYS = (
+    "rank_score",
     "smart_score",
     "weighted_score",
     "vector_score",
