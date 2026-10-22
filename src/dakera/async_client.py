@@ -30,9 +30,10 @@ import os
 import random
 import time
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 try:
     import httpx
@@ -42,11 +43,26 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 from dakera._util import (
+    _MIN_POLL_INTERVAL,
     _attachment_body,
     _audit_export_response,
+    _create_backup_body,
+    _create_key_body,
+    _create_namespace_key_body,
+    _dakera_event,
+    _document_fields,
+    _event_time,
+    _export_response,
+    _import_upload,
     _key_update_body,
     _listing_params,
+    _memory_event,
     _memory_job_body,
+    _not_sent,
+    _path_segment,
+    _redacted_repr,
+    _retry_safe,
+    _SSEDecoder,
     _store_memory_result,
 )
 from dakera.exceptions import (
@@ -79,6 +95,7 @@ from dakera.models import (
     BatchStoreMemoryRequest,
     BatchStoreMemoryResponse,
     BatchTextQueryResponse,
+    ChunkingOptions,
     CompressResponse,
     ConfigureNamespaceRequest,
     ConfigureNamespaceResponse,
@@ -88,11 +105,18 @@ from dakera.models import (
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
+    DeduplicatedListResponse,
+    DeleteDocumentResponse,
     DerivationDrainResponse,
     DerivationStatus,
     DistanceMetric,
     Document,
+    DocumentDetail,
+    DocumentImportAccepted,
     DocumentInput,
+    DocumentJob,
+    DocumentListResponse,
+    DocumentSummary,
     DrainReembedResponse,
     EdgeType,
     EmbeddingModel,
@@ -115,6 +139,8 @@ from dakera.models import (
     GraphLinkResponse,
     GraphPath,
     HybridSearchResult,
+    ImportAttachmentDocumentRequest,
+    ImportDocumentRequest,
     ImportJobStatus,
     IndexStats,
     JobAccepted,
@@ -126,6 +152,7 @@ from dakera.models import (
     # OBS-2
     KpiSnapshot,
     ListNamespaceKeysResponse,
+    Memory,
     MemoryEntitiesResponse,
     MemoryEvent,
     MemoryExportResponse,
@@ -139,6 +166,7 @@ from dakera.models import (
     NamespaceInfo,
     NamespaceKeyUsageResponse,
     NamespaceNerConfig,
+    NeighborhoodMode,
     RateLimitHeaders,
     ReadConsistency,
     # COG-2
@@ -147,6 +175,7 @@ from dakera.models import (
     RecordUpsertResponse,
     RecordView,
     RetryConfig,
+    RotateEncryptionKeyRequest,
     # SEC-3
     RotateEncryptionKeyResponse,
     RouteResponse,
@@ -173,6 +202,7 @@ from dakera.models import (
     WarmingPriority,
     WarmingTargetTier,
     WhoamiResponse,
+    _flatten_result,
     wire_value,
 )
 
@@ -226,7 +256,9 @@ class AsyncDakeraClient:
             headers: Additional headers to include in all requests
             ode_url: Base URL of the dakera-ode sidecar
                 (e.g., ``"http://localhost:8080"``).  Required to call
-                :meth:`extract_entities`.
+                :meth:`ode_extract_entities`. Requests to the sidecar currently
+                carry the Dakera API key (tracked in
+                https://github.com/Dakera-AI/dakera/issues/924).
             preflight: Validate the requested embedding model, index kind and
                 distance metric against ``GET /v1/capabilities`` *before* sending
                 a request (see :class:`dakera.DakeraClient` for the full contract).
@@ -263,6 +295,9 @@ class AsyncDakeraClient:
         self._preflight_enabled = preflight
         self._capabilities: ServerCapabilities | None = None
         self._capabilities_unavailable = False
+
+    def __repr__(self) -> str:
+        return _redacted_repr(self)
 
     @property
     def last_rate_limit_headers(self) -> RateLimitHeaders | None:
@@ -367,6 +402,7 @@ class AsyncDakeraClient:
         content: bytes | None = None,
         headers: dict[str, str] | None = None,
         raw: bool = False,
+        idempotent: bool | None = None,
     ) -> Any:
         """Make async HTTP request with retry logic and exponential backoff.
 
@@ -375,9 +411,15 @@ class AsyncDakeraClient:
         instead of its parsed body. A ``503`` / ``429`` waits for the server's
         ``Retry-After`` (capped at the retry config's ``max_delay``) before the
         next attempt; other transient errors use exponential backoff.
+
+        Retries follow :meth:`dakera.DakeraClient._request`: ``429`` / ``503``
+        and a failed connect for every request; a ``5xx``, a read / write
+        timeout or a dropped connection only for an idempotent one.
         """
         url = self._url(path)
         rc = self._retry_config
+        if idempotent is None:
+            idempotent = _retry_safe(method, path) or rc.retry_non_idempotent
 
         for attempt in range(rc.max_retries):
             try:
@@ -391,18 +433,25 @@ class AsyncDakeraClient:
                 )
                 return self._handle_response(response, raw=raw)
             except httpx.ConnectError as e:
+                # Nothing was sent: safe to retry whatever the method.
                 if attempt == rc.max_retries - 1:
                     raise ConnectionError(f"Failed to connect to {url}: {e}") from e
             except httpx.TimeoutException as e:
-                if attempt == rc.max_retries - 1:
+                # A connect / pool timeout sent nothing; a read / write one may have.
+                sent = not isinstance(e, (httpx.ConnectTimeout, httpx.PoolTimeout))
+                if attempt == rc.max_retries - 1 or (sent and not idempotent):
                     raise TimeoutError(f"Request timed out: {e}") from e
+            except httpx.TransportError as e:
+                # Connection dropped mid-request (reset, protocol error).
+                if attempt == rc.max_retries - 1 or not idempotent:
+                    raise ConnectionError(f"Connection to {url} failed: {e}") from e
             except (RateLimitError, ServiceUnavailableError) as e:
                 if attempt == rc.max_retries - 1:
                     raise
                 await asyncio.sleep(self._retry_delay(rc, e.retry_after, attempt))
                 continue
             except ServerError:
-                if attempt == rc.max_retries - 1:
+                if attempt == rc.max_retries - 1 or not idempotent:
                     raise
             except DakeraError:
                 raise
@@ -711,7 +760,9 @@ class AsyncDakeraClient:
         metadata: dict[str, Any] | None = None,
         distance: DistanceMetric | str | None = None,
     ) -> NamespaceInfo:
-        """Create a new namespace."""
+        """Create a new namespace. See :meth:`dakera.DakeraClient.create_namespace`:
+        ``dimensions`` is required by the server; ``index_type`` / ``metadata``
+        are not read by its create route."""
         data: dict[str, Any] = {"name": namespace}
         if dimensions:
             data["dimension"] = dimensions
@@ -1017,6 +1068,226 @@ class AsyncDakeraClient:
             await asyncio.sleep(poll_interval)
 
     # =========================================================================
+    # Documents (#923, server v0.12.3+): PDF / DOCX / HTML / Markdown / text
+    # imported as chunk memories
+    # =========================================================================
+
+    async def import_document(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        media_type: str | None = None,
+        title: str | None = None,
+        document_id: str | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
+        lang: str | None = None,
+        chunking: ChunkingOptions | dict[str, Any] | None = None,
+        decompose: bool | None = None,
+    ) -> DocumentImportAccepted:
+        """Import a document given as text — ``POST /v1/memory/documents`` (``202``).
+
+        The server splits it into chunk memories of the agent (each with its
+        heading breadcrumb and ``_dakera_document`` provenance) in a background
+        job: poll it with :meth:`get_document_job` or wait with
+        :meth:`wait_for_document_job`. Needs Write on the agent's namespace and
+        server v0.12.3+ (an older server answers ``404``; check
+        ``capabilities().documents.enabled``).
+
+        Args:
+            agent_id: The agent whose memories the chunks become.
+            content: The document (at most ``capabilities().documents.max_bytes``).
+            media_type: ``"text/plain"`` (server default), ``"text/markdown"``
+                or ``"text/html"``.
+            title: Title (else the document's own: front matter, first ``#``
+                heading, ``<title>``); the root of every chunk's breadcrumb.
+            document_id: Default: derived from the agent and the content hash,
+                so the same bytes imported again replace the document.
+            memory_type, session_id, importance, tags, metadata, ttl_seconds,
+                expires_at, lang: Carried by every chunk memory (as
+                :meth:`store_memory`).
+            chunking: :class:`ChunkingOptions` (or a dict with ``max_tokens``,
+                ``overlap_tokens``, ``strategy``).
+            decompose: Derive sentence sub-memories from every chunk (server
+                default ``False``).
+
+        Returns:
+            :class:`DocumentImportAccepted` (``job_id``, ``document_id``, ...).
+
+        Errors: ``501`` (:class:`~dakera.FeatureNotAvailableError`) when the
+        server runs with ``DAKERA_DOCUMENTS`` off; ``413`` for a document over
+        the size limit; ``503`` / ``429`` (retried, ``Retry-After``) when the
+        server cannot take the job now.
+        """
+        body = ImportDocumentRequest(
+            agent_id=agent_id,
+            content=content,
+            media_type=media_type,
+            title=title,
+            document_id=document_id,
+            **_document_fields(
+                memory_type, session_id, importance, tags, metadata, ttl_seconds,
+                expires_at, lang, chunking, decompose,
+            ),
+        ).to_dict()  # fmt: skip
+        result = await self._request("POST", "/v1/memory/documents", data=body)
+        return DocumentImportAccepted.from_dict(result)
+
+    async def import_attachment_document(
+        self,
+        namespace: str,
+        attachment_ref: str,
+        agent_id: str,
+        *,
+        title: str | None = None,
+        document_id: str | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        ttl_seconds: int | None = None,
+        expires_at: int | None = None,
+        lang: str | None = None,
+        chunking: ChunkingOptions | dict[str, Any] | None = None,
+        decompose: bool | None = None,
+    ) -> DocumentImportAccepted:
+        """Import an uploaded attachment as a document —
+        ``POST /v1/namespaces/{namespace}/attachments/{attachment_ref}/document``.
+
+        Upload the file first with :meth:`upload_attachment`; its stored media
+        type picks the parser: PDF, DOCX, HTML, Markdown or text
+        (``capabilities().documents.media_types``). The chunks reference the
+        attachment (``attachment_ref``). Needs Read on ``namespace`` and Write
+        on the agent's namespace, the server's attachment lane
+        (``DAKERA_ATTACHMENTS``) and server v0.12.3+. The other arguments are
+        those of :meth:`import_document`.
+        """
+        body = ImportAttachmentDocumentRequest(
+            agent_id=agent_id,
+            title=title,
+            document_id=document_id,
+            **_document_fields(
+                memory_type, session_id, importance, tags, metadata, ttl_seconds,
+                expires_at, lang, chunking, decompose,
+            ),
+        ).to_dict()  # fmt: skip
+        result = await self._request(
+            "POST",
+            f"/v1/namespaces/{namespace}/attachments/{attachment_ref}/document",
+            data=body,
+        )
+        return DocumentImportAccepted.from_dict(result)
+
+    async def get_document_job(self, job_id: str, agent_id: str) -> DocumentJob:
+        """A document import job — ``GET /v1/memory/documents/jobs/{job_id}?agent_id=``.
+
+        ``status`` ``Pending`` / ``Running`` (``progress``, ``message``
+        ``chunks_stored n/total``) / ``Completed`` / ``Failed`` (``error_status``,
+        ``error_code``). Jobs live in server memory: after a restart this is a
+        ``NotFoundError``; the chunks a completed job stored are kept (see
+        :meth:`get_document`).
+        """
+        result = await self._request(
+            "GET",
+            f"/v1/memory/documents/jobs/{_path_segment(job_id)}",
+            params={"agent_id": agent_id},
+        )
+        return DocumentJob.from_dict(result)
+
+    async def wait_for_document_job(
+        self,
+        job_id: str,
+        agent_id: str,
+        timeout: float = 600.0,
+        poll_interval: float = 1.0,
+    ) -> DocumentJob:
+        """Poll a document import job until it completes, fails or is cancelled.
+
+        Polls every ``poll_interval`` seconds (at least 0.1) and returns the
+        final :class:`DocumentJob` (check ``succeeded`` / ``error_code``).
+        Raises :class:`~dakera.exceptions.TimeoutError` after ``timeout``
+        seconds; the job keeps running on the server.
+        """
+        interval = max(poll_interval, _MIN_POLL_INTERVAL)
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.get_document_job(job_id, agent_id)
+            if job.is_done:
+                return job
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"document import job {job_id} not done after {timeout:g}s")
+            await asyncio.sleep(min(interval, remaining))
+
+    async def list_documents(
+        self,
+        agent_id: str,
+        *,
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> DocumentListResponse:
+        """One page of the agent's documents — ``GET /v1/memory/documents``.
+
+        Sorted by document id; ``limit`` 1–500 (server default 50). Pass the
+        answer's ``next_cursor`` as ``cursor`` for the next page (``None`` on
+        the last one), or use :meth:`iter_documents`.
+        """
+        params: dict[str, Any] = {"agent_id": agent_id}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if limit is not None:
+            params["limit"] = limit
+        result = await self._request("GET", "/v1/memory/documents", params=params)
+        return DocumentListResponse.from_dict(result or {})
+
+    async def iter_documents(
+        self, agent_id: str, page_size: int | None = None
+    ) -> AsyncGenerator[DocumentSummary, None]:
+        """Every document of the agent, following ``next_cursor`` page by page."""
+        cursor: str | None = None
+        while True:
+            page = await self.list_documents(agent_id, cursor=cursor, limit=page_size)
+            for document in page.documents:
+                yield document
+            if not page.next_cursor or page.next_cursor == cursor or not page.documents:
+                return
+            cursor = page.next_cursor
+
+    async def get_document(self, document_id: str, agent_id: str) -> DocumentDetail:
+        """One document and its chunks — ``GET /v1/memory/documents/{document_id}``.
+
+        Chunks: memory id, index, page range, heading path, character range.
+        A document the agent does not have is a ``NotFoundError``.
+        """
+        result = await self._request(
+            "GET",
+            f"/v1/memory/documents/{_path_segment(document_id)}",
+            params={"agent_id": agent_id},
+        )
+        return DocumentDetail.from_dict(result or {})
+
+    async def delete_document(self, document_id: str, agent_id: str) -> DeleteDocumentResponse:
+        """Delete every chunk of a document — ``DELETE /v1/memory/documents/{document_id}``.
+
+        The attachment it was imported from goes when no memory references it
+        any more. Needs Write on the agent's namespace; an unknown document is
+        a ``NotFoundError``.
+        """
+        result = await self._request(
+            "DELETE",
+            f"/v1/memory/documents/{_path_segment(document_id)}",
+            params={"agent_id": agent_id},
+        )
+        return DeleteDocumentResponse.from_dict(result or {})
+
+    # =========================================================================
     # Records: one vector plus named representations (server v0.12, DAKERA_RECORDS)
     # =========================================================================
 
@@ -1127,6 +1398,8 @@ class AsyncDakeraClient:
         valid_from: int | None = None,
         lang: str | None = None,
         attachment_ref: str | None = None,
+        *,
+        event_time: int | float | str | datetime | None = None,
     ) -> dict[str, Any]:
         """Store a memory for an agent.
 
@@ -1145,7 +1418,9 @@ class AsyncDakeraClient:
                 Takes precedence over ``ttl_seconds`` when both are provided.
             valid_from: Optional bi-temporal validity start as a Unix timestamp
                 (seconds). Indicates when this memory becomes temporally valid,
-                independent of ingest time. Defaults to ingest time when omitted.
+                independent of ingest time. The server reads it from the
+                memory's metadata, so it is sent as ``metadata["valid_from"]``
+                (earlier SDKs sent a top-level field the server ignored).
                 Requires server v0.11.98+ (DAK-7424).
             lang: Language of ``content`` for the write-time derivations (event
                 dates, entity tags): an ISO 639-1 code or name, optionally with a
@@ -1156,12 +1431,26 @@ class AsyncDakeraClient:
                 this agent's namespace (``_dakera_agent_{agent_id}``) with
                 :meth:`upload_attachment`. Server v0.12+, needs
                 ``DAKERA_ATTACHMENTS``.
+            event_time: When the memory's event happened, for history written
+                after the fact (an import, a backfill, a replayed conversation):
+                Unix seconds, an RFC 3339 string or a timezone-aware
+                ``datetime``. Server v0.12.3+: recorded as metadata
+                ``_dakera_event_time`` (integer seconds) and as the event date;
+                recency, ``since``/``until`` and the temporal links read it
+                instead of the ingest time, while ``created_at``, TTL and decay
+                keep the ingest time. Out of range (before 1970, after 2286) is
+                a ``400``. Older servers ignore it.
 
         Returns:
             The stored memory. From server v0.12.2, when the memory went into a
             started session the dict also carries ``session_state``
             (``"active"`` or ``"ended"``): storing into an ended session still
-            succeeds, so check it if your agent keeps a session open.
+            succeeds, so check it if your agent keeps a session open. From
+            server v0.12.3, a text longer than the embedding model reads adds
+            ``truncated: True`` with ``content_tokens``, ``embedded_tokens``,
+            ``max_tokens`` and ``windows`` (the vector covers only the first
+            ``embedded_tokens``), and request fields the server ignored are
+            listed in ``warnings``.
 
         The server limits ``content`` in UTF-8 **bytes** (v0.12.2:
         ``DAKERA_MAX_MEMORY_CONTENT_BYTES``, default 100000) and refuses reserved
@@ -1183,11 +1472,13 @@ class AsyncDakeraClient:
         if expires_at is not None:
             data["expires_at"] = expires_at
         if valid_from is not None:
-            data["valid_from"] = valid_from
+            data["metadata"] = {**(metadata or {}), "valid_from": valid_from}
         if lang is not None:
             data["lang"] = lang
         if attachment_ref is not None:
             data["attachment_ref"] = attachment_ref
+        if event_time is not None:
+            data["event_time"] = _event_time(event_time)
         data["agent_id"] = agent_id
         response = await self._request("POST", "/v1/memory/store", data=data)
         return _store_memory_result(response)
@@ -1213,6 +1504,11 @@ class AsyncDakeraClient:
         neighborhood: bool | None = None,
         lang: str | None = None,
         tags: list[str] | None = None,
+        *,
+        neighborhood_mode: NeighborhoodMode | None = None,
+        include_summaries: bool | None = None,
+        session_id: str | None = None,
+        rerank_candidates: int | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -1256,13 +1552,47 @@ class AsyncDakeraClient:
             neighborhood: v0.11.0 — fetch session-adjacent memories within
                 ±5 min of each top result as context enrichment (default:
                 None = server default of ``True``). Pass ``False`` to
-                disable for latency-sensitive paths.
+                disable for latency-sensitive paths; ``False`` means
+                ``neighborhood_mode="off"`` and wins over it.
+            neighborhood_mode: Where the neighbourhood context goes (server
+                v0.12.3+; older servers ignore it): ``"inline"`` (the
+                server default, ``DAKERA_NEIGHBORHOOD_MODE``) appends it to
+                ``memories`` after the ``top_k`` ranked results, each with
+                ``retrieval == "neighborhood"``; ``"separate"`` keeps
+                ``memories`` to at most ``top_k`` results and returns the
+                context in ``context_memories`` (each with ``context_of``);
+                ``"off"`` fetches none. Pass ``"separate"`` when ``top_k``
+                must be the maximum number of results.
+            include_summaries: Whether session-summary memories may be
+                recalled (server v0.12.3+). Omitted = the server's choice
+                (``DAKERA_RECALL_EXCLUDE_SUMMARIES``, default: they may).
+            session_id: Recall within this session only.
+            rerank_candidates: Rerank at most this many retrieved candidates
+                with the cross-encoder (the best by retrieval score; the rest
+                stay below them in retrieval order). Omitted = the whole pool
+                up to the server's cap (``DAKERA_RERANK_MAX_CANDIDATES``); a
+                value above the cap is lowered to it and reported as
+                ``rerank_report.capped`` (server v0.12.3+). Must be at least 1
+                (``0`` is a ``400`` on v0.12.3; pass ``rerank=False`` to turn
+                reranking off).
 
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
             ``associated_memories`` when ``include_associated`` is True.
-            Each associated memory includes a ``depth`` field (KG-3).
+            Each associated memory includes a ``depth`` field (KG-3). The
+            first ``k`` results of a ``top_k=k`` recall are the first ``k``
+            of a ``top_k=10`` recall for ``k <= 10`` (server v0.12.3+).
+            ``rerank_report`` says what the cross-encoder did and ``warnings``
+            lists request fields the server ignored (v0.12.3+). An agent that
+            has stored nothing yet answers with no memories (servers before
+            v0.12.3 answered ``404 NAMESPACE_NOT_FOUND``).
         """
+        if rerank_candidates is not None and (
+            isinstance(rerank_candidates, bool) or rerank_candidates < 1
+        ):
+            raise ValueError(
+                "rerank_candidates must be a positive integer; pass rerank=False to skip reranking"
+            )
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
@@ -1292,20 +1622,29 @@ class AsyncDakeraClient:
             data["iterations"] = iterations
         if neighborhood is not None:
             data["neighborhood"] = neighborhood
+        if neighborhood_mode is not None:
+            data["neighborhood_mode"] = neighborhood_mode
+        if include_summaries is not None:
+            data["include_summaries"] = include_summaries
         if lang is not None:
             data["lang"] = lang
         if tags is not None:
             data["tags"] = tags
+        if session_id is not None:
+            data["session_id"] = session_id
+        if rerank_candidates is not None:
+            data["rerank_candidates"] = rerank_candidates
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
-    async def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
-        """Get a specific memory."""
+    async def get_memory(self, agent_id: str | None, memory_id: str) -> dict[str, Any]:
+        """Get a specific memory. See :meth:`DakeraClient.get_memory`."""
+        params = {"agent_id": agent_id} if agent_id is not None else None
         return await self._request(
-            "GET", f"/v1/memory/get/{memory_id}", params={"agent_id": agent_id}
+            "GET", f"/v1/memory/get/{_path_segment(memory_id)}", params=params
         )
 
     async def update_memory(
@@ -1316,11 +1655,20 @@ class AsyncDakeraClient:
         metadata: dict[str, Any] | None = None,
         memory_type: str | None = None,
         lang: str | None = None,
+        *,
+        importance: float | None = None,
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Update an existing memory.
+        """Update an existing memory (only the fields given are sent; ``tags``
+        replaces the memory's tags).
 
         ``lang`` (server v0.12+) is the language of the content; when it differs
         from the recorded one the text-derived data is re-derived.
+
+        Returns the updated memory. From server v0.12.3, when new ``content``
+        is longer than the embedding model reads, it also carries
+        ``truncated: True``, ``content_tokens``, ``embedded_tokens``,
+        ``max_tokens`` and ``windows``.
         """
         data: dict[str, Any] = {}
         if content is not None:
@@ -1331,6 +1679,10 @@ class AsyncDakeraClient:
             data["memory_type"] = memory_type
         if lang is not None:
             data["lang"] = lang
+        if importance is not None:
+            data["importance"] = importance
+        if tags is not None:
+            data["tags"] = list(tags)
         return await self._request(
             "PUT",
             f"/v1/memory/update/{memory_id}",
@@ -1410,11 +1762,19 @@ class AsyncDakeraClient:
         rerank: bool | None = None,
         lang: str | None = None,
         tags: list[str] | None = None,
+        *,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Search memories for an agent.
 
         ``lang`` (server v0.12+): language of ``query`` for rule-based routing.
         ``tags``: only memories carrying at least one of these tags.
+        ``session_id``: only memories of this session.
+
+        Each result is the memory's fields plus ``score`` and the result fields
+        the server sent (``smart_score``, ``weighted_score``, ``vector_score``,
+        ``text_score``; from v0.12.3 ``matched_ids`` / ``matched_text`` when
+        derived sentences are collapsed into their source).
         """
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
@@ -1429,16 +1789,13 @@ class AsyncDakeraClient:
             data["lang"] = lang
         if tags is not None:
             data["tags"] = tags
+        if session_id is not None:
+            data["session_id"] = session_id
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/search", data=data)
         items = result.get("memories", result) if isinstance(result, dict) else result
         if isinstance(items, list):
-            return [
-                {**item["memory"], "score": item.get("score")}
-                if isinstance(item, dict) and isinstance(item.get("memory"), dict)
-                else item
-                for item in items
-            ]
+            return [_flatten_result(item) if isinstance(item, dict) else item for item in items]
         return items
 
     async def compress_agent(self, agent_id: str) -> CompressResponse:
@@ -1471,29 +1828,52 @@ class AsyncDakeraClient:
         threshold: float | None = None,
         dry_run: bool = False,
         config: ConsolidationConfig | None = None,
+        *,
+        memory_ids: list[str] | None = None,
+        target_type: str | None = None,
     ) -> dict[str, Any]:
-        """Consolidate memories for an agent (CE-6).
+        """Merge memories of an agent into one — ``POST /v1/memory/consolidate`` (CE-6).
+
+        The merged memory is stored and the sources are forgotten. Without
+        ``memory_ids`` the server picks up to 5 memories of the agent's most
+        common type.
 
         Args:
             agent_id: Agent whose memories to consolidate.
-            memory_type: Optional filter — only consolidate this memory type.
-            threshold: Similarity threshold for grouping (0–1).
-            dry_run: Preview changes without applying them.
-            config: Optional :class:`~dakera.ConsolidationConfig` to select the
-                clustering algorithm and tune its parameters.
+            memory_type: Deprecated: not read by the server and not sent (use
+                ``memory_ids`` to choose the memories).
+            threshold: Similarity threshold (0–1).
+            dry_run: The server has no dry run for this route: ``True`` raises
+                ``ValueError`` instead of merging (earlier SDKs sent it and the
+                server merged anyway).
+            config: Deprecated: not read by this route and not sent; see
+                :meth:`patch_consolidation_config` / :meth:`consolidate_agent`.
+            memory_ids: Consolidate exactly these memories (at least 2).
+            target_type: Memory type of the merged memory.
 
         Returns:
-            Dict with ``consolidated_count``, ``removed_count``, ``new_memories``
-            and optionally a ``log`` list of consolidation steps.
+            Dict with ``consolidated_memory``, ``source_memory_ids`` and
+            ``memories_removed``.
+
+        Raises:
+            ValueError: ``dry_run=True``.
         """
-        data: dict[str, Any] = {"dry_run": dry_run}
+        if dry_run:
+            raise ValueError(
+                "consolidate(dry_run=True): the server has no dry run for "
+                "/v1/memory/consolidate and would merge the memories"
+            )
         if memory_type is not None:
-            data["memory_type"] = memory_type
+            _not_sent("consolidate", "memory_type", "memory_ids=")
+        if config is not None:
+            _not_sent("consolidate", "config", "patch_consolidation_config()")
+        data: dict[str, Any] = {"agent_id": agent_id}
+        if memory_ids is not None:
+            data["memory_ids"] = list(memory_ids)
         if threshold is not None:
             data["threshold"] = threshold
-        if config is not None:
-            data["config"] = config.to_dict()
-        data["agent_id"] = agent_id
+        if target_type is not None:
+            data["target_type"] = target_type
         return await self._request("POST", "/v1/memory/consolidate", data=data)
 
     async def consolidate_agent(self, agent_id: str) -> dict[str, Any]:
@@ -1575,19 +1955,27 @@ class AsyncDakeraClient:
         result = await self._request("POST", f"/v1/memories/{memory_id}/feedback", data=data)
         return FeedbackResponse.from_dict(result)
 
-    async def get_memory_feedback_history(self, memory_id: str) -> FeedbackHistoryResponse:
+    async def get_memory_feedback_history(
+        self, memory_id: str, agent_id: str | None = None
+    ) -> FeedbackHistoryResponse:
         """Get the full feedback history for a memory (INT-1).
 
         Args:
             memory_id: The memory whose feedback history to retrieve.
+            agent_id: The agent that owns the memory (required by the server,
+                which answers ``400`` without it).
 
         Returns:
             :class:`FeedbackHistoryResponse` with ordered list of feedback events.
         """
-        result = await self._request("GET", f"/v1/memories/{memory_id}/feedback")
+        if not agent_id:
+            raise ValueError("get_memory_feedback_history() needs agent_id: the server requires it")
+        result = await self._request(
+            "GET", f"/v1/memories/{memory_id}/feedback", params={"agent_id": agent_id}
+        )
         return FeedbackHistoryResponse.from_dict(result)
 
-    async def evaluate_tif(self, memory_id: str) -> TifScore:
+    async def evaluate_tif(self, memory_id: str, agent_id: str | None = None) -> TifScore:
         """Compute a T-I-F reliability score for a memory (T-I-F RFC Phase 3).
 
         Fetches the memory's full feedback history and reduces it to a
@@ -1596,11 +1984,12 @@ class AsyncDakeraClient:
 
         Args:
             memory_id: The memory to score.
+            agent_id: The agent that owns the memory (required by the server).
 
         Returns:
             :class:`TifScore` derived from the memory's feedback history.
         """
-        history = await self.get_memory_feedback_history(memory_id)
+        history = await self.get_memory_feedback_history(memory_id, agent_id)
         return TifScore.from_feedback_history(history)
 
     async def get_agent_feedback_summary(self, agent_id: str) -> AgentFeedbackSummary:
@@ -1620,7 +2009,7 @@ class AsyncDakeraClient:
         memory_id: str,
         agent_id: str,
         importance: float,
-    ) -> FeedbackResponse:
+    ) -> Memory:
         """Directly override a memory's importance score (INT-1).
 
         Args:
@@ -1629,11 +2018,12 @@ class AsyncDakeraClient:
             importance: New importance value (0.0–1.0).
 
         Returns:
-            :class:`FeedbackResponse` with the new importance value.
+            The updated :class:`~dakera.models.Memory` (the server answers the
+            memory; earlier SDKs parsed it as a ``FeedbackResponse`` and failed).
         """
         data: dict[str, Any] = {"agent_id": agent_id, "importance": importance}
         result = await self._request("PATCH", f"/v1/memories/{memory_id}/importance", data=data)
-        return FeedbackResponse.from_dict(result)
+        return Memory.from_dict(result)
 
     async def get_feedback_health(self, agent_id: str) -> FeedbackHealthResponse:
         """Get overall feedback health score for an agent (INT-1).
@@ -1906,12 +2296,20 @@ class AsyncDakeraClient:
         result = await self._request("POST", "/v1/sessions/start", data=data)
         return result["session"]
 
-    async def end_session(self, session_id: str, summary: str | None = None) -> dict[str, Any]:
+    async def end_session(
+        self,
+        session_id: str,
+        summary: str | None = None,
+        *,
+        auto_summarize: bool | None = None,
+    ) -> dict[str, Any]:
         """End a session (server v0.12.2+: Write scope; an idle-ended session
         answers its persisted state)."""
         data: dict[str, Any] = {}
         if summary is not None:
             data["summary"] = summary
+        if auto_summarize is not None:
+            data["auto_summarize"] = auto_summarize
         return await self._request("POST", f"/v1/sessions/{session_id}/end", data=data)
 
     async def touch_session(self, session_id: str) -> SessionTouchResponse:
@@ -2422,6 +2820,35 @@ class AsyncDakeraClient:
             data["memory_type"] = memory_type
         return await self._request("POST", "/v1/knowledge/deduplicate", data=data)
 
+    async def list_deduplicated(self, agent_id: str) -> DeduplicatedListResponse:
+        """The agent's memories that deduplication or consolidation deleted and
+        that can still be restored (server v0.12.3+), newest first.
+
+        Calls ``GET /v1/memory/deduplicated?agent_id=``. Each entry names the
+        memory it was folded or merged into (``survivor_id``) and until when it
+        can be restored (``restorable_until``, the server's
+        ``trash_retention_hours`` after the deletion). Read scope.
+        """
+        result = await self._request(
+            "GET", "/v1/memory/deduplicated", params={"agent_id": agent_id}
+        )
+        return DeduplicatedListResponse.from_dict(result)
+
+    async def restore_deduplicated(self, agent_id: str, memory_id: str) -> dict[str, Any]:
+        """Put back a memory that deduplication or consolidation deleted (server
+        v0.12.3+), exactly as it was stored, under its own id, and return it.
+
+        Calls ``POST /v1/memory/deduplicated/{id}/restore?agent_id=``. Raises
+        :class:`NotFoundError` when it has no restorable copy and
+        :class:`DakeraError` with status ``409`` when the agent holds a memory
+        with that id again. Write scope.
+        """
+        return await self._request(
+            "POST",
+            f"/v1/memory/deduplicated/{_path_segment(memory_id)}/restore",
+            params={"agent_id": agent_id},
+        )
+
     # =========================================================================
     # KG-2: Graph Query & Export Operations
     # =========================================================================
@@ -2705,9 +3132,36 @@ class AsyncDakeraClient:
             params["min_duration_ms"] = min_duration_ms
         return await self._request("GET", "/v1/admin/slow-queries", params=params)
 
-    async def create_backup(self, include_data: bool = True) -> dict[str, Any]:
-        """Create a backup."""
-        return await self._request("POST", "/v1/admin/backups", data={"include_data": include_data})
+    async def create_backup(
+        self,
+        name: str | None = None,
+        include_data: bool | None = None,
+        *,
+        backup_type: str | None = None,
+        namespaces: list[str] | None = None,
+        encrypt: bool | None = None,
+        compression: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a backup — ``POST /admin/backups`` (same as :meth:`admin_create_backup`).
+
+        Args:
+            name: The backup's name (required by the server).
+            include_data: Deprecated: not a server field and never sent (the
+                server refuses unknown fields here with ``422`` from v0.12.3).
+            backup_type: ``"full"``, ``"incremental"`` or ``"snapshot"``.
+            namespaces: Back up only these namespaces (default: all).
+            encrypt: Seal the backup with the encryption-at-rest key.
+            compression: ``"none"``, ``"zstd"`` or ``"lz4"``.
+
+        Raises:
+            ValueError: no ``name``.
+        """
+        if isinstance(name, bool):  # the old positional create_backup(include_data)
+            include_data, name = name, None
+        if include_data is not None:
+            _not_sent("create_backup", "include_data")
+        body = _create_backup_body(name, backup_type, namespaces, encrypt, compression)
+        return await self._request("POST", "/v1/admin/backups", data=body)
 
     async def list_backups(self) -> list[dict[str, Any]]:
         """List backups."""
@@ -2735,10 +3189,32 @@ class AsyncDakeraClient:
         dedup_threshold: float | None = None,
         dedup_interval_hours: int | None = None,
         consolidation_interval_hours: int | None = None,
+        *,
+        dedup_mode: Literal["off", "report", "merge"] | str | None = None,
+        dedup_cross_session: bool | None = None,
+        consolidate_cross_session: bool | None = None,
+        trash_retention_hours: int | None = None,
     ) -> dict[str, Any]:
         """Update AutoPilot configuration at runtime (PILOT-2).
 
         All parameters are optional — omit any to keep its current value.
+
+        Server v0.12.3+ (older servers ignore them):
+
+        Args:
+            dedup_mode: ``"off"`` (the server default: no dedup pass),
+                ``"report"`` (find duplicate groups and report them, change
+                nothing) or ``"merge"`` (fold and delete duplicates).
+            dedup_cross_session: Let dedup fold memories of different sessions
+                (default ``False``).
+            consolidate_cross_session: Let the server's consolidation merge
+                memories of different sessions (default ``False``).
+            trash_retention_hours: Hours a memory deleted by dedup or
+                consolidation stays restorable (``0``–``8760``; ``0`` = no
+                copy). See :meth:`list_deduplicated`.
+
+        The answer's ``config`` (and :meth:`autopilot_status`'s) carries the
+        same four fields on v0.12.3+.
         """
         data: dict[str, Any] = {}
         if enabled is not None:
@@ -2749,6 +3225,14 @@ class AsyncDakeraClient:
             data["dedup_interval_hours"] = dedup_interval_hours
         if consolidation_interval_hours is not None:
             data["consolidation_interval_hours"] = consolidation_interval_hours
+        if dedup_mode is not None:
+            data["dedup_mode"] = dedup_mode
+        if dedup_cross_session is not None:
+            data["dedup_cross_session"] = dedup_cross_session
+        if consolidate_cross_session is not None:
+            data["consolidate_cross_session"] = consolidate_cross_session
+        if trash_retention_hours is not None:
+            data["trash_retention_hours"] = trash_retention_hours
         return await self._request("PUT", "/v1/admin/autopilot/config", data=data)
 
     async def autopilot_trigger(self, action: str) -> dict[str, Any]:
@@ -2817,8 +3301,10 @@ class AsyncDakeraClient:
 
     async def rotate_encryption_key(
         self,
-        new_key: str,
+        new_key: str | None = None,
         namespace: str | None = None,
+        *,
+        wait_secs: int | None = None,
     ) -> RotateEncryptionKeyResponse:
         """Re-encrypt all memory content blobs with a new AES-256-GCM key (SEC-3).
 
@@ -2832,9 +3318,9 @@ class AsyncDakeraClient:
             :class:`RotateEncryptionKeyResponse` with counts of rotated,
             skipped, and affected namespace names.
         """
-        data: dict[str, Any] = {"new_key": new_key}
-        if namespace is not None:
-            data["namespace"] = namespace
+        data = RotateEncryptionKeyRequest(
+            new_key=new_key, namespace=namespace, wait_secs=wait_secs
+        ).to_dict()
         result = await self._request("POST", "/v1/admin/encryption/rotate-key", data=data)
         return RotateEncryptionKeyResponse.from_dict(result)
 
@@ -2859,15 +3345,7 @@ class AsyncDakeraClient:
         ``namespaces`` (names or, from v0.12.2, ``p*`` patterns) and
         ``expires_in_days``.
         """
-        data: dict[str, Any] = {"name": name, "scope": scope}
-        if permissions is not None:
-            data["permissions"] = permissions
-        if expires_at is not None:
-            data["expires_at"] = expires_at
-        if namespaces is not None:
-            data["namespaces"] = list(namespaces)
-        if expires_in_days is not None:
-            data["expires_in_days"] = expires_in_days
+        data = _create_key_body(name, scope, namespaces, expires_in_days, permissions, expires_at)
         return await self._request("POST", "/admin/keys", data=data)
 
     async def list_keys(self) -> list[dict[str, Any]]:
@@ -2927,18 +3405,9 @@ class AsyncDakeraClient:
 
     def _parse_sse_block(self, block: str) -> DakeraEvent | None:
         """Parse a single SSE event block into a :class:`~dakera.models.DakeraEvent`."""
-        data_lines: list[str] = []
-        for line in block.split("\n"):
-            if line.startswith(":"):
-                continue  # SSE comment / heartbeat
-            if line.startswith("data:"):
-                data_lines.append(line[5:].lstrip(" "))
-        if not data_lines:
-            return None
-        try:
-            return DakeraEvent.from_dict(json.loads("\n".join(data_lines)))
-        except Exception:
-            return None
+        decoder = _SSEDecoder()
+        payloads = decoder.feed(block + "\n\n")
+        return _dakera_event(payloads[0]) if payloads else None
 
     async def stream_namespace_events(
         self,
@@ -2981,23 +3450,30 @@ class AsyncDakeraClient:
         async for event in self._stream_sse(url):
             yield event
 
-    async def _stream_sse(self, url: str) -> AsyncGenerator[DakeraEvent, None]:
-        """Low-level async SSE streaming helper."""
+    async def _sse_payloads(self, url: str) -> AsyncGenerator[str, None]:
+        """Open ``url`` as ``text/event-stream`` and yield each event's ``data``.
+
+        UTF-8 whatever the ``Content-Type`` says, LF / CRLF / CR line ends; no
+        read timeout (the stream is long-lived), the connect timeout applies.
+        """
         headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
-        async with self._client.stream("GET", url, headers=headers, timeout=None) as response:
+        timeout = httpx.Timeout(None, connect=self.connect_timeout)
+        async with self._client.stream("GET", url, headers=headers, timeout=timeout) as response:
             if not response.is_success:
                 # Read the error body before raising so we have context.
                 await response.aread()
                 self._handle_response(response)  # always raises
-            buffer = ""
-            async for chunk in response.aiter_text():
-                buffer += chunk
-                # SSE events are separated by a blank line (\n\n)
-                while "\n\n" in buffer:
-                    block, buffer = buffer.split("\n\n", 1)
-                    event = self._parse_sse_block(block)
-                    if event is not None:
-                        yield event
+            decoder = _SSEDecoder()
+            async for chunk in response.aiter_bytes():
+                for data in decoder.feed(chunk):
+                    yield data
+
+    async def _stream_sse(self, url: str) -> AsyncGenerator[DakeraEvent, None]:
+        """Low-level async SSE streaming helper: one :class:`DakeraEvent` per event."""
+        async for data in self._sse_payloads(url):
+            event = _dakera_event(data)
+            if event is not None:
+                yield event
 
     # =========================================================================
     # DASH-B: Memory Lifecycle Event Stream
@@ -3023,31 +3499,11 @@ class AsyncDakeraClient:
                 if event.event_type == "stored":
                     print(f"[{event.agent_id}] stored {event.memory_id}")
         """
-        import json as _json
-
         url = self._url("/v1/events/stream")
-        headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache"}
-        async with self._client.stream("GET", url, headers=headers, timeout=None) as response:
-            if not response.is_success:
-                await response.aread()
-                self._handle_response(response)
-            buffer = ""
-            async for chunk in response.aiter_text():
-                buffer += chunk
-                while "\n\n" in buffer:
-                    block, buffer = buffer.split("\n\n", 1)
-                    data_lines = []
-                    for line in block.splitlines():
-                        if line.startswith(":"):
-                            continue
-                        if line.startswith("data:"):
-                            data_lines.append(line[5:].lstrip())
-                    if data_lines:
-                        try:
-                            payload = _json.loads("\n".join(data_lines))
-                            yield MemoryEvent.from_dict(payload)
-                        except (ValueError, TypeError, KeyError):
-                            pass
+        async for data in self._sse_payloads(url):
+            event = _memory_event(data)
+            if event is not None:
+                yield event
 
     # =========================================================================
     # DASH-A: Cross-Agent Network
@@ -3194,11 +3650,7 @@ class AsyncDakeraClient:
         Returns:
             :class:`CreateNamespaceKeyResponse` containing the raw API key.
         """
-        data: dict[str, Any] = {"name": name, "scope": scope}
-        if expires_in_days is not None:
-            data["expires_in_days"] = expires_in_days
-        if extra_namespaces is not None:
-            data["extra_namespaces"] = list(extra_namespaces)
+        data = _create_namespace_key_body(name, scope, extra_namespaces, expires_in_days)
         result = await self._request("POST", f"/v1/namespaces/{namespace}/keys", data=data)
         return CreateNamespaceKeyResponse.from_dict(result, namespace=namespace)
 
@@ -3271,14 +3723,43 @@ class AsyncDakeraClient:
         agent_id: str | None = None,
         namespace: str | None = None,
     ) -> MemoryImportResponse:
-        """Import memories from an external format (DX-1)."""
-        body: dict[str, Any] = {"data": data, "format": format}
-        if agent_id is not None:
-            body["agent_id"] = agent_id
+        """Import memories into an agent — ``POST /v1/import`` (DX-1).
+
+        The file is uploaded as ``multipart/form-data`` with ``agent_id`` and
+        ``format`` in the query, as the server reads them.
+
+        Args:
+            data: The file: ``bytes`` / ``str`` are sent as given (e.g. the
+                ``raw`` of :meth:`export_memories`); otherwise a list of dicts
+                (``jsonl``: one object per line; ``mem0``: sent as
+                ``{"memories": [...]}``; ``zep``: ``{"messages": [...]}``) or the
+                Mem0 / Zep document as a dict. ``csv`` needs the CSV text.
+            format: ``"jsonl"``, ``"csv"``, ``"mem0"`` or ``"zep"``.
+            agent_id: The agent the memories are imported into (required by
+                the server; needs Write scope on its namespace).
+            namespace: Deprecated: not read by the server and not sent (the
+                target is the agent's namespace).
+
+        Returns:
+            :class:`MemoryImportResponse`: the import job's status
+            (``imported_count``, ``skipped_count``, ``errors``, ``job_id``, ...).
+
+        Raises:
+            ValueError: no ``agent_id``.
+        """
+        if not agent_id:
+            raise ValueError("import_memories() needs agent_id: the server requires it")
         if namespace is not None:
-            body["namespace"] = namespace
-        result = await self._request("POST", "/v1/import", data=body)
-        return MemoryImportResponse.from_dict(result)
+            _not_sent("import_memories", "namespace", "agent_id=")
+        body, headers = _import_upload(data, format)
+        result = await self._request(
+            "POST",
+            "/v1/import",
+            params={"agent_id": agent_id, "format": format},
+            content=body,
+            headers=headers,
+        )
+        return MemoryImportResponse.from_dict(result or {})
 
     async def export_memories(
         self,
@@ -3287,16 +3768,44 @@ class AsyncDakeraClient:
         namespace: str | None = None,
         limit: int | None = None,
     ) -> MemoryExportResponse:
-        """Export memories in a portable format (DX-1)."""
-        params: dict[str, Any] = {"format": format}
-        if agent_id is not None:
-            params["agent_id"] = agent_id
+        """Export an agent's memories — ``GET /v1/export`` (DX-1).
+
+        The server answers the export file (JSON lines, CSV, or the Mem0 / Zep
+        JSON document) with the memories' plaintext, without derived sentence
+        sub-memories or expired memories.
+
+        Args:
+            format: ``"jsonl"``, ``"csv"``, ``"mem0"`` or ``"zep"``.
+            agent_id: The agent to export (required by the server; needs Read
+                scope on its namespace).
+            namespace: Deprecated: not read by the server and not sent.
+            limit: Keep at most this many memories in ``data`` (applied here;
+                the server exports every memory). ``raw`` is the whole file.
+
+        Returns:
+            :class:`MemoryExportResponse` with ``data`` (the memories as
+            dicts), ``raw`` (the file) and ``skipped`` (memories the server
+            could not open).
+
+        Raises:
+            ValueError: no ``agent_id``.
+        """
+        if not agent_id:
+            raise ValueError("export_memories() needs agent_id: the server requires it")
         if namespace is not None:
-            params["namespace"] = namespace
+            _not_sent("export_memories", "namespace", "agent_id=")
+        response = await self._request(
+            "GET", "/v1/export", params={"agent_id": agent_id, "format": format}, raw=True
+        )
+        export = _export_response(
+            response.content.decode("utf-8", "replace"),
+            format,
+            response.headers.get("x-dakera-export-skipped"),
+        )
         if limit is not None:
-            params["limit"] = limit
-        result = await self._request("GET", "/v1/export", params=params)
-        return MemoryExportResponse.from_dict(result)
+            export.data = export.data[: max(0, limit)]
+            export.count = len(export.data)
+        return export
 
     # =========================================================================
     # OBS-1: Business-Event Audit Log
@@ -3311,7 +3820,8 @@ class AsyncDakeraClient:
         limit: int | None = None,
         cursor: str | None = None,
     ) -> AuditListResponse:
-        """List business-event audit log entries (OBS-1)."""
+        """List business-event audit log entries (OBS-1); ``from_ts`` / ``to_ts``
+        are Unix milliseconds, both inclusive. See :meth:`DakeraClient.list_audit_events`."""
         params: dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
@@ -3686,16 +4196,14 @@ class AsyncDakeraClient:
         encrypt: bool | None = None,
         compression: str | None = None,
     ) -> dict[str, Any]:
-        """POST /admin/backups — create a new backup."""
-        data: dict[str, Any] = {"name": name}
-        if backup_type is not None:
-            data["backup_type"] = backup_type
-        if namespaces is not None:
-            data["namespaces"] = namespaces
-        if encrypt is not None:
-            data["encrypt"] = encrypt
-        if compression is not None:
-            data["compression"] = compression
+        """POST /admin/backups — create a new backup.
+
+        Sends only the fields the server's ``CreateBackupRequest`` reads, and
+        only those that are set (it refuses unknown fields with ``422`` after
+        v0.12.2). ``backup_type``: ``full`` / ``incremental`` / ``snapshot``;
+        ``compression``: ``none`` / ``zstd`` / ``lz4``.
+        """
+        data = _create_backup_body(name, backup_type, namespaces, encrypt, compression)
         return await self._request("POST", "/v1/admin/backups", data=data)
 
     async def admin_get_backup(self, backup_id: str) -> dict[str, Any]:
@@ -3763,7 +4271,12 @@ class AsyncDakeraClient:
         return await self._request("POST", "/ops/compact", data=data)
 
     async def ops_shutdown(self) -> dict[str, Any]:
-        """POST /ops/shutdown — request graceful shutdown."""
+        """POST /ops/shutdown — request a graceful shutdown of the node.
+
+        Needs a global ``super_admin`` key on server v0.12.3+ (a
+        global ``admin`` key gets ``403`` / :class:`~dakera.AuthorizationError`):
+        a shutdown stops the node for every tenant.
+        """
         return await self._request("POST", "/ops/shutdown")
 
     # =========================================================================

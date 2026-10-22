@@ -1,6 +1,9 @@
-# Routes served by Dakera server v0.12.2 (crates/api/src/lib.rs router; admin routes under /admin and /v1/admin).
+# Routes served by the Dakera server router v0.12.3 (crates/api/src/lib.rs; admin routes under /admin and /v1/admin,
+# API keys under /admin/keys only; node-to-node /internal routes omitted).
 # v0.12.2 adds: POST /v1/agents, PATCH /admin/keys/{}, PATCH /v1/namespaces/{}/keys/{}, GET /v1/auth/whoami,
 # POST /v1/sessions/{}/touch, GET /admin/derivations/status, POST /admin/derivations/drain (and their /v1/admin mounts).
+# v0.12.3 adds the document routes: /v1/memory/documents[/{}][/jobs/{}], POST /v1/namespaces/{}/attachments/{}/document.
+# v0.12.3 also adds GET /v1/memory/deduplicated and POST /v1/memory/deduplicated/{}/restore.
 # Path params are normalised to {}. Regenerate when the server router changes.
 DELETE /admin/backups/{}
 DELETE /admin/keys/{}
@@ -8,11 +11,11 @@ DELETE /admin/namespaces/{}
 DELETE /admin/quotas/{}
 DELETE /admin/slow-queries
 DELETE /v1/admin/backups/{}
-DELETE /v1/admin/keys/{}
 DELETE /v1/admin/namespaces/{}
 DELETE /v1/admin/quotas/{}
 DELETE /v1/admin/slow-queries
 DELETE /v1/memories/forget/batch
+DELETE /v1/memory/documents/{}
 DELETE /v1/namespaces/{}
 DELETE /v1/namespaces/{}/attachments/{}
 DELETE /v1/namespaces/{}/keys/{}
@@ -56,11 +59,6 @@ GET /debug/config
 GET /health
 GET /health/live
 GET /health/ready
-GET /internal/metrics/snapshot
-GET /internal/sync/attachment
-GET /internal/sync/digest
-GET /internal/sync/job
-GET /internal/sync/snapshot
 GET /metrics
 GET /ops/diagnostics
 GET /ops/events
@@ -85,9 +83,6 @@ GET /v1/admin/decay/stats
 GET /v1/admin/derivations/status
 GET /v1/admin/encryption/status
 GET /v1/admin/indexes/stats
-GET /v1/admin/keys
-GET /v1/admin/keys/{}
-GET /v1/admin/keys/{}/usage
 GET /v1/admin/memory-type-stats
 GET /v1/admin/namespaces
 GET /v1/admin/quotas
@@ -130,6 +125,10 @@ GET /v1/kpis
 GET /v1/memories/{}/feedback
 GET /v1/memories/{}/graph
 GET /v1/memories/{}/path
+GET /v1/memory/deduplicated
+GET /v1/memory/documents
+GET /v1/memory/documents/jobs/{}
+GET /v1/memory/documents/{}
 GET /v1/memory/entities/{}
 GET /v1/memory/get/{}
 GET /v1/namespaces
@@ -184,31 +183,6 @@ POST /admin/quotas/{}/check
 POST /admin/reembed/drain
 POST /admin/ttl/cleanup
 POST /admin/vectors/{}/import
-POST /internal/leader
-POST /internal/sync/attachments/delete
-POST /internal/sync/attachments/put
-POST /internal/sync/backup/create
-POST /internal/sync/backup/delete
-POST /internal/sync/backup/schedule
-POST /internal/sync/fulltext/delete
-POST /internal/sync/fulltext/index
-POST /internal/sync/graph
-POST /internal/sync/key/add
-POST /internal/sync/key/deactivate
-POST /internal/sync/key/delete
-POST /internal/sync/namespace/config
-POST /internal/sync/namespace/delete
-POST /internal/sync/quota
-POST /internal/sync/quota/default
-POST /internal/sync/quota/delete
-POST /internal/sync/records/upsert
-POST /internal/sync/restore/complete
-POST /internal/sync/runtime-config
-POST /internal/sync/slow-query/clear
-POST /internal/sync/slow-query/entry
-POST /internal/sync/vectors/delete
-POST /internal/sync/vectors/upsert
-POST /internal/vote
 POST /ops/compact
 POST /ops/shutdown
 POST /v1/admin/autopilot/trigger
@@ -227,9 +201,6 @@ POST /v1/admin/encryption/reseal
 POST /v1/admin/encryption/rotate-key
 POST /v1/admin/fulltext/reindex
 POST /v1/admin/indexes/rebuild
-POST /v1/admin/keys
-POST /v1/admin/keys/{}/deactivate
-POST /v1/admin/keys/{}/rotate
 POST /v1/admin/namespaces/migrate-dimensions
 POST /v1/admin/namespaces/{}/optimize
 POST /v1/admin/quotas/{}/check
@@ -252,6 +223,8 @@ POST /v1/memories/store/batch
 POST /v1/memories/{}/feedback
 POST /v1/memories/{}/links
 POST /v1/memory/consolidate
+POST /v1/memory/deduplicated/{}/restore
+POST /v1/memory/documents
 POST /v1/memory/feedback
 POST /v1/memory/forget
 POST /v1/memory/importance
@@ -261,6 +234,7 @@ POST /v1/memory/store
 POST /v1/namespaces
 POST /v1/namespaces/{}/aggregate
 POST /v1/namespaces/{}/attachments
+POST /v1/namespaces/{}/attachments/{}/document
 POST /v1/namespaces/{}/attachments/{}/index
 POST /v1/namespaces/{}/attachments/{}/transcribe
 POST /v1/namespaces/{}/batch-query

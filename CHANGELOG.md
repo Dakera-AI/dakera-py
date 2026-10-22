@@ -7,6 +7,155 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-22
+
+Dakera server **v0.12.3** support (Dakera-AI/dakera#917, #920; engine PR
+Dakera-AI/dakera#922), an API parity audit against the server's router and handlers,
+and request-safety fixes. The new features need server **v0.12.3 or later**; the SDK keeps
+working with v0.12.0 – v0.12.2 servers: new request fields are sent only when set and new response
+fields are `None` from an older server.
+
+### Added
+
+- **Document import** (Dakera-AI/dakera#923): PDF, DOCX, HTML, Markdown and text become
+  chunk memories of an agent, each with its heading breadcrumb and `_dakera_document`
+  provenance. Sync and async: `import_document(agent_id, content, media_type=, title=,
+  document_id=, chunking=, decompose=, ...)` (`POST /v1/memory/documents`),
+  `import_attachment_document(namespace, attachment_ref, agent_id, ...)` (an uploaded
+  attachment), `get_document_job()` / `wait_for_document_job()` (polls with a bounded
+  timeout, at least 0.1 s between polls), `list_documents(cursor=, limit=)` /
+  `iter_documents()`, `get_document()`, `delete_document()`. Both imports take the memory
+  fields of `store_memory()` that every chunk carries. Models: `ChunkingOptions`
+  (`ChunkStrategy`), `ImportDocumentRequest`, `ImportAttachmentDocumentRequest`,
+  `DocumentImportAccepted`, `DocumentJob`, `DocumentSummary`, `DocumentListResponse`,
+  `DocumentDetail`, `DocumentChunkInfo`, `DeleteDocumentResponse`, `DocumentChunkMeta`
+  (`RecalledMemory.document`, `document_chunk_meta()` read `_dakera_document` from a
+  result). `ServerCapabilities.documents` (`DocumentCapabilities`) and
+  `supports_documents`; a server before v0.12.3 answers the document routes `404`.
+- **Recall neighbourhood control**: `recall(..., neighborhood_mode="inline" | "separate" |
+  "off", include_summaries=, session_id=)` (sync and async; `NeighborhoodMode`).
+  `RecallResponse.context_memories` (under `"separate"`) and `RecallResponse.ranked` (the
+  ranked results without inline neighbourhood items).
+- **Result fields** on `RecalledMemory`: `matched_text`, `matched_ids` (derived sentence
+  sub-memories collapsed into their source), `retrieval` (`"neighborhood"` for inline
+  context; `RETRIEVAL_NEIGHBORHOOD`), `context_of`, and `is_neighborhood`.
+  `search_memories()` results carry every result field the server sends (`smart_score`,
+  `weighted_score`, `vector_score`, `text_score`, `matched_ids`, `matched_text`), and take
+  `session_id=`.
+- **`rank_score`** on `RecalledMemory`: the server's ranking field of a recall
+  (non-increasing over `memories` in response order). `score` is `rank_score` when the
+  server sends it, else `smart_score`, `weighted_score`, then the raw score.
+- **Event time** (Dakera-AI/dakera#932): `store_memory(..., event_time=)` and
+  `BatchStoreMemoryItem(event_time=)` take when the memory's event happened — Unix
+  seconds, an RFC 3339 string or a timezone-aware `datetime` (a naive one raises
+  `ValueError`). The server keeps it as `_dakera_event_time` and reads it for recency,
+  `since` / `until` and temporal links; `created_at` stays the ingest time.
+- **Long text report** (Dakera-AI/dakera#933): `store_memory()` / `update_memory()` return
+  `truncated`, `content_tokens`, `embedded_tokens`, `max_tokens` and `windows` when the text
+  is longer than the embedding model reads; `BatchStoreMemoryResponse.truncated` lists such
+  memories (`TruncatedMemory`).
+- **Ignored request fields**: `warnings` on the `store_memory()` result,
+  `BatchStoreMemoryResponse`, `RecallResponse` and `BatchRecallResponse` lists the request
+  fields the server did not know and ignored.
+- **Reranking control**: `recall(..., rerank_candidates=)` bounds how many candidates the
+  cross-encoder scores (a positive integer; `0` raises `ValueError`, use `rerank=False`).
+  `RecallResponse.rerank_report` (`RerankReport`: `applied`, `candidates`, `skipped`,
+  `capped`), plus `query_embedding_time_ms`, `search_time_ms` and
+  `late_interaction_first_stage`.
+- **Restorable deduplicated memories** (Dakera-AI/dakera#930): `list_deduplicated(agent_id)`
+  (`GET /v1/memory/deduplicated`, `DeduplicatedListResponse` / `DeduplicatedMemory`:
+  `kind`, `survivor_id`, `deleted_at`, `restorable_until`) and
+  `restore_deduplicated(agent_id, memory_id)` (`404` without a restorable copy, `409` when
+  the agent holds the id again). `autopilot_update_config(..., dedup_mode="off" | "report" |
+  "merge", dedup_cross_session=, consolidate_cross_session=, trash_retention_hours=)`.
+- `get_memory(None, memory_id)` looks the id up in every agent namespace the key may read
+  (server v0.12.3+).
+- `NamingCapabilities.session_id_pattern` / `session_id_max_bytes` (session ids may contain
+  `:`, e.g. `urn:chat:42`).
+- `ErrorCode.HOST_NOT_ALLOWED` (421), `UNPROCESSABLE_CONTENT` (422) and
+  `EXTRACTION_TIMEOUT` (504).
+- `rotate_encryption_key(new_key=None, namespace=None, *, wait_secs=)`: `new_key` is
+  optional (the server generates a key); `RotateEncryptionKeyResponse` gains `key_id`,
+  `previous_key_id`, `scope`, `namespace`, `reseal`, `fulltext_indices_rotated`,
+  `failed_namespaces`, `action_required`, `status_url`.
+- `end_session(..., auto_summarize=)`, `update_memory(..., importance=, tags=)`,
+  `consolidate(..., memory_ids=, target_type=)`.
+- `RetryConfig.retry_non_idempotent` (default `False`, see Changed).
+- `MemoryImportResponse` job fields (`job_id`, `status`, `format`, `total`, `started_at`,
+  `finished_at`); `MemoryExportResponse.raw` and `.skipped`.
+
+### Fixed
+
+- **Admin requests send only the server's fields** (the server refuses unknown fields with
+  `422` from v0.12.3): `create_key()` no longer sends `permissions` / `expires_at`
+  (deprecated, `DeprecationWarning`); `create_backup()` sent `{"include_data": ...}`
+  without the required `name` and always failed: it now takes `name`, `backup_type`,
+  `namespaces`, `encrypt`, `compression` like `admin_create_backup()` (`include_data` is
+  deprecated and never sent). Tests pin the bodies to the engine's request structs.
+- `import_memories()` posted JSON; the server reads a `multipart/form-data` file with
+  `agent_id` / `format` in the query, and answers the job status (`imported`, `skipped`).
+  `export_memories()` expected a JSON wrapper; the server answers the file itself (JSON
+  lines, CSV, Mem0 / Zep JSON), which is now parsed into `data`. Both need `agent_id`
+  (`ValueError` without it); `namespace` is not a server parameter (deprecated, not sent)
+  and `limit` is applied client-side.
+- `consolidate(dry_run=True)` was sent to a server that has no dry run and merged (and
+  deleted) the memories: it now raises `ValueError`. `memory_type` / `config` were ignored
+  by the server and are no longer sent (`DeprecationWarning`).
+- `get_memory_feedback_history()` / `evaluate_tif()` take `agent_id` (the server answered
+  `400` without it). `patch_memory_importance()` returns the updated `Memory` the server
+  sends (it was parsed as a `FeedbackResponse` and raised `KeyError`).
+- `store_memory(valid_from=)` is sent as `metadata["valid_from"]`, where the server reads
+  it (a top-level field was ignored).
+- KG-3 `depth` of associated memories was dropped when flattening the result envelope.
+- `AuditEvent` / `AuditListResponse` follow the server's `GET /v1/audit` answer:
+  `memory_id`, `session_id`, `importance` and `reason` (why the event happened, e.g.
+  `"absorbed into <id>"`) were dropped, and `total` read a field the server does not send
+  (it sends `count`). `from_ts` / `to_ts` are Unix milliseconds, both inclusive.
+- A `429` error kept neither the server's message nor its `code`
+  (`RATE_LIMIT_EXCEEDED`); an error status without its own exception class (`421`,
+  `422`, ...) replaced the server's message with "Unexpected status code". Both now keep
+  the server's message and code.
+- `get_memory()` sends the memory id as one escaped path segment.
+- `ChatMemorySession.recall()` / `AsyncChatMemorySession.recall()` return at most `top_k`
+  memories as documented: they request `neighborhood_mode="separate"` and return the ranked
+  results (a server up to v0.12.2, which appends the context inline, is cut at `top_k`).
+- SSE streams are decoded as UTF-8 (a `text/event-stream` without a charset was read as
+  Latin-1 by the sync client), accept CRLF / CR line ends, bound an event's size, apply
+  the connect timeout and release the connection when iteration stops.
+- `FusionStrategy` docs: the server default is `minmax` (since v0.11.2), not `rrf`.
+- `create_namespace()` docs: `dimensions` is required by the server.
+- Examples: `admin_operations.py` (`admin_create_backup`), `advanced.py`
+  (`get_memory_feedback_history`).
+
+### Changed
+
+- **Retries only where repeating is harmless.** `429` / `503` (with `Retry-After`) and
+  failed connects are retried for every request; a `5xx`, a read timeout or a dropped
+  connection only for `GET` / `PUT` / `DELETE` / `HEAD` and read-only `POST`s (recall,
+  search, queries, ...). A `store_memory()` that got a `500` is no longer sent again.
+  `RetryConfig(retry_non_idempotent=True)` restores the previous behaviour. The async
+  client wraps a dropped connection in `ConnectionError` instead of raising the raw
+  `httpx` error.
+- `ode_url` docs: requests to the ODE sidecar currently carry the Dakera API key (tracked in
+  Dakera-AI/dakera#924).
+- CI: the Dakera service container is health-checked from the host (polling `/health`)
+  instead of a `curl` inside the container, so the job works with images that ship no
+  `curl` (v0.12.3+); the pinned image is unchanged.
+- `ops_shutdown()` documents the server's global `super_admin` requirement (an `admin` key
+  gets `403` from v0.12.3).
+- Recall, `search_memories()` and `batch_recall()` of an agent that has stored nothing
+  return no memories on a v0.12.3 server (older servers answered `404 NAMESPACE_NOT_FOUND`);
+  an overloaded v0.12.3 server answers `429` with `Retry-After`, which the client retries.
+- `repr()` of the clients never shows the API key; the key fields of
+  `CreateNamespaceKeyResponse`, `RotateKeyResponse` and `RotateEncryptionKeyRequest` are
+  left out of `repr()`.
+- Dependencies: `urllib3>=2.8.0` (CVE-2026-97687, CVE-2026-97688, CVE-2026-97689; the
+  sync client streams SSE through urllib3); lock file: anyio 4.15.1, fsspec 2026.9.0
+  (dev / optional extras). `pip-audit` of the lock file finds no known vulnerability.
+- `tests/v0_12_routes.txt` follows the server router: API keys under `/admin/keys` only,
+  node-to-node `/internal` routes left out; the v0.12.3 document and deduplicated-memory
+  routes are in.
+
 ## [0.14.0] - 2026-10-08
 
 Dakera server **v0.12.2** support (Dakera-AI/dakera#916). Works against v0.12.0, v0.12.1

@@ -153,6 +153,86 @@ asyncio.run(main())
 
 ---
 
+## What's new for Dakera server v0.12.3
+
+Version 0.14.1 of this SDK adds support for Dakera server **v0.12.3**; the features
+below need server **v0.12.3 or later**. It stays **compatible with v0.12.0 – v0.12.2 servers**:
+the new request fields are sent only when you set them, the new response fields are
+`None` from an older server.
+
+- `recall(..., neighborhood_mode=)`: `"inline"` (the server default) appends
+  session-adjacent context after the `top_k` ranked results, each marked
+  `retrieval == "neighborhood"` (its `score` is from a different search and is not
+  comparable); `"separate"` keeps `memories` to at most `top_k` results and puts
+  the context in `response.context_memories`, each with `context_of` (the ranked
+  memory it belongs to); `"off"` fetches none. `response.ranked` is the ranked
+  results alone. `include_summaries=False` keeps session summaries out.
+- Results (recall and `search_memories()`) carry `matched_ids` / `matched_text`
+  when the server collapses derived sentence sub-memories into their source.
+- `POST /admin/keys`, `POST /v1/namespaces/{ns}/keys`, `POST /admin/backups` and
+  `POST /admin/encryption/rotate-key` refuse unknown fields with `422`: the SDK
+  sends only the fields the server reads (`create_key(permissions=, expires_at=)`
+  and `create_backup(include_data=)` are deprecated and never sent).
+- `ops_shutdown()` needs a global `super_admin` key (`admin` gets `403`).
+- **Event time**: `store_memory(..., event_time=)` and `BatchStoreMemoryItem(event_time=)`
+  record when something happened (Unix seconds, RFC 3339 or an aware `datetime`), so
+  imported or replayed history is ranked and filtered by its own dates.
+- **Ranking**: each recall result carries `rank_score`, non-increasing down the list;
+  `recall(..., rerank_candidates=N)` bounds the reranker's work and
+  `response.rerank_report` says what it did (`capped` when the server's cap applied).
+- **Long text**: a store whose text is longer than the embedding model reads returns
+  `truncated`, `content_tokens` and `embedded_tokens` (batch: `response.truncated`).
+- **Ignored fields**: store, batch store, recall and batch recall answers list request
+  fields the server did not use in `warnings`.
+- **Restorable deduplicated memories**: `list_deduplicated(agent_id)` and
+  `restore_deduplicated(agent_id, memory_id)`; `autopilot_update_config(dedup_mode=,
+  trash_retention_hours=, ...)` controls automatic deduplication.
+- `get_memory(None, memory_id)` finds a memory without its agent id; session ids may
+  contain `:`; recalling an agent that has stored nothing returns no memories.
+
+```python
+response = client.recall("my-agent", "which port does the API use?", top_k=3,
+                         neighborhood_mode="separate")
+for m in response.memories:          # at most 3, ranked
+    print(m.score, m.content, m.matched_text)
+for c in response.context_memories or []:
+    print("  context of", c.context_of, ":", c.content)
+```
+
+### Document import (server v0.12.3+)
+
+A document becomes chunk memories of an agent, sized for the embedding model, each
+with its heading breadcrumb and a `_dakera_document` provenance record (document,
+page range, heading path) that recall results carry. Imports run as server jobs.
+
+```python
+from dakera import ChunkingOptions
+
+caps = client.capabilities()
+if caps.supports_documents:
+    accepted = client.import_document(
+        "docs-bot", open("README.md").read(), media_type="text/markdown",
+        document_id="readme", tags=["docs"], chunking=ChunkingOptions(max_tokens=300),
+    )
+    job = client.wait_for_document_job(accepted.job_id, "docs-bot", timeout=120)
+    print(job.status, job.message)
+
+    # PDF / DOCX: upload the file, then import the attachment
+    ref = client.upload_attachment("library", "manual.pdf").attachment_ref
+    client.import_attachment_document("library", ref, "docs-bot", document_id="manual-v3")
+
+    for doc in client.iter_documents("docs-bot"):
+        print(doc.document_id, doc.title, doc.chunk_count)
+
+    for m in client.recall("docs-bot", "how do I install it?").ranked:
+        if m.document:  # cite the source
+            print(m.document.title, m.document.page_start, m.document.breadcrumb)
+
+    client.delete_document("manual-v3", "docs-bot")
+```
+
+---
+
 ## What's new for Dakera server v0.12.2
 
 Version 0.14.0 of this SDK adds support for Dakera server **v0.12.2** and stays

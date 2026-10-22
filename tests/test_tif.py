@@ -266,7 +266,7 @@ class TestEvaluateTif:
                 },
                 status=200,
             )
-            score = client.evaluate_tif("mem-abc")
+            score = client.evaluate_tif("mem-abc", "agent-1")
             assert len(rsps.calls) == 1
 
         assert isinstance(score, TifScore)
@@ -289,7 +289,7 @@ class TestEvaluateTif:
                 json={"memory_id": "mem-xyz", "entries": []},
                 status=200,
             )
-            score = client.evaluate_tif("mem-xyz")
+            score = client.evaluate_tif("mem-xyz", "agent-1")
 
         assert score.indeterminacy == pytest.approx(1.0)
         assert score.truth == pytest.approx(0.0)
@@ -311,4 +311,4 @@ class TestEvaluateTif:
                 status=500,
             )
             with pytest.raises(DakeraError):
-                client.evaluate_tif("mem-bad")
+                client.evaluate_tif("mem-bad", "agent-1")

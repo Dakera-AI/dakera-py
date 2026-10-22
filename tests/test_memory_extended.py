@@ -369,8 +369,14 @@ class TestMemoryFeedback:
             },
             status=200,
         )
-        result = client.get_memory_feedback_history("mem-1")
+        result = client.get_memory_feedback_history("mem-1", "agent-1")
         assert len(result.entries) == 2
+        assert "agent_id=agent-1" in mock_responses.calls[0].request.url
+
+    def test_get_memory_feedback_history_needs_agent_id(self, client):
+        """The server answers 400 without agent_id: refused before sending."""
+        with pytest.raises(ValueError, match="agent_id"):
+            client.get_memory_feedback_history("mem-1")
 
     def test_get_agent_feedback_summary(self, client, mock_responses):
         """Test getting agent feedback summary."""
@@ -396,15 +402,18 @@ class TestMemoryFeedback:
         mock_responses.add(
             responses.PATCH,
             "http://localhost:3000/v1/memories/mem-1/importance",
+            # The server answers the updated memory (`Json<Memory>`).
             json={
-                "memory_id": "mem-1",
-                "new_importance": 0.95,
-                "signal": "positive",
+                "id": "mem-1",
+                "content": "fact",
+                "memory_type": "semantic",
+                "importance": 0.95,
             },
             status=200,
         )
         result = client.patch_memory_importance("mem-1", "agent-1", 0.95)
-        assert result.new_importance == 0.95
+        assert result.id == "mem-1"
+        assert result.importance == 0.95
 
     def test_get_feedback_health(self, client, mock_responses):
         """Test getting feedback health score."""
@@ -603,32 +612,67 @@ class TestAgentOperations:
 class TestImportExport:
     """Tests for memory import/export methods."""
 
+    IMPORT_STATUS = {
+        "job_id": "job-1",
+        "status": "done",
+        "format": "jsonl",
+        "total": 11,
+        "imported": 10,
+        "skipped": 1,
+        "errors": ["row 5: invalid format"],
+        "started_at": 1700000000,
+        "finished_at": 1700000001,
+    }
+
     def test_import_memories(self, client, mock_responses):
-        """Test importing memories."""
+        """import_memories() uploads a multipart file with agent_id/format in the query."""
         mock_responses.add(
-            responses.POST,
-            "http://localhost:3000/v1/import",
-            json={
-                "imported_count": 10,
-                "skipped_count": 1,
-                "errors": ["row 5: invalid format"],
-            },
-            status=200,
+            responses.POST, "http://localhost:3000/v1/import", json=self.IMPORT_STATUS
         )
-        result = client.import_memories(
-            data=[{"content": "test", "memory_type": "episodic"}],
-            format="jsonl",
-            agent_id="agent-1",
-            namespace="test-ns",
-        )
+        rows = [{"content": "a", "memory_type": "episodic"}, {"content": "b"}]
+        result = client.import_memories(data=rows, format="jsonl", agent_id="agent-1")
         assert result.imported_count == 10
         assert result.skipped_count == 1
-        req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body["format"] == "jsonl"
-        assert req_body["agent_id"] == "agent-1"
+        assert result.job_id == "job-1"
+        assert result.status == "done"
+        assert result.total == 11
+        req = mock_responses.calls[0].request
+        assert "agent_id=agent-1" in req.url
+        assert "format=jsonl" in req.url
+        assert req.headers["Content-Type"].startswith("multipart/form-data; boundary=")
+        body = req.body.decode()
+        assert 'name="file"; filename="import.jsonl"' in body
+        lines = body.split("\r\n\r\n", 1)[1].split("\r\n--")[0].splitlines()
+        assert [json.loads(line) for line in lines] == rows
+
+    def test_import_memories_mem0_and_raw(self, client, mock_responses):
+        """mem0 lists are wrapped in {"memories": ...}; str data is sent as given."""
+        for _ in range(2):
+            mock_responses.add(
+                responses.POST, "http://localhost:3000/v1/import", json=self.IMPORT_STATUS
+            )
+        client.import_memories([{"memory": "likes tea"}], format="mem0", agent_id="a")
+        client.import_memories("id,agent_id,content\n1,a,x\n", format="csv", agent_id="a")
+        mem0 = mock_responses.calls[0].request.body.decode()
+        assert '{"memories": [{"memory": "likes tea"}]}' in mem0
+        csv_body = mock_responses.calls[1].request.body.decode()
+        assert "id,agent_id,content\n1,a,x\n" in csv_body
+        assert 'filename="import.csv"' in csv_body
+
+    def test_import_memories_needs_agent_id(self, client):
+        with pytest.raises(ValueError, match="agent_id"):
+            client.import_memories(data=[], format="jsonl")
+
+    def test_import_memories_namespace_not_sent(self, client, mock_responses):
+        mock_responses.add(
+            responses.POST, "http://localhost:3000/v1/import", json=self.IMPORT_STATUS
+        )
+        with pytest.warns(DeprecationWarning, match="namespace"):
+            client.import_memories(data=[], agent_id="a", namespace="ns")
+        assert "namespace" not in mock_responses.calls[0].request.url
 
     def test_import_memories_error(self, client, mock_responses):
-        """Test import with server error."""
+        """Test import with server error (a POST is not retried after a 5xx)."""
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/import",
@@ -636,25 +680,58 @@ class TestImportExport:
             status=500,
         )
         with pytest.raises(ServerError):
-            client.import_memories(data=[], format="invalid")
+            client.import_memories(data=[], format="jsonl", agent_id="agent-1")
+        assert len(mock_responses.calls) == 1
 
-    def test_export_memories(self, client, mock_responses):
-        """Test exporting memories."""
+    def test_export_memories_jsonl(self, client, mock_responses):
+        """The server answers the file itself; limit is applied client-side."""
+        lines = [
+            {"id": "mem-1", "content": "fact", "memory_type": "semantic"},
+            {"id": "mem-2", "content": "other", "memory_type": "episodic"},
+        ]
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/export",
-            json={
-                "data": [
-                    {"id": "mem-1", "content": "fact", "memory_type": "semantic"}
-                ],
-                "count": 1,
-                "format": "jsonl",
-            },
-            status=200,
+            body="\n".join(json.dumps(x) for x in lines),
+            content_type="application/x-ndjson",
+            headers={"x-dakera-export-skipped": "3"},
         )
-        result = client.export_memories(format="jsonl", agent_id="agent-1", limit=100)
-        assert result.count == 1
+        result = client.export_memories(format="jsonl", agent_id="agent-1", limit=1)
         assert result.format == "jsonl"
+        assert result.data == lines[:1]
+        assert result.count == 1
+        assert result.skipped == 3
+        assert result.raw.count("\n") == 1
+        url = mock_responses.calls[0].request.url
+        assert "agent_id=agent-1" in url and "format=jsonl" in url
+        assert "limit" not in url
+
+    def test_export_memories_csv_mem0_zep(self, client, mock_responses):
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/export",
+            body="id,agent_id,content\nm1,a,héllo\n".encode(),
+            content_type="text/csv",
+        )
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/export",
+            json={"memories": [{"id": "m1", "memory": "hello"}]},
+        )
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/export",
+            json={"messages": [{"uuid": "m1", "content": "hello"}]},
+        )
+        csv_export = client.export_memories(format="csv", agent_id="a")
+        # UTF-8 although a charset-less text/csv would be read as Latin-1 by requests
+        assert csv_export.data == [{"id": "m1", "agent_id": "a", "content": "héllo"}]
+        assert client.export_memories(format="mem0", agent_id="a").data[0]["memory"] == "hello"
+        assert client.export_memories(format="zep", agent_id="a").data[0]["uuid"] == "m1"
+
+    def test_export_memories_needs_agent_id(self, client):
+        with pytest.raises(ValueError, match="agent_id"):
+            client.export_memories(format="jsonl")
 
 
 class TestAuditLog:
@@ -1312,12 +1389,13 @@ class TestCacheWarming:
 class TestStoreMemoryValidFrom:
     """Tests for the valid_from bi-temporal parameter on store_memory (DAK-7424).
 
-    Server v0.11.98 began persisting valid_from so callers can express when a
-    memory becomes temporally valid, independent of ingest time.
+    The server reads valid_from (and valid_to) from the memory's metadata, so
+    callers can express when a memory becomes temporally valid, independent of
+    ingest time.
     """
 
     def test_store_memory_with_valid_from_includes_field(self, client, mock_responses):
-        """store_memory() forwards valid_from in the request body when set."""
+        """store_memory() sends valid_from in the metadata, where the server reads it."""
         mock_responses.add(
             responses.POST,
             "http://localhost:3000/v1/memory/store",
@@ -1325,9 +1403,12 @@ class TestStoreMemoryValidFrom:
             status=200,
         )
         ts = 1700000000  # 2023-11-14 Unix timestamp
-        client.store_memory("agent-1", "past event", valid_from=ts)
+        meta = {"source": "chat"}
+        client.store_memory("agent-1", "past event", valid_from=ts, metadata=meta)
         req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body.get("valid_from") == ts
+        assert req_body["metadata"] == {"source": "chat", "valid_from": ts}
+        assert "valid_from" not in req_body
+        assert meta == {"source": "chat"}  # the caller's dict is not changed
 
     def test_store_memory_without_valid_from_omits_field(self, client, mock_responses):
         """store_memory() does not include valid_from when the caller omits it."""
@@ -1359,7 +1440,7 @@ class TestStoreMemoryValidFrom:
             ttl_seconds=86400,
         )
         req_body = json.loads(mock_responses.calls[0].request.body)
-        assert req_body.get("valid_from") == ts
+        assert req_body["metadata"] == {"valid_from": ts}
         assert req_body.get("tags") == ["history"]
         assert req_body.get("session_id") == "sess-1"
         assert req_body.get("ttl_seconds") == 86400

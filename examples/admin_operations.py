@@ -31,10 +31,10 @@ def main():
     print("\n=== Backup Operations ===")
 
     # Create a full backup
-    backup = client.admin_create_backup(include_data=True, description="example backup")
+    backup = client.admin_create_backup("example-backup", backup_type="full")
     print(f"Created backup: {backup}")
     assert backup is not None, "expected non-None backup result"
-    backup_id = backup.get("backup_id") or backup.get("id")
+    backup_id = (backup.get("backup") or {}).get("backup_id")
 
     # List all backups
     backups = client.admin_list_backups()

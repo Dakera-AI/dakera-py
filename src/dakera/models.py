@@ -7,8 +7,9 @@ Dataclasses representing Dakera data structures.
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
-from typing import Any, Union
+from typing import Any, Literal, Union, cast
 
 from dakera.exceptions import UnsupportedCapabilityError
 
@@ -103,19 +104,35 @@ class RoutingMode(LenientStrEnum):
     """Fuse ANN and BM25 scores (RRF)."""
 
 
+NeighborhoodMode = Literal["inline", "separate", "off"]
+"""Where a recall returns its neighbourhood context (``neighborhood_mode``, server
+v0.12.3+):
+
+- ``"inline"`` (the server default unless ``DAKERA_NEIGHBORHOOD_MODE`` says
+  otherwise): appended to ``memories`` after the ``top_k`` ranked results, each
+  with ``retrieval == "neighborhood"``;
+- ``"separate"``: ``memories`` holds at most ``top_k`` results and the context is
+  in ``RecallResponse.context_memories``, each with ``context_of``;
+- ``"off"``: no neighbourhood context.
+"""
+
+RETRIEVAL_NEIGHBORHOOD = "neighborhood"
+"""``RecalledMemory.retrieval`` of a neighbourhood item returned inline."""
+
+
 class FusionStrategy(LenientStrEnum):
     """Fusion strategy for hybrid recall (CE-14).
 
     Controls how vector and BM25 scores are combined when ``routing=hybrid``.
-    ``rrf`` (default) uses Reciprocal Rank Fusion (Cormack et al., SIGIR 2009)
-    which is rank-based and scale-invariant. ``minmax`` uses legacy weighted
-    min-max normalization.
+    ``minmax`` (the server default since v0.11.2) uses weighted min-max
+    normalisation; ``rrf`` uses Reciprocal Rank Fusion (Cormack et al., SIGIR
+    2009), which is rank-based and scale-invariant.
     """
 
     RRF = "rrf"
-    """Reciprocal Rank Fusion — default, best for recall tasks."""
+    """Reciprocal Rank Fusion."""
     MINMAX = "minmax"
-    """Weighted min-max normalization — legacy behavior."""
+    """Weighted min-max normalisation — the server default since v0.11.2."""
 
 
 # ============================================================================
@@ -138,6 +155,12 @@ class RetryConfig:
 
     jitter: bool = True
     """Whether to add random jitter to backoff delay (default: True)."""
+
+    retry_non_idempotent: bool = False
+    """Also retry a request that may already have been acted on (a ``POST`` /
+    ``PATCH`` that got a ``5xx``, a read timeout or a dropped connection).
+    Off by default: repeating a write can store a memory twice. ``429`` /
+    ``503`` and failed connects are retried for every request either way."""
 
 
 @dataclass
@@ -894,6 +917,11 @@ class NamingCapabilities:
 
     agent_id_pattern: str = ""
     agent_id_max_bytes: int = 0
+    session_id_pattern: str = ""
+    """Pattern a session id must match (server v0.12.3+: the agent-id alphabet
+    plus ``:``, e.g. ``urn:chat:42``); empty from older servers."""
+    session_id_max_bytes: int = 0
+    """Longest session id, in bytes (server v0.12.3+); ``0`` from older servers."""
     agent_namespace_prefix: str = ""
     agent_namespace_max_bytes: int = 0
     namespace_pattern: str = ""
@@ -908,6 +936,8 @@ class NamingCapabilities:
         return cls(
             agent_id_pattern=str(data.get("agent_id_pattern", "")),
             agent_id_max_bytes=int(data.get("agent_id_max_bytes", 0) or 0),
+            session_id_pattern=str(data.get("session_id_pattern", "")),
+            session_id_max_bytes=int(data.get("session_id_max_bytes", 0) or 0),
             agent_namespace_prefix=str(data.get("agent_namespace_prefix", "")),
             agent_namespace_max_bytes=int(data.get("agent_namespace_max_bytes", 0) or 0),
             namespace_pattern=str(data.get("namespace_pattern", "")),
@@ -990,6 +1020,8 @@ class ServerCapabilities:
     """Agent id and namespace rules (``capabilities_version`` 2, v0.12.2)."""
     sessions: SessionCapabilities = field(default_factory=SessionCapabilities)
     """Session idle timeout, touch and ``ended_reason`` (v0.12.2)."""
+    documents: "DocumentCapabilities" = field(default_factory=lambda: DocumentCapabilities())
+    """Document import (v0.12.3); ``documents.enabled`` is ``False`` on older servers."""
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -1026,6 +1058,7 @@ class ServerCapabilities:
             auth=AuthCapabilities.from_dict(_dict(data.get("auth"))),
             naming=NamingCapabilities.from_dict(_dict(data.get("naming"))),
             sessions=SessionCapabilities.from_dict(_dict(data.get("sessions"))),
+            documents=DocumentCapabilities.from_dict(_dict(data.get("documents"))),
             raw=dict(data),
         )
 
@@ -1040,6 +1073,11 @@ class ServerCapabilities:
     def supports_key_update(self) -> bool:
         """Whether keys can be renamed / re-granted with ``PATCH`` (v0.12.2+)."""
         return self.auth.key_update
+
+    @property
+    def supports_documents(self) -> bool:
+        """Whether the document import routes answer (v0.12.3+, ``DAKERA_DOCUMENTS`` on)."""
+        return self.documents.enabled
 
     @property
     def supports_session_touch(self) -> bool:
@@ -1364,9 +1402,14 @@ class RecalledMemory:
     memory_type: str
     importance: float
     score: float
-    """Ranking score — equals smart_score when present, then weighted_score, then raw score."""
+    """Ranking score — the server's ``rank_score`` when present (v0.12.3+: non-increasing
+    over a recall's results, in order), else smart_score, then weighted_score, then raw
+    score."""
+    rank_score: float | None = None
+    """The server's ranking field (recall, v0.12.3+): non-increasing over ``memories`` in
+    response order — sort or threshold on this. ``None`` from older servers and search."""
     smart_score: float | None = None
-    """Raw smart_score from the server (the primary ranking key)."""
+    """Raw smart_score from the server."""
     weighted_score: float | None = None
     """Raw weighted_score from the server."""
     metadata: dict[str, Any] | None = None
@@ -1377,12 +1420,42 @@ class RecalledMemory:
     """Hybrid sub-score: vector similarity component (server v0.11.98+, absent when BM25-only)."""
     text_score: float | None = None
     """Hybrid sub-score: BM25 text component (server v0.11.98+, absent when vector-only)."""
+    matched_text: str | None = None
+    """When the server collapses derived sentence sub-memories into their source
+    (``DAKERA_RECALL_COLLAPSE_DERIVED``): the sentence that matched best, when it
+    outranked the source's own text. The memory itself is then the source."""
+    matched_ids: list[str] | None = None
+    """Ids of the derived sentence sub-memories collapsed into this result, best
+    first. ``None`` when none matched (and from servers up to v0.12.2)."""
+    retrieval: str | None = None
+    """How the item got into the response when it is not a ranked result:
+    ``"neighborhood"`` for neighbourhood context returned inline. Its ``score`` is
+    then the raw similarity of a different search and is NOT comparable with the
+    ranked results' scores. ``None`` for ranked results and on older servers."""
+    context_of: str | None = None
+    """On a ``RecallResponse.context_memories`` entry: the id of the ranked memory
+    it is context for."""
+
+    @property
+    def document(self) -> "DocumentChunkMeta | None":
+        """The ``_dakera_document`` of a document chunk (server v0.12.3+): the
+        document, page range and heading path the result came from; ``None``
+        when the memory is not a document chunk."""
+        return DocumentChunkMeta.from_memory(self)
+
+    @property
+    def is_neighborhood(self) -> bool:
+        """Whether this item is neighbourhood context rather than a ranked result."""
+        return self.retrieval == RETRIEVAL_NEIGHBORHOOD or self.context_of is not None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecalledMemory":
+        rank_score = data.get("rank_score")
         smart_score = data.get("smart_score")
         weighted_score = data.get("weighted_score")
-        if smart_score is not None:
+        if rank_score is not None:
+            score = rank_score
+        elif smart_score is not None:
             score = smart_score
         elif weighted_score is not None:
             score = weighted_score
@@ -1394,6 +1467,7 @@ class RecalledMemory:
             memory_type=data.get("memory_type", "episodic"),
             importance=data.get("importance", 0.5),
             score=score,
+            rank_score=rank_score,
             smart_score=smart_score,
             weighted_score=weighted_score,
             metadata=data.get("metadata"),
@@ -1401,7 +1475,43 @@ class RecalledMemory:
             depth=data.get("depth"),
             vector_score=data.get("vector_score"),
             text_score=data.get("text_score"),
+            matched_text=data.get("matched_text"),
+            matched_ids=data.get("matched_ids"),
+            retrieval=data.get("retrieval"),
+            context_of=data.get("context_of"),
         )
+
+
+# Keys of a recall/search result envelope (``{"memory": {...}, "score": ..., ...}``)
+# that are copied onto the flattened memory.
+_RESULT_ENVELOPE_KEYS = (
+    "rank_score",
+    "smart_score",
+    "weighted_score",
+    "vector_score",
+    "text_score",
+    "depth",
+    "matched_text",
+    "matched_ids",
+    "retrieval",
+    "context_of",
+)
+
+
+def _flatten_result(m: dict[str, Any]) -> dict[str, Any]:
+    """Flatten a ``{"memory": {...}, "score": ..., ...}`` result into one dict.
+
+    The memory's own fields come first; ``score`` and the envelope fields that
+    are present (:data:`_RESULT_ENVELOPE_KEYS`) are added next to them. A result
+    that is already flat is returned unchanged.
+    """
+    if "memory" in m and isinstance(m["memory"], dict):
+        flat = {**m["memory"], "score": m.get("score", 0.0)}
+        for key in _RESULT_ENVELOPE_KEYS:
+            if key in m:
+                flat[key] = m[key]
+        return flat
+    return m
 
 
 @dataclass
@@ -1412,34 +1522,95 @@ class RecallResponse:
     memories surfaced via configurable-depth KG traversal when
     ``include_associated`` is requested.  Each associated memory carries a
     ``depth`` field indicating the hop at which it was found (KG-3).
+
+    Under ``neighborhood_mode="inline"`` (the server default) ``memories`` may
+    hold more than ``top_k`` items: the neighbourhood context follows the ranked
+    results, each with ``retrieval == "neighborhood"`` (servers up to v0.12.2 do
+    not mark them). Under ``neighborhood_mode="separate"`` ``memories`` holds at
+    most ``top_k`` ranked results and the context is in ``context_memories``.
+    Use :attr:`ranked` for the ranked results alone.
     """
 
     memories: list["RecalledMemory"]
     associated_memories: list["RecalledMemory"] | None = None
+    context_memories: list["RecalledMemory"] | None = None
+    """Neighbourhood context under ``neighborhood_mode="separate"``, each entry
+    with ``context_of`` (the ranked memory it belongs to). ``None`` in the other
+    modes and from servers up to v0.12.2."""
+    rerank_report: "RerankReport | None" = None
+    """What the cross-encoder did for this recall (server v0.12+). ``None`` when
+    the server sends no report."""
+    query_embedding_time_ms: int | None = None
+    search_time_ms: int | None = None
+    late_interaction_first_stage: str | None = None
+    """Under the late-interaction strategy: the first stage that served the
+    recall's first search (``fde_graph``, ``fde_exact``, ``dense_while_building``,
+    ``dense_no_fde`` or ``cold_fallback``). ``None`` otherwise."""
+    warnings: list[str] = field(default_factory=list)
+    """Request fields the server ignored because it does not know them (server
+    v0.12.3+), e.g. ``["unknown field 'when' ignored"]``. Empty when every field
+    was used, and from older servers."""
+
+    @property
+    def ranked(self) -> list["RecalledMemory"]:
+        """The ranked results of ``memories``, without inline neighbourhood items."""
+        return [m for m in self.memories if not m.is_neighborhood]
 
     @classmethod
     def _normalize_memory(cls, m: dict[str, Any]) -> dict[str, Any]:
-        """Flatten nested memory envelope; promote sub-score fields to top level."""
-        if "memory" in m and isinstance(m["memory"], dict):
-            flat = {**m["memory"], "score": m.get("score", 0.0)}
-            for key in ("smart_score", "weighted_score", "vector_score", "text_score"):
-                if key in m:
-                    flat[key] = m[key]
-            return flat
-        return m
+        """Flatten nested memory envelope; promote the result fields to top level."""
+        return _flatten_result(m)
+
+    @classmethod
+    def _parse_list(cls, raw: Any) -> list["RecalledMemory"] | None:
+        if raw is None:
+            return None
+        return [RecalledMemory.from_dict(cls._normalize_memory(m)) for m in raw]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
-        memories = [
-            RecalledMemory.from_dict(cls._normalize_memory(m)) for m in data.get("memories", [])
-        ]
-        raw_assoc = data.get("associated_memories")
-        associated_memories = (
-            [RecalledMemory.from_dict(cls._normalize_memory(m)) for m in raw_assoc]
-            if raw_assoc is not None
-            else None
+        report = data.get("rerank_report")
+        if not isinstance(report, dict):
+            # Servers before the H19 rename send the report as `rerank` only.
+            report = data.get("rerank")
+        return cls(
+            memories=cls._parse_list(data.get("memories")) or [],
+            associated_memories=cls._parse_list(data.get("associated_memories")),
+            context_memories=cls._parse_list(data.get("context_memories")),
+            rerank_report=RerankReport.from_dict(report) if isinstance(report, dict) else None,
+            query_embedding_time_ms=data.get("query_embedding_time_ms"),
+            search_time_ms=data.get("search_time_ms"),
+            late_interaction_first_stage=data.get("late_interaction_first_stage"),
+            warnings=_str_list(data.get("warnings")),
         )
-        return cls(memories=memories, associated_memories=associated_memories)
+
+
+@dataclass
+class RerankReport:
+    """What the cross-encoder did for one recall (``rerank_report``)."""
+
+    applied: bool = False
+    """The cross-encoder rescored candidates and its order was used."""
+    candidates: int = 0
+    """How many candidates it scored."""
+    skipped: str | None = None
+    """Why it did not run (``disabled``, ``bm25_routing``, ``visual_lane``,
+    ``no_candidates``, ``no_query``, ``unavailable``, ``failed``) or why its order
+    was not used (``low_confidence``). ``None`` when it ran and was used."""
+    capped: bool = False
+    """The server's candidate cap (``DAKERA_RERANK_MAX_CANDIDATES``) left part of
+    the pool unscored, also when ``rerank_candidates`` was above the cap and was
+    lowered to it (server v0.12.3+)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RerankReport":
+        skipped = data.get("skipped")
+        return cls(
+            applied=bool(data.get("applied", False)),
+            candidates=int(data.get("candidates", 0) or 0),
+            skipped=str(skipped) if skipped is not None else None,
+            capped=bool(data.get("capped", False)),
+        )
 
 
 @dataclass
@@ -2074,6 +2245,9 @@ class MemoryEvent:
     - ``recalled`` — a memory was recalled (importance present)
     - ``forgotten`` — a memory was deleted
     - ``consolidated`` — memories were merged (memory_id is the new memory)
+    - ``deduplicated`` — a duplicate was folded into another memory (server
+      v0.12.3+; restorable for a while, see :meth:`DakeraClient.list_deduplicated`)
+    - ``restored`` — a deduplicated or consolidated memory was put back (v0.12.3+)
     - ``importance_updated`` — importance score changed
     - ``session_started`` — an agent session began (session_id present)
     - ``session_ended`` — an agent session ended (session_id present; server
@@ -2356,6 +2530,8 @@ class BatchRecallResponse:
     filtered: int
     truncated: bool = False
     """True when the result set was capped by ``limit`` and more matching memories exist."""
+    warnings: list[str] = field(default_factory=list)
+    """Request fields the server ignored (server v0.12.3+); empty otherwise."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchRecallResponse":
@@ -2364,6 +2540,7 @@ class BatchRecallResponse:
             total=data.get("total", 0),
             filtered=data.get("filtered", 0),
             truncated=data.get("truncated", False),
+            warnings=_str_list(data.get("warnings")),
         )
 
 
@@ -2426,8 +2603,14 @@ class BatchStoreMemoryItem:
     attachment_ref: str | None = None
     """``sha256:<hex>`` of an attachment already uploaded to the agent's namespace
     (server v0.12+, needs ``DAKERA_ATTACHMENTS``)."""
+    event_time: int | float | str | datetime | None = None
+    """When the memory's event happened (server v0.12.3+): Unix seconds, an
+    RFC 3339 string or a timezone-aware :class:`~datetime.datetime`. See
+    :meth:`DakeraClient.store_memory`."""
 
     def to_dict(self) -> dict[str, Any]:
+        from dakera._util import _event_time
+
         d: dict[str, Any] = {
             "content": self.content,
             "memory_type": self.memory_type,
@@ -2435,6 +2618,8 @@ class BatchStoreMemoryItem:
         }
         if self.attachment_ref is not None:
             d["attachment_ref"] = self.attachment_ref
+        if self.event_time is not None:
+            d["event_time"] = _event_time(self.event_time)
         if self.tags is not None:
             d["tags"] = self.tags
         if self.session_id is not None:
@@ -2512,6 +2697,13 @@ class BatchStoreMemoryResponse:
     ended_sessions: list[str] = field(default_factory=list)
     """Ended sessions this batch stored into (server v0.12.2+; the store still
     succeeds). Empty when none, or from older servers."""
+    truncated: list["TruncatedMemory"] = field(default_factory=list)
+    """The stored memories whose text is longer than the embedding model reads
+    (server v0.12.3+): their vector covers only the first ``embedded_tokens``.
+    Empty when none, and from older servers."""
+    warnings: list[str] = field(default_factory=list)
+    """Request fields the server ignored (server v0.12.3+), e.g.
+    ``"unknown field 'memories[].when' ignored (in 3 items)"``; empty otherwise."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchStoreMemoryResponse":
@@ -2520,6 +2712,96 @@ class BatchStoreMemoryResponse:
             stored_count=data.get("stored_count", 0),
             total_embedding_time_ms=data.get("total_embedding_time_ms", 0),
             ended_sessions=_str_list(data.get("ended_sessions")),
+            truncated=[
+                TruncatedMemory.from_dict(t)
+                for t in data.get("truncated") or []
+                if isinstance(t, dict)
+            ],
+            warnings=_str_list(data.get("warnings")),
+        )
+
+
+@dataclass
+class TruncatedMemory:
+    """A memory whose text is longer than the embedding model reads (server
+    v0.12.3+): its vector covers the first ``embedded_tokens`` of
+    ``content_tokens``. ``POST /v1/memory/store`` and ``PUT
+    /v1/memory/update/{id}`` report the same fields on the memory itself."""
+
+    id: str
+    content_tokens: int
+    """Tokens of the whole text."""
+    embedded_tokens: int
+    """Tokens the model embedded."""
+    max_tokens: int
+    """The model's token cap on this server (``effective_max_seq_length``)."""
+    windows: int = 0
+    """Overlapping windows derived as sub-memories so the tail is searchable
+    (``DAKERA_LONG_CONTENT_WINDOWS``); ``0`` with that switch off."""
+    tokens_estimated: bool = False
+    """The counts are the server's model-free estimate, not the tokenizer's."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TruncatedMemory":
+        return cls(
+            id=str(data.get("id", "")),
+            content_tokens=int(data.get("content_tokens", 0) or 0),
+            embedded_tokens=int(data.get("embedded_tokens", 0) or 0),
+            max_tokens=int(data.get("max_tokens", 0) or 0),
+            windows=int(data.get("windows", 0) or 0),
+            tokens_estimated=bool(data.get("tokens_estimated", False)),
+        )
+
+
+@dataclass
+class DeduplicatedMemory:
+    """A memory deduplication or consolidation deleted that can still be restored
+    (``GET /v1/memory/deduplicated``, server v0.12.3+)."""
+
+    id: str
+    """The deleted memory's id; restore it under this id."""
+    kind: str
+    """What deleted it: ``"deduplication"`` or ``"consolidation"``."""
+    survivor_id: str
+    """The memory it was folded (deduplication) or merged (consolidation) into."""
+    deleted_at: int
+    """When it was deleted (Unix seconds)."""
+    restorable_until: int
+    """Until when it can be restored (Unix seconds); purged after."""
+    session_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DeduplicatedMemory":
+        return cls(
+            id=str(data.get("id", "")),
+            kind=str(data.get("kind", "")),
+            survivor_id=str(data.get("survivor_id", "")),
+            deleted_at=int(data.get("deleted_at", 0) or 0),
+            restorable_until=int(data.get("restorable_until", 0) or 0),
+            session_id=data.get("session_id"),
+        )
+
+
+@dataclass
+class DeduplicatedListResponse:
+    """``GET /v1/memory/deduplicated?agent_id=`` (server v0.12.3+): the agent's
+    restorable deleted memories, newest first."""
+
+    agent_id: str
+    memories: list[DeduplicatedMemory]
+    count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DeduplicatedListResponse":
+        memories = [
+            DeduplicatedMemory.from_dict(m)
+            for m in data.get("memories") or []
+            if isinstance(m, dict)
+        ]
+        return cls(
+            agent_id=str(data.get("agent_id", "")),
+            memories=memories,
+            count=int(data.get("count", len(memories)) or 0),
         )
 
 
@@ -3236,8 +3518,8 @@ class RotateKeyResponse:
     it always has); ``RotateKeyResponse.from_dict(...)`` gives it a type.
     """
 
-    new_key: str
-    """The new API key — shown only once."""
+    new_key: str = field(repr=False)
+    """The new API key — shown only once. Left out of ``repr()``."""
     key_id: str
     """The NEW key's id."""
     warning: str = ""
@@ -3345,7 +3627,8 @@ class CreateNamespaceKeyResponse:
     """
 
     key_id: str
-    key: str
+    key: str = field(repr=False)
+    """The raw API key, shown only once. Left out of ``repr()``."""
     name: str
     namespace: str
     created_at: int
@@ -3468,28 +3751,54 @@ class ConsolidationLogEntry:
 
 @dataclass
 class MemoryImportResponse:
-    """Response from ``POST /v1/import`` (DX-1)."""
+    """Response from ``POST /v1/import`` (DX-1): the import job's status.
+
+    ``imported_count`` / ``skipped_count`` are the server's ``imported`` /
+    ``skipped``; the job fields are ``None`` when the server did not send them.
+    """
 
     imported_count: int
     skipped_count: int
     errors: list[str]
+    job_id: str | None = None
+    status: str | None = None
+    """``"done"``, ``"failed"`` (every item skipped) or ``"running"``."""
+    format: str | None = None
+    total: int | None = None
+    started_at: int | None = None
+    finished_at: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryImportResponse":
         return cls(
-            imported_count=data.get("imported_count", 0),
-            skipped_count=data.get("skipped_count", 0),
-            errors=data.get("errors", []),
+            imported_count=data.get("imported", data.get("imported_count", 0)),
+            skipped_count=data.get("skipped", data.get("skipped_count", 0)),
+            errors=list(data.get("errors") or []),
+            job_id=data.get("job_id"),
+            status=data.get("status"),
+            format=data.get("format"),
+            total=data.get("total"),
+            started_at=data.get("started_at"),
+            finished_at=data.get("finished_at"),
         )
 
 
 @dataclass
 class MemoryExportResponse:
-    """Response from ``GET /v1/export`` (DX-1)."""
+    """Response from ``GET /v1/export`` (DX-1).
+
+    The server answers the export file itself; ``data`` is its memories as
+    dicts (CSV rows as string-valued dicts) and ``raw`` the file as received,
+    ready to pass back to :meth:`~dakera.DakeraClient.import_memories`.
+    """
 
     data: list[dict[str, Any]]
     format: str
     count: int
+    raw: str = field(default="", repr=False)
+    """The export file as the server sent it."""
+    skipped: int = 0
+    """Stored memories the server could not export (``x-dakera-export-skipped``)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MemoryExportResponse":
@@ -3508,14 +3817,27 @@ class MemoryExportResponse:
 
 @dataclass
 class AuditEvent:
-    """A single business-event entry from the audit log (OBS-1)."""
+    """A single business-event entry from the audit log (OBS-1).
 
-    id: str
+    The server sends ``id``, ``event_type``, ``agent_id``, ``timestamp`` (Unix
+    milliseconds) and, when they apply, ``memory_id``, ``session_id``,
+    ``importance`` and (v0.12.3+) ``reason``: why the event happened, e.g.
+    ``"absorbed into mem_…"`` for a ``deduplicated`` memory or ``"merged into
+    mem_…"`` for a ``consolidated`` one. ``namespace`` and ``details`` are kept
+    for compatibility and are filled only by servers that send them.
+    """
+
+    id: int | str
     event_type: str
     agent_id: str | None
     namespace: str | None
     timestamp: int
+    """Unix milliseconds."""
     details: dict[str, Any]
+    memory_id: str | None = None
+    session_id: str | None = None
+    importance: float | None = None
+    reason: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditEvent":
@@ -3525,7 +3847,11 @@ class AuditEvent:
             agent_id=data.get("agent_id"),
             namespace=data.get("namespace"),
             timestamp=data.get("timestamp", 0),
-            details=data.get("details", {}),
+            details=data.get("details") or {},
+            memory_id=data.get("memory_id"),
+            session_id=data.get("session_id"),
+            importance=data.get("importance"),
+            reason=data.get("reason"),
         )
 
 
@@ -3535,13 +3861,16 @@ class AuditListResponse:
 
     events: list[AuditEvent]
     total: int
+    """How many events this page holds (the server's ``count``)."""
     cursor: str | None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditListResponse":
+        events = [AuditEvent.from_dict(e) for e in data.get("events", [])]
+        total = data.get("count", data.get("total"))
         return cls(
-            events=[AuditEvent.from_dict(e) for e in data.get("events", [])],
-            total=data.get("total", 0),
+            events=events,
+            total=int(total) if total is not None else len(events),
             cursor=data.get("cursor"),
         )
 
@@ -3668,31 +3997,67 @@ class FulltextReindexResponse:
 
 @dataclass
 class RotateEncryptionKeyRequest:
-    """Request body for ``POST /v1/admin/encryption/rotate-key`` (SEC-3).
+    """Request body for ``POST /admin/encryption/rotate-key`` (SEC-3).
+
+    :meth:`to_dict` holds exactly the fields the server's
+    ``RotateEncryptionKeyRequest`` reads (it refuses any other with ``422``
+    from v0.12.3), and only those that are set.
 
     Args:
-        new_key: New passphrase or 64-char hex key to rotate to.
-        namespace: If set, rotate only memories in this namespace.
-            Omit to rotate all namespaces.
+        new_key: Passphrase or 64-char hex key the new data key is derived
+            from. ``None``: the server generates a random 256-bit key. Never
+            shown by ``repr()``.
+        namespace: If set, rotate only this namespace's key. Omit to rotate
+            the global key (every namespace moves to it).
+        wait_secs: How long the server waits for the re-seal before answering
+            (server default 10, at most 300; ``0`` = answer at once).
     """
 
-    new_key: str
+    new_key: str | None = field(default=None, repr=False)
     namespace: str | None = None
+    wait_secs: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"new_key": self.new_key}
+        d: dict[str, Any] = {}
+        if self.new_key is not None:
+            d["new_key"] = self.new_key
         if self.namespace is not None:
             d["namespace"] = self.namespace
+        if self.wait_secs is not None:
+            d["wait_secs"] = self.wait_secs
         return d
 
 
 @dataclass
 class RotateEncryptionKeyResponse:
-    """Response from ``POST /v1/admin/encryption/rotate-key`` (SEC-3)."""
+    """Response from ``POST /admin/encryption/rotate-key`` (SEC-3).
+
+    Key ids only, never key material. The fields after ``namespaces`` are
+    ``None`` / empty when the server did not send them.
+    """
 
     rotated: int
+    """Values re-sealed under the new key by the time of the answer."""
     skipped: int
+    """Values not re-sealed by the time of the answer (retried in the background)."""
     namespaces: list[str]
+    """Namespaces with values re-sealed by the time of the answer."""
+    key_id: str | None = None
+    """Id of the new active key."""
+    previous_key_id: str | None = None
+    """Id of the key it replaces for this scope."""
+    scope: str | None = None
+    """``"global"`` or ``"namespace"``."""
+    namespace: str | None = None
+    reseal: str | None = None
+    """``"completed"``, ``"running"`` or ``"partial"`` — see
+    ``GET /admin/encryption/status`` (``status_url``)."""
+    fulltext_indices_rotated: int | None = None
+    failed_namespaces: list[str] = field(default_factory=list)
+    action_required: str | None = None
+    """Set when the operator must act, e.g. set ``DAKERA_ENCRYPTION_KEY``
+    before the next restart."""
+    status_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RotateEncryptionKeyResponse":
@@ -3700,6 +4065,15 @@ class RotateEncryptionKeyResponse:
             rotated=data.get("rotated", 0),
             skipped=data.get("skipped", 0),
             namespaces=data.get("namespaces", []),
+            key_id=data.get("key_id"),
+            previous_key_id=data.get("previous_key_id"),
+            scope=data.get("scope"),
+            namespace=data.get("namespace"),
+            reseal=data.get("reseal"),
+            fulltext_indices_rotated=data.get("fulltext_indices_rotated"),
+            failed_namespaces=list(data.get("failed_namespaces") or []),
+            action_required=data.get("action_required"),
+            status_url=data.get("status_url"),
         )
 
 
@@ -4746,3 +5120,451 @@ class RecordUpsertResponse:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecordUpsertResponse":
         return cls(upserted_count=int(data.get("upserted_count", 0) or 0))
+
+
+# ============================================================================
+# Documents (#923, server v0.12.3+): import PDF / DOCX / HTML / Markdown / text
+# as chunk memories
+# ============================================================================
+
+DOCUMENT_META_KEY = "_dakera_document"
+"""Metadata key every chunk memory of an imported document carries
+(:class:`DocumentChunkMeta`)."""
+
+DOCUMENT_TAG_PREFIX = "document:"
+"""Prefix of the tag every chunk of a document carries: ``document:<document_id>``."""
+
+DOCUMENT_TEXT_MEDIA_TYPES = ("text/plain", "text/markdown", "text/html")
+"""Media types :meth:`~dakera.DakeraClient.import_document` takes as text."""
+
+
+class ChunkStrategy(LenientStrEnum):
+    """How an imported document's text is split (``chunking.strategy``)."""
+
+    STRUCTURE = "structure"
+    """Sections at headings, then paragraphs, sentences, words (server default)."""
+    FIXED = "fixed"
+    """Plain token windows with overlap; headings are text."""
+
+
+@dataclass
+class ChunkingOptions:
+    """The ``chunking`` field of a document import.
+
+    The server refuses an unknown field here (``deny_unknown_fields``), so
+    :meth:`to_dict` holds only these three, and only those that are set.
+    """
+
+    max_tokens: int | None = None
+    """Token budget of one chunk's text (server default
+    ``DAKERA_DOCUMENT_CHUNK_TOKENS``, 400; clamped to the embedding model's cap)."""
+    overlap_tokens: int | None = None
+    """Tokens repeated from the end of the previous chunk (server default
+    ``DAKERA_DOCUMENT_CHUNK_OVERLAP_TOKENS``, 50; at most a quarter of the budget)."""
+    strategy: ChunkStrategy | str | None = None
+    """``"structure"`` (server default) or ``"fixed"``."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        if self.max_tokens is not None:
+            d["max_tokens"] = self.max_tokens
+        if self.overlap_tokens is not None:
+            d["overlap_tokens"] = self.overlap_tokens
+        if self.strategy is not None:
+            d["strategy"] = wire_value(self.strategy)
+        return d
+
+
+@dataclass
+class DocumentImportOptions:
+    """Fields both document imports share: the memory fields every chunk memory
+    carries (as ``POST /v1/memory/store``), ``chunking`` and ``decompose``.
+
+    Only the fields that are set are sent; the server's defaults apply to the
+    others (``memory_type`` episodic, ``importance`` 0.5, ``decompose`` false).
+    """
+
+    memory_type: str | None = None
+    session_id: str | None = None
+    importance: float | None = None
+    tags: list[str] | None = None
+    """Tags of every chunk; the server adds ``document:<document_id>``."""
+    metadata: dict[str, Any] | None = None
+    """Metadata of every chunk; the server adds ``_dakera_document``."""
+    ttl_seconds: int | None = None
+    expires_at: int | None = None
+    lang: str | None = None
+    """Language of the document for the write-time derivations."""
+    chunking: ChunkingOptions | None = None
+    decompose: bool | None = None
+    """Derive sentence sub-memories from every chunk (server default ``False``:
+    a chunk is already a retrieval unit)."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        for key in (
+            "memory_type",
+            "session_id",
+            "importance",
+            "tags",
+            "metadata",
+            "ttl_seconds",
+            "expires_at",
+            "lang",
+            "decompose",
+        ):
+            value = getattr(self, key)
+            if value is None:
+                continue
+            if key == "tags":
+                value = list(value)
+            elif key == "memory_type":
+                value = wire_value(value)
+            d[key] = value
+        if self.chunking is not None:
+            d["chunking"] = self.chunking.to_dict()
+        return d
+
+
+@dataclass
+class ImportDocumentRequest(DocumentImportOptions):
+    """Body of ``POST /v1/memory/documents``: a document given as text.
+
+    Use :meth:`~dakera.DakeraClient.import_document`, which builds it.
+    """
+
+    agent_id: str = ""
+    content: str = field(default="", repr=False)
+    media_type: str | None = None
+    """``text/plain`` (server default), ``text/markdown`` or ``text/html``."""
+    title: str | None = None
+    """Title of the document (else taken from the document itself)."""
+    document_id: str | None = None
+    """Id of the document; default: derived from the agent and the content hash,
+    so importing the same bytes again replaces the document with itself."""
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"agent_id": self.agent_id, "content": self.content}
+        for key in ("media_type", "title", "document_id"):
+            value = getattr(self, key)
+            if value is not None:
+                d[key] = value
+        d.update(super().to_dict())
+        return d
+
+
+@dataclass
+class ImportAttachmentDocumentRequest(DocumentImportOptions):
+    """Body of ``POST /v1/namespaces/{ns}/attachments/{ref}/document``.
+
+    Use :meth:`~dakera.DakeraClient.import_attachment_document`, which builds it.
+    """
+
+    agent_id: str = ""
+    title: str | None = None
+    document_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"agent_id": self.agent_id}
+        for key in ("title", "document_id"):
+            value = getattr(self, key)
+            if value is not None:
+                d[key] = value
+        d.update(super().to_dict())
+        return d
+
+
+@dataclass
+class DocumentImportAccepted:
+    """``202`` answer of both document imports."""
+
+    job_id: str
+    document_id: str
+    agent_id: str
+    status_url: str
+    """Server-relative route to poll (``GET``, a key that may read the agent)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentImportAccepted":
+        return cls(
+            job_id=str(data["job_id"]),
+            document_id=str(data.get("document_id", "")),
+            agent_id=str(data.get("agent_id", "")),
+            status_url=str(data.get("status_url", "")),
+        )
+
+
+@dataclass
+class DocumentJob(AttachmentJob):
+    """A document import job (``GET /v1/memory/documents/jobs/{job_id}``).
+
+    ``status`` is ``Pending``, ``Running``, ``Completed``, ``Failed`` or
+    ``Cancelled``. While running, ``progress`` (0–100) and ``message``
+    (``chunks_stored n/total``) report the writes; a failed job carries
+    ``error_status`` / ``error_code`` (``413`` too big / too many chunks, ``422``
+    ``UNPROCESSABLE_CONTENT``, ``504`` ``EXTRACTION_TIMEOUT``, …).
+    """
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentJob":
+        return cast("DocumentJob", super().from_dict(data))  # built as cls
+
+    @property
+    def document_id(self) -> str | None:
+        return self.metadata.get("document_id")
+
+    @property
+    def agent_id(self) -> str | None:
+        return self.metadata.get("agent_id")
+
+    @property
+    def media_type(self) -> str | None:
+        return self.metadata.get("media_type")
+
+    @property
+    def attachment_ref(self) -> str | None:
+        """The attachment imported (attachment route only)."""
+        return self.metadata.get("attachment_ref")
+
+
+@dataclass
+class DocumentChunkMeta:
+    """What ``_dakera_document`` holds on every chunk memory of a document.
+
+    The document-level fields (``title``, ``media_type``, ``chunk_count``,
+    ``bytes``, ``pages``, ``created_at``, ``updated_at``, ``sha256``) are
+    repeated on every chunk, so one recall result can cite its document, page
+    and section. Read it with :meth:`from_memory`.
+    """
+
+    id: str
+    """The document id."""
+    media_type: str
+    chunk_index: int
+    """Position of this chunk, from 0."""
+    chunk_count: int
+    char_start: int
+    """Character range of the chunk's text in the extracted text."""
+    char_end: int
+    sha256: str
+    """SHA-256 (hex) of the source document's bytes."""
+    title: str | None = None
+    page_start: int | None = None
+    """First page the chunk's text comes from (PDF; form-feed pages of text)."""
+    page_end: int | None = None
+    heading_path: list[str] = field(default_factory=list)
+    """Headings above the chunk, outermost first (the title included)."""
+    bytes: int = 0
+    pages: int | None = None
+    created_at: int = 0
+    updated_at: int = 0
+    decompose: bool = False
+    fingerprint: str = ""
+
+    @property
+    def breadcrumb(self) -> str:
+        """The heading path joined as the server shows it (``A › B › C``)."""
+        return " › ".join(self.heading_path)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentChunkMeta":
+        return cls(
+            id=str(data["id"]),
+            media_type=str(data.get("media_type", "")),
+            chunk_index=int(data.get("chunk_index", 0) or 0),
+            chunk_count=int(data.get("chunk_count", 0) or 0),
+            char_start=int(data.get("char_start", 0) or 0),
+            char_end=int(data.get("char_end", 0) or 0),
+            sha256=str(data.get("sha256", "")),
+            title=data.get("title"),
+            page_start=_opt_int(data.get("page_start")),
+            page_end=_opt_int(data.get("page_end")),
+            heading_path=_str_list(data.get("heading_path")),
+            bytes=int(data.get("bytes", 0) or 0),
+            pages=_opt_int(data.get("pages")),
+            created_at=int(data.get("created_at", 0) or 0),
+            updated_at=int(data.get("updated_at", 0) or 0),
+            decompose=bool(data.get("decompose", False)),
+            fingerprint=str(data.get("fingerprint", "")),
+        )
+
+    @classmethod
+    def from_memory(cls, memory: Any) -> "DocumentChunkMeta | None":
+        """The ``_dakera_document`` of a memory, or ``None`` when it is not a chunk.
+
+        ``memory`` is a :class:`RecalledMemory` / :class:`Memory`, a memory dict
+        (e.g. a :meth:`~dakera.DakeraClient.search_memories` item or a
+        ``{"memory": {...}}`` result), or a metadata dict.
+        """
+        if isinstance(memory, dict):
+            if isinstance(memory.get("memory"), dict):
+                memory = memory["memory"]
+            metadata = memory.get("metadata") if DOCUMENT_META_KEY not in memory else memory
+        else:
+            metadata = getattr(memory, "metadata", None)
+        if not isinstance(metadata, dict):
+            return None
+        value = metadata.get(DOCUMENT_META_KEY)
+        if not isinstance(value, dict) or "id" not in value:
+            return None
+        try:
+            return cls.from_dict(value)
+        except (TypeError, ValueError):
+            return None
+
+
+def document_chunk_meta(memory: Any) -> DocumentChunkMeta | None:
+    """The ``_dakera_document`` of a recalled / searched / listed memory, or
+    ``None`` when it is not a document chunk. See :meth:`DocumentChunkMeta.from_memory`."""
+    return DocumentChunkMeta.from_memory(memory)
+
+
+@dataclass
+class DocumentSummary:
+    """One document of ``GET /v1/memory/documents``."""
+
+    document_id: str
+    media_type: str
+    chunk_count: int
+    bytes: int
+    created_at: int
+    updated_at: int
+    sha256: str
+    title: str | None = None
+    pages: int | None = None
+    attachment_ref: str | None = None
+    """The attachment the document was imported from (attachment route)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentSummary":
+        return cls(
+            document_id=str(data["document_id"]),
+            media_type=str(data.get("media_type", "")),
+            chunk_count=int(data.get("chunk_count", 0) or 0),
+            bytes=int(data.get("bytes", 0) or 0),
+            created_at=int(data.get("created_at", 0) or 0),
+            updated_at=int(data.get("updated_at", 0) or 0),
+            sha256=str(data.get("sha256", "")),
+            title=data.get("title"),
+            pages=_opt_int(data.get("pages")),
+            attachment_ref=data.get("attachment_ref"),
+        )
+
+
+@dataclass
+class DocumentListResponse:
+    """``GET /v1/memory/documents``: one page, sorted by document id."""
+
+    documents: list[DocumentSummary]
+    next_cursor: str | None = None
+    """Pass as ``cursor`` for the next page; ``None`` on the last one."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentListResponse":
+        return cls(
+            documents=[
+                DocumentSummary.from_dict(d)
+                for d in data.get("documents") or []
+                if isinstance(d, dict)
+            ],
+            next_cursor=data.get("next_cursor"),
+        )
+
+
+@dataclass
+class DocumentChunkInfo:
+    """One chunk of ``GET /v1/memory/documents/{document_id}``."""
+
+    id: str
+    """The chunk's memory id (``doc_…``)."""
+    chunk_index: int
+    char_start: int
+    char_end: int
+    heading_path: list[str] = field(default_factory=list)
+    page_start: int | None = None
+    page_end: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentChunkInfo":
+        return cls(
+            id=str(data["id"]),
+            chunk_index=int(data.get("chunk_index", 0) or 0),
+            char_start=int(data.get("char_start", 0) or 0),
+            char_end=int(data.get("char_end", 0) or 0),
+            heading_path=_str_list(data.get("heading_path")),
+            page_start=_opt_int(data.get("page_start")),
+            page_end=_opt_int(data.get("page_end")),
+        )
+
+
+@dataclass
+class DocumentDetail:
+    """``GET /v1/memory/documents/{document_id}``: the document and its chunks."""
+
+    document: DocumentSummary
+    chunks: list[DocumentChunkInfo]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentDetail":
+        return cls(
+            document=DocumentSummary.from_dict(_dict(data.get("document"))),
+            chunks=[
+                DocumentChunkInfo.from_dict(c)
+                for c in data.get("chunks") or []
+                if isinstance(c, dict)
+            ],
+        )
+
+
+@dataclass
+class DeleteDocumentResponse:
+    """``DELETE /v1/memory/documents/{document_id}``."""
+
+    document_id: str
+    deleted_chunks: int
+    """Chunk memories removed."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DeleteDocumentResponse":
+        return cls(
+            document_id=str(data.get("document_id", "")),
+            deleted_chunks=int(data.get("deleted_chunks", 0) or 0),
+        )
+
+
+@dataclass
+class DocumentCapabilities:
+    """Document import (``capabilities.documents``, server v0.12.3+).
+
+    ``enabled`` is ``False`` on a server that predates document import (its
+    routes answer ``404``) or runs with ``DAKERA_DOCUMENTS`` off (``501``).
+    """
+
+    enabled: bool = False
+    text_media_types: list[str] = field(default_factory=list)
+    """Media types :meth:`~dakera.DakeraClient.import_document` takes."""
+    media_types: list[str] = field(default_factory=list)
+    """Attachment media types :meth:`~dakera.DakeraClient.import_attachment_document`
+    takes (PDF, DOCX, HTML, Markdown, text)."""
+    max_bytes: int = 0
+    max_text_bytes: int = 0
+    max_chunks: int = 0
+    default_chunk_tokens: int = 0
+    default_overlap_tokens: int = 0
+    strategies: list[str] = field(default_factory=list)
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DocumentCapabilities":
+        return cls(
+            enabled=bool(data.get("enabled", False)),
+            text_media_types=_str_list(data.get("text_media_types")),
+            media_types=_str_list(data.get("media_types")),
+            max_bytes=int(data.get("max_bytes", 0) or 0),
+            max_text_bytes=int(data.get("max_text_bytes", 0) or 0),
+            max_chunks=int(data.get("max_chunks", 0) or 0),
+            default_chunk_tokens=int(data.get("default_chunk_tokens", 0) or 0),
+            default_overlap_tokens=int(data.get("default_overlap_tokens", 0) or 0),
+            strategies=_str_list(data.get("strategies")),
+            raw=dict(data),
+        )

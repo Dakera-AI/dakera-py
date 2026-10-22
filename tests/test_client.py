@@ -2515,6 +2515,15 @@ FEEDBACK_RESPONSE = {
     "signal": "upvote",
 }
 
+PATCHED_MEMORY = {
+    "id": "mem-abc",
+    "content": "the user prefers tea",
+    "memory_type": "semantic",
+    "importance": 0.92,
+    "agent_id": "agent-1",
+    "tags": [],
+}
+
 # SEC-1 fixtures
 NAMESPACE_KEY_INFO = {
     "key_id": "key-abc",
@@ -2626,7 +2635,8 @@ class TestFeedbackLoopSyncClient:
             json=FEEDBACK_HISTORY_RESPONSE,
             status=200,
         )
-        result = client.get_memory_feedback_history("mem-abc")
+        result = client.get_memory_feedback_history("mem-abc", "agent-1")
+        assert "agent_id=agent-1" in mock_responses.calls[0].request.url
         assert result.memory_id == "mem-abc"
         assert len(result.entries) == 2
         from dakera import FeedbackSignal
@@ -2654,12 +2664,13 @@ class TestFeedbackLoopSyncClient:
         mock_responses.add(
             responses.PATCH,
             "http://localhost:3000/v1/memories/mem-abc/importance",
-            json=FEEDBACK_RESPONSE,
+            json=PATCHED_MEMORY,
             status=200,
         )
+        # The server answers the updated memory (`Json<Memory>`).
         result = client.patch_memory_importance("mem-abc", "agent-1", 0.92)
-        assert result.memory_id == "mem-abc"
-        assert result.new_importance == pytest.approx(0.92)
+        assert result.id == "mem-abc"
+        assert result.importance == pytest.approx(0.92)
         import json as _json
         body = _json.loads(mock_responses.calls[0].request.body)
         assert body["agent_id"] == "agent-1"
@@ -2706,8 +2717,10 @@ class TestFeedbackLoopAsyncClient:
         with patch("httpx.AsyncClient.request") as mock_req:
             mock_req.return_value = httpx.Response(200, json=FEEDBACK_HISTORY_RESPONSE)
             async with AsyncDakeraClient("http://localhost:3000") as client:
-                result = await client.get_memory_feedback_history("mem-abc")
+                result = await client.get_memory_feedback_history("mem-abc", "agent-1")
         assert len(result.entries) == 2
+        _, kwargs = mock_req.call_args
+        assert kwargs["params"] == {"agent_id": "agent-1"}
 
     @pytest.mark.asyncio
     async def test_get_agent_feedback_summary_async(self):
@@ -2725,10 +2738,10 @@ class TestFeedbackLoopAsyncClient:
         """AsyncDakeraClient.patch_memory_importance() PATCHes importance."""
         import httpx
         with patch("httpx.AsyncClient.request") as mock_req:
-            mock_req.return_value = httpx.Response(200, json=FEEDBACK_RESPONSE)
+            mock_req.return_value = httpx.Response(200, json=PATCHED_MEMORY)
             async with AsyncDakeraClient("http://localhost:3000") as client:
                 result = await client.patch_memory_importance("mem-abc", "agent-1", 0.92)
-        assert result.new_importance == pytest.approx(0.92)
+        assert result.importance == pytest.approx(0.92)
 
     @pytest.mark.asyncio
     async def test_get_feedback_health_async(self):
@@ -3452,7 +3465,7 @@ class TestAsyncClientStoreMemoryValidFrom:
     """AsyncDakeraClient.store_memory() forwards valid_from for bi-temporal recall (DAK-7424)."""
 
     async def test_store_memory_with_valid_from_includes_field(self):
-        """store_memory() sends valid_from in request body when set."""
+        """store_memory() sends valid_from in the metadata when set."""
         from unittest.mock import patch
 
         from dakera.async_client import AsyncDakeraClient
@@ -3466,7 +3479,9 @@ class TestAsyncClientStoreMemoryValidFrom:
         with patch.object(client, "_request", side_effect=fake_request):
             await client.store_memory("agent-1", "past event", valid_from=1700000000)
 
-        assert captured.get("valid_from") == 1700000000
+        # The server reads valid_from from the memory's metadata.
+        assert captured["metadata"] == {"valid_from": 1700000000}
+        assert "valid_from" not in captured
 
     async def test_store_memory_without_valid_from_omits_field(self):
         """store_memory() does not include valid_from when caller omits it."""

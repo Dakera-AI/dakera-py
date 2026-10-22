@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dakera"
-version = "0.14.0"
+version = "0.14.1"
 description = "Python SDK for Dakera - AI memory platform"
 readme = "README.md"
 license = {text = "MIT"}
@@ -28,7 +28,7 @@ classifiers = [
 keywords = ["agent-memory", "vector-search", "knowledge-graph", "mcp", "ai-agents", "self-hosted", "memory-engine", "vector-database", "session-management", "embeddings", "dakera", "ai", "ml"]
 dependencies = [
     "requests>=2.33.0",
-    "urllib3>=2.6.3",
+    "urllib3>=2.8.0",
 ]
 
 [project.optional-dependencies]

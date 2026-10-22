@@ -148,6 +148,27 @@ class TestChatMemorySessionRecall:
         import json
         body = json.loads(mock_responses.calls[0].request.body)
         assert body["top_k"] == 10
+        assert body["neighborhood_mode"] == "separate"
+
+    def test_recall_never_exceeds_top_k(self, client, mock_responses):
+        """A server up to v0.12.2 appends neighbourhood context inline, unmarked."""
+        mem = {"memory_type": "episodic", "importance": 0.5}
+        mock_responses.add(
+            responses.POST,
+            "http://localhost:3000/v1/memory/recall",
+            json={
+                "memories": [
+                    {"memory": {"id": f"m{i}", "content": str(i), **mem}, "score": 1.0 - i / 10}
+                    for i in range(4)
+                ],
+                "context_memories": [
+                    {"memory": {"id": "n", "content": "ctx", **mem}, "score": 0.1,
+                     "context_of": "m0"}
+                ],
+            },  # fmt: skip
+        )
+        session = ChatMemorySession(client, "agent-1", "sess_abc")
+        assert [m.id for m in session.recall("q", top_k=2)] == ["m0", "m1"]
 
 
 class TestChatMemorySessionClose:

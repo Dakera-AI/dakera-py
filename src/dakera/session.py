@@ -154,15 +154,19 @@ class ChatMemorySession:
             top_k: Maximum number of memories to return (default: 5).
 
         Returns:
-            List of :class:`~dakera.RecalledMemory` objects ordered by
-            relevance.
+            At most ``top_k`` :class:`~dakera.RecalledMemory` objects ordered by
+            relevance. The server's neighbourhood context is requested
+            separately (``neighborhood_mode="separate"``) and left out, so it
+            never pushes the list past ``top_k``; a server up to v0.12.2 that
+            appends it inline is cut at ``top_k``.
         """
         response = self._client.recall(
             agent_id=self._agent_id,
             query=query,
             top_k=top_k,
+            neighborhood_mode="separate",
         )
-        return response.memories
+        return response.ranked[:top_k]
 
     def close(self, summary: str | None = None) -> dict[str, Any]:
         """End the Dakera session.
@@ -324,15 +328,19 @@ class AsyncChatMemorySession:
             top_k: Maximum number of memories to return (default: 5).
 
         Returns:
-            List of :class:`~dakera.RecalledMemory` objects ordered by
-            relevance.
+            At most ``top_k`` :class:`~dakera.RecalledMemory` objects ordered by
+            relevance. The server's neighbourhood context is requested
+            separately (``neighborhood_mode="separate"``) and left out, so it
+            never pushes the list past ``top_k``; a server up to v0.12.2 that
+            appends it inline is cut at ``top_k``.
         """
         response = await self._client.recall(
             agent_id=self._agent_id,
             query=query,
             top_k=top_k,
+            neighborhood_mode="separate",
         )
-        return response.memories
+        return response.ranked[:top_k]
 
     async def close(self, summary: str | None = None) -> dict[str, Any]:
         """End the Dakera session.
