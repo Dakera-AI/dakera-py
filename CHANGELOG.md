@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.14.1] - Unreleased
+## [0.14.1] - 2026-10-22
 
 Dakera server **v0.12.3** support (Dakera-AI/dakera#917, #920; engine PR
 Dakera-AI/dakera#922), an API parity audit against the server's router and handlers,
@@ -42,6 +42,38 @@ fields are `None` from an older server.
   `search_memories()` results carry every result field the server sends (`smart_score`,
   `weighted_score`, `vector_score`, `text_score`, `matched_ids`, `matched_text`), and take
   `session_id=`.
+- **`rank_score`** on `RecalledMemory`: the server's ranking field of a recall
+  (non-increasing over `memories` in response order). `score` is `rank_score` when the
+  server sends it, else `smart_score`, `weighted_score`, then the raw score.
+- **Event time** (Dakera-AI/dakera#932): `store_memory(..., event_time=)` and
+  `BatchStoreMemoryItem(event_time=)` take when the memory's event happened — Unix
+  seconds, an RFC 3339 string or a timezone-aware `datetime` (a naive one raises
+  `ValueError`). The server keeps it as `_dakera_event_time` and reads it for recency,
+  `since` / `until` and temporal links; `created_at` stays the ingest time.
+- **Long text report** (Dakera-AI/dakera#933): `store_memory()` / `update_memory()` return
+  `truncated`, `content_tokens`, `embedded_tokens`, `max_tokens` and `windows` when the text
+  is longer than the embedding model reads; `BatchStoreMemoryResponse.truncated` lists such
+  memories (`TruncatedMemory`).
+- **Ignored request fields**: `warnings` on the `store_memory()` result,
+  `BatchStoreMemoryResponse`, `RecallResponse` and `BatchRecallResponse` lists the request
+  fields the server did not know and ignored.
+- **Reranking control**: `recall(..., rerank_candidates=)` bounds how many candidates the
+  cross-encoder scores (a positive integer; `0` raises `ValueError`, use `rerank=False`).
+  `RecallResponse.rerank_report` (`RerankReport`: `applied`, `candidates`, `skipped`,
+  `capped`), plus `query_embedding_time_ms`, `search_time_ms` and
+  `late_interaction_first_stage`.
+- **Restorable deduplicated memories** (Dakera-AI/dakera#930): `list_deduplicated(agent_id)`
+  (`GET /v1/memory/deduplicated`, `DeduplicatedListResponse` / `DeduplicatedMemory`:
+  `kind`, `survivor_id`, `deleted_at`, `restorable_until`) and
+  `restore_deduplicated(agent_id, memory_id)` (`404` without a restorable copy, `409` when
+  the agent holds the id again). `autopilot_update_config(..., dedup_mode="off" | "report" |
+  "merge", dedup_cross_session=, consolidate_cross_session=, trash_retention_hours=)`.
+- `get_memory(None, memory_id)` looks the id up in every agent namespace the key may read
+  (server v0.12.3+).
+- `NamingCapabilities.session_id_pattern` / `session_id_max_bytes` (session ids may contain
+  `:`, e.g. `urn:chat:42`).
+- `ErrorCode.HOST_NOT_ALLOWED` (421), `UNPROCESSABLE_CONTENT` (422) and
+  `EXTRACTION_TIMEOUT` (504).
 - `rotate_encryption_key(new_key=None, namespace=None, *, wait_secs=)`: `new_key` is
   optional (the server generates a key); `RotateEncryptionKeyResponse` gains `key_id`,
   `previous_key_id`, `scope`, `namespace`, `reseal`, `fulltext_indices_rotated`,
@@ -75,6 +107,15 @@ fields are `None` from an older server.
 - `store_memory(valid_from=)` is sent as `metadata["valid_from"]`, where the server reads
   it (a top-level field was ignored).
 - KG-3 `depth` of associated memories was dropped when flattening the result envelope.
+- `AuditEvent` / `AuditListResponse` follow the server's `GET /v1/audit` answer:
+  `memory_id`, `session_id`, `importance` and `reason` (why the event happened, e.g.
+  `"absorbed into <id>"`) were dropped, and `total` read a field the server does not send
+  (it sends `count`). `from_ts` / `to_ts` are Unix milliseconds, both inclusive.
+- A `429` error kept neither the server's message nor its `code`
+  (`RATE_LIMIT_EXCEEDED`); an error status without its own exception class (`421`,
+  `422`, ...) replaced the server's message with "Unexpected status code". Both now keep
+  the server's message and code.
+- `get_memory()` sends the memory id as one escaped path segment.
 - `ChatMemorySession.recall()` / `AsyncChatMemorySession.recall()` return at most `top_k`
   memories as documented: they request `neighborhood_mode="separate"` and return the ranked
   results (a server up to v0.12.2, which appends the context inline, is cut at `top_k`).
@@ -102,6 +143,9 @@ fields are `None` from an older server.
   `curl` (v0.12.3+); the pinned image is unchanged.
 - `ops_shutdown()` documents the server's global `super_admin` requirement (an `admin` key
   gets `403` from v0.12.3).
+- Recall, `search_memories()` and `batch_recall()` of an agent that has stored nothing
+  return no memories on a v0.12.3 server (older servers answered `404 NAMESPACE_NOT_FOUND`);
+  an overloaded v0.12.3 server answers `429` with `Retry-After`, which the client retries.
 - `repr()` of the clients never shows the API key; the key fields of
   `CreateNamespaceKeyResponse`, `RotateKeyResponse` and `RotateEncryptionKeyRequest` are
   left out of `repr()`.
@@ -109,7 +153,8 @@ fields are `None` from an older server.
   sync client streams SSE through urllib3); lock file: anyio 4.15.1, fsspec 2026.9.0
   (dev / optional extras). `pip-audit` of the lock file finds no known vulnerability.
 - `tests/v0_12_routes.txt` follows the server router: API keys under `/admin/keys` only,
-  node-to-node `/internal` routes left out.
+  node-to-node `/internal` routes left out; the v0.12.3 document and deduplicated-memory
+  routes are in.
 
 ## [0.14.0] - 2026-10-08
 

@@ -11,12 +11,14 @@ import contextlib
 import os
 import time
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
 from dakera import DakeraClient
-from dakera.exceptions import AuthenticationError, DakeraError
+from dakera.exceptions import AuthenticationError, DakeraError, NotFoundError
 from dakera.models import (
+    BatchMemoryFilter,
     BatchRecallRequest,
     BatchStoreMemoryItem,
     BatchStoreMemoryRequest,
@@ -517,3 +519,147 @@ class TestAsyncChatMemorySession:
             memories = await session.recall("context manager")
             assert isinstance(memories, list)
         # If we reach here without exception the context manager worked
+
+
+# ---------------------------------------------------------------------------
+# Server v0.12.3: event time, ignored-field warnings, empty agents, restorable
+# deleted memories, get without agent_id. Skipped on older servers (CI pins an
+# older image until v0.12.3 is published).
+# ---------------------------------------------------------------------------
+
+
+def _server_version(client) -> tuple[int, ...]:
+    raw = str(client.health().get("version", "0"))
+    parts = []
+    for piece in raw.split("-")[0].split("."):
+        parts.append(int(piece) if piece.isdigit() else 0)
+    return tuple(parts)
+
+
+@pytest.fixture(scope="module")
+def v0123(client):
+    if _server_version(client) < (0, 12, 3):
+        pytest.skip("needs Dakera server v0.12.3+")
+    return client
+
+
+class TestServer0123:
+    def test_empty_agent_reads_answer_with_no_memories(self, v0123):
+        agent = f"integ-empty-{uuid.uuid4().hex[:8]}"
+        recalled = v0123.recall(agent, "anything at all")
+        assert recalled.memories == []
+        assert v0123.search_memories(agent, query="anything at all") == []
+        batch = v0123.batch_recall(BatchRecallRequest(agent_id=agent, limit=10))
+        assert batch.memories == [] and batch.filtered == 0
+
+    def test_store_with_every_option_and_event_time(self, v0123):
+        agent = f"integ-ev-{uuid.uuid4().hex[:8]}"
+        session = v0123.start_session(agent)
+        session_id = getattr(session, "session_id", None) or session["id"]
+        stored = v0123.store_memory(
+            agent,
+            "I moved to Paris in May 2019",
+            memory_type="semantic",
+            importance=0.7,
+            metadata={"source": "integration"},
+            session_id=session_id,
+            tags=["move"],
+            ttl_seconds=86_400,
+            lang="en",
+            event_time=datetime(2019, 5, 1, tzinfo=timezone.utc),
+        )
+        assert "warnings" not in stored, stored.get("warnings")
+        assert stored["metadata"]["_dakera_event_time"] == 1_556_668_800
+        fetched = v0123.get_memory(None, stored["id"])
+        assert fetched["id"] == stored["id"]
+        assert fetched["metadata"]["_dakera_event_time"] == 1_556_668_800
+
+    def test_batch_store_and_recall_send_only_known_fields(self, v0123):
+        agent = f"integ-wb-{uuid.uuid4().hex[:8]}"
+        resp = v0123.store_memories_batch(
+            BatchStoreMemoryRequest(
+                agent_id=agent,
+                lang="en",
+                memories=[
+                    BatchStoreMemoryItem(
+                        "The team meeting moved to Thursday",
+                        memory_type="episodic",
+                        importance=0.6,
+                        tags=["meeting"],
+                        session_id="urn:chat:42",
+                        metadata={"k": "v"},
+                        ttl_seconds=86_400,
+                        id=f"mem-{uuid.uuid4().hex[:8]}",
+                        event_time="2023-05-20T02:21:00Z",
+                    ),
+                    BatchStoreMemoryItem("The office is in Berlin", event_time=1_684_549_260),
+                ],
+            )
+        )
+        assert resp.stored_count == 2
+        assert resp.warnings == [] and resp.truncated == []
+        recalled = v0123.recall(
+            agent,
+            "when is the meeting?",
+            top_k=3,
+            memory_type="episodic",
+            min_importance=0.1,
+            include_associated=True,
+            associated_memories_cap=2,
+            associated_memories_depth=1,
+            associated_memories_min_weight=0.0,
+            since="2000-01-01T00:00:00Z",
+            until="2100-01-01T00:00:00Z",
+            routing="hybrid",
+            rerank=True,
+            fusion="minmax",
+            vector_weight=0.5,
+            iterations=1,
+            neighborhood=True,
+            lang="en",
+            tags=["meeting"],
+            neighborhood_mode="separate",
+            include_summaries=False,
+            session_id="urn:chat:42",
+            rerank_candidates=20,
+        )
+        assert recalled.warnings == []
+        assert recalled.rerank_report is not None
+        filt = BatchMemoryFilter(
+            tags=["meeting"],
+            min_importance=0.0,
+            max_importance=1.0,
+            created_after=0,
+            created_before=4_102_444_800,
+            memory_type="episodic",
+            session_id="urn:chat:42",
+        )
+        batch = v0123.batch_recall(BatchRecallRequest(agent_id=agent, filter=filt, limit=10))
+        assert batch.warnings == []
+        assert len(batch.memories) == 1
+
+    def test_long_text_reports_truncation(self, v0123):
+        agent = f"integ-tr-{uuid.uuid4().hex[:8]}"
+        text = " ".join(f"fact {i} about the project schedule." for i in range(400))
+        stored = v0123.store_memory(agent, text)
+        assert stored["truncated"] is True
+        assert stored["content_tokens"] > stored["embedded_tokens"] == stored["max_tokens"]
+        batch = v0123.store_memories_batch(
+            BatchStoreMemoryRequest(agent_id=agent, memories=[BatchStoreMemoryItem(text)])
+        )
+        (cut,) = batch.truncated
+        assert cut.id == batch.stored[0].id and cut.content_tokens > cut.embedded_tokens
+
+    def test_deduplicated_memories(self, v0123):
+        agent = f"integ-dd-{uuid.uuid4().hex[:8]}"
+        v0123.store_memory(agent, "something to remember")
+        listed = v0123.list_deduplicated(agent)
+        assert listed.agent_id == agent and listed.count == 0 and listed.memories == []
+        with pytest.raises(NotFoundError):
+            v0123.restore_deduplicated(agent, "mem_does_not_exist")
+
+    def test_autopilot_reports_dedup_settings(self, v0123):
+        status = v0123.autopilot_status()
+        config = status["config"]
+        assert config["dedup_mode"] in ("off", "report", "merge")
+        assert isinstance(config["trash_retention_hours"], int)

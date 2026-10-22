@@ -346,19 +346,64 @@ def _key_update_body(
     return body
 
 
+# Fields of a ``POST /v1/memory/store`` answer, next to ``memory``, that are
+# copied onto the returned memory dict when the server sends them:
+# ``session_state`` (v0.12.2), the truncation report and ``warnings`` (v0.12.3).
+_STORE_RESULT_KEYS = (
+    "session_state",
+    "truncated",
+    "content_tokens",
+    "embedded_tokens",
+    "max_tokens",
+    "tokens_estimated",
+    "windows",
+    "warnings",
+)
+
+
 def _store_memory_result(response: Any) -> Any:
     """The memory of a ``POST /v1/memory/store`` answer.
 
-    The server wraps it in ``{"memory": {...}, "embedding_time_ms": ...}``;
-    v0.12.2 adds ``session_state`` (``"active"`` / ``"ended"``) when the memory
-    went into a started session, which is copied onto the returned dict.
+    The server wraps it in ``{"memory": {...}, "embedding_time_ms": ...}``.
+    The fields it adds next to ``memory`` are copied onto the returned dict
+    when present (:data:`_STORE_RESULT_KEYS`): ``session_state`` (v0.12.2,
+    ``"active"`` / ``"ended"``) when the memory went into a started session;
+    from v0.12.3 the truncation report (``truncated``, ``content_tokens``,
+    ``embedded_tokens``, ``max_tokens``, ``tokens_estimated``, ``windows``)
+    when the text is longer than the embedding model reads, and ``warnings``
+    when the server ignored request fields it does not know.
     """
     if isinstance(response, dict) and isinstance(response.get("memory"), dict):
         memory = dict(response["memory"])
-        if response.get("session_state") is not None:
-            memory["session_state"] = response["session_state"]
+        for key in _STORE_RESULT_KEYS:
+            if response.get(key) is not None:
+                memory[key] = response[key]
         return memory
     return response
+
+
+def _event_time(value: Any) -> int | float | str:
+    """The wire form of a memory's ``event_time`` (server v0.12.3+).
+
+    Unix seconds (``int`` / ``float``) and RFC 3339 strings are sent as given; a
+    timezone-aware :class:`datetime.datetime` is sent as RFC 3339. A naive
+    datetime is refused: the server needs an offset, and guessing one would
+    move the event.
+    """
+    from datetime import datetime
+
+    if isinstance(value, bool):
+        raise TypeError("event_time must be Unix seconds, an RFC 3339 string or a datetime")
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(
+                "event_time datetime must be timezone-aware "
+                "(e.g. datetime(..., tzinfo=timezone.utc))"
+            )
+        return value.isoformat()
+    if isinstance(value, (int, float, str)):
+        return value
+    raise TypeError("event_time must be Unix seconds, an RFC 3339 string or a datetime")
 
 
 def _listing_params(

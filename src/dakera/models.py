@@ -7,6 +7,7 @@ Dataclasses representing Dakera data structures.
 import json
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Union, cast
 
@@ -916,6 +917,11 @@ class NamingCapabilities:
 
     agent_id_pattern: str = ""
     agent_id_max_bytes: int = 0
+    session_id_pattern: str = ""
+    """Pattern a session id must match (server v0.12.3+: the agent-id alphabet
+    plus ``:``, e.g. ``urn:chat:42``); empty from older servers."""
+    session_id_max_bytes: int = 0
+    """Longest session id, in bytes (server v0.12.3+); ``0`` from older servers."""
     agent_namespace_prefix: str = ""
     agent_namespace_max_bytes: int = 0
     namespace_pattern: str = ""
@@ -930,6 +936,8 @@ class NamingCapabilities:
         return cls(
             agent_id_pattern=str(data.get("agent_id_pattern", "")),
             agent_id_max_bytes=int(data.get("agent_id_max_bytes", 0) or 0),
+            session_id_pattern=str(data.get("session_id_pattern", "")),
+            session_id_max_bytes=int(data.get("session_id_max_bytes", 0) or 0),
             agent_namespace_prefix=str(data.get("agent_namespace_prefix", "")),
             agent_namespace_max_bytes=int(data.get("agent_namespace_max_bytes", 0) or 0),
             namespace_pattern=str(data.get("namespace_pattern", "")),
@@ -1529,6 +1537,19 @@ class RecallResponse:
     """Neighbourhood context under ``neighborhood_mode="separate"``, each entry
     with ``context_of`` (the ranked memory it belongs to). ``None`` in the other
     modes and from servers up to v0.12.2."""
+    rerank_report: "RerankReport | None" = None
+    """What the cross-encoder did for this recall (server v0.12+). ``None`` when
+    the server sends no report."""
+    query_embedding_time_ms: int | None = None
+    search_time_ms: int | None = None
+    late_interaction_first_stage: str | None = None
+    """Under the late-interaction strategy: the first stage that served the
+    recall's first search (``fde_graph``, ``fde_exact``, ``dense_while_building``,
+    ``dense_no_fde`` or ``cold_fallback``). ``None`` otherwise."""
+    warnings: list[str] = field(default_factory=list)
+    """Request fields the server ignored because it does not know them (server
+    v0.12.3+), e.g. ``["unknown field 'when' ignored"]``. Empty when every field
+    was used, and from older servers."""
 
     @property
     def ranked(self) -> list["RecalledMemory"]:
@@ -1548,10 +1569,47 @@ class RecallResponse:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RecallResponse":
+        report = data.get("rerank_report")
+        if not isinstance(report, dict):
+            # Servers before the H19 rename send the report as `rerank` only.
+            report = data.get("rerank")
         return cls(
             memories=cls._parse_list(data.get("memories")) or [],
             associated_memories=cls._parse_list(data.get("associated_memories")),
             context_memories=cls._parse_list(data.get("context_memories")),
+            rerank_report=RerankReport.from_dict(report) if isinstance(report, dict) else None,
+            query_embedding_time_ms=data.get("query_embedding_time_ms"),
+            search_time_ms=data.get("search_time_ms"),
+            late_interaction_first_stage=data.get("late_interaction_first_stage"),
+            warnings=_str_list(data.get("warnings")),
+        )
+
+
+@dataclass
+class RerankReport:
+    """What the cross-encoder did for one recall (``rerank_report``)."""
+
+    applied: bool = False
+    """The cross-encoder rescored candidates and its order was used."""
+    candidates: int = 0
+    """How many candidates it scored."""
+    skipped: str | None = None
+    """Why it did not run (``disabled``, ``bm25_routing``, ``visual_lane``,
+    ``no_candidates``, ``no_query``, ``unavailable``, ``failed``) or why its order
+    was not used (``low_confidence``). ``None`` when it ran and was used."""
+    capped: bool = False
+    """The server's candidate cap (``DAKERA_RERANK_MAX_CANDIDATES``) left part of
+    the pool unscored, also when ``rerank_candidates`` was above the cap and was
+    lowered to it (server v0.12.3+)."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RerankReport":
+        skipped = data.get("skipped")
+        return cls(
+            applied=bool(data.get("applied", False)),
+            candidates=int(data.get("candidates", 0) or 0),
+            skipped=str(skipped) if skipped is not None else None,
+            capped=bool(data.get("capped", False)),
         )
 
 
@@ -2187,6 +2245,9 @@ class MemoryEvent:
     - ``recalled`` — a memory was recalled (importance present)
     - ``forgotten`` — a memory was deleted
     - ``consolidated`` — memories were merged (memory_id is the new memory)
+    - ``deduplicated`` — a duplicate was folded into another memory (server
+      v0.12.3+; restorable for a while, see :meth:`DakeraClient.list_deduplicated`)
+    - ``restored`` — a deduplicated or consolidated memory was put back (v0.12.3+)
     - ``importance_updated`` — importance score changed
     - ``session_started`` — an agent session began (session_id present)
     - ``session_ended`` — an agent session ended (session_id present; server
@@ -2469,6 +2530,8 @@ class BatchRecallResponse:
     filtered: int
     truncated: bool = False
     """True when the result set was capped by ``limit`` and more matching memories exist."""
+    warnings: list[str] = field(default_factory=list)
+    """Request fields the server ignored (server v0.12.3+); empty otherwise."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchRecallResponse":
@@ -2477,6 +2540,7 @@ class BatchRecallResponse:
             total=data.get("total", 0),
             filtered=data.get("filtered", 0),
             truncated=data.get("truncated", False),
+            warnings=_str_list(data.get("warnings")),
         )
 
 
@@ -2539,8 +2603,14 @@ class BatchStoreMemoryItem:
     attachment_ref: str | None = None
     """``sha256:<hex>`` of an attachment already uploaded to the agent's namespace
     (server v0.12+, needs ``DAKERA_ATTACHMENTS``)."""
+    event_time: int | float | str | datetime | None = None
+    """When the memory's event happened (server v0.12.3+): Unix seconds, an
+    RFC 3339 string or a timezone-aware :class:`~datetime.datetime`. See
+    :meth:`DakeraClient.store_memory`."""
 
     def to_dict(self) -> dict[str, Any]:
+        from dakera._util import _event_time
+
         d: dict[str, Any] = {
             "content": self.content,
             "memory_type": self.memory_type,
@@ -2548,6 +2618,8 @@ class BatchStoreMemoryItem:
         }
         if self.attachment_ref is not None:
             d["attachment_ref"] = self.attachment_ref
+        if self.event_time is not None:
+            d["event_time"] = _event_time(self.event_time)
         if self.tags is not None:
             d["tags"] = self.tags
         if self.session_id is not None:
@@ -2625,6 +2697,13 @@ class BatchStoreMemoryResponse:
     ended_sessions: list[str] = field(default_factory=list)
     """Ended sessions this batch stored into (server v0.12.2+; the store still
     succeeds). Empty when none, or from older servers."""
+    truncated: list["TruncatedMemory"] = field(default_factory=list)
+    """The stored memories whose text is longer than the embedding model reads
+    (server v0.12.3+): their vector covers only the first ``embedded_tokens``.
+    Empty when none, and from older servers."""
+    warnings: list[str] = field(default_factory=list)
+    """Request fields the server ignored (server v0.12.3+), e.g.
+    ``"unknown field 'memories[].when' ignored (in 3 items)"``; empty otherwise."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchStoreMemoryResponse":
@@ -2633,6 +2712,96 @@ class BatchStoreMemoryResponse:
             stored_count=data.get("stored_count", 0),
             total_embedding_time_ms=data.get("total_embedding_time_ms", 0),
             ended_sessions=_str_list(data.get("ended_sessions")),
+            truncated=[
+                TruncatedMemory.from_dict(t)
+                for t in data.get("truncated") or []
+                if isinstance(t, dict)
+            ],
+            warnings=_str_list(data.get("warnings")),
+        )
+
+
+@dataclass
+class TruncatedMemory:
+    """A memory whose text is longer than the embedding model reads (server
+    v0.12.3+): its vector covers the first ``embedded_tokens`` of
+    ``content_tokens``. ``POST /v1/memory/store`` and ``PUT
+    /v1/memory/update/{id}`` report the same fields on the memory itself."""
+
+    id: str
+    content_tokens: int
+    """Tokens of the whole text."""
+    embedded_tokens: int
+    """Tokens the model embedded."""
+    max_tokens: int
+    """The model's token cap on this server (``effective_max_seq_length``)."""
+    windows: int = 0
+    """Overlapping windows derived as sub-memories so the tail is searchable
+    (``DAKERA_LONG_CONTENT_WINDOWS``); ``0`` with that switch off."""
+    tokens_estimated: bool = False
+    """The counts are the server's model-free estimate, not the tokenizer's."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TruncatedMemory":
+        return cls(
+            id=str(data.get("id", "")),
+            content_tokens=int(data.get("content_tokens", 0) or 0),
+            embedded_tokens=int(data.get("embedded_tokens", 0) or 0),
+            max_tokens=int(data.get("max_tokens", 0) or 0),
+            windows=int(data.get("windows", 0) or 0),
+            tokens_estimated=bool(data.get("tokens_estimated", False)),
+        )
+
+
+@dataclass
+class DeduplicatedMemory:
+    """A memory deduplication or consolidation deleted that can still be restored
+    (``GET /v1/memory/deduplicated``, server v0.12.3+)."""
+
+    id: str
+    """The deleted memory's id; restore it under this id."""
+    kind: str
+    """What deleted it: ``"deduplication"`` or ``"consolidation"``."""
+    survivor_id: str
+    """The memory it was folded (deduplication) or merged (consolidation) into."""
+    deleted_at: int
+    """When it was deleted (Unix seconds)."""
+    restorable_until: int
+    """Until when it can be restored (Unix seconds); purged after."""
+    session_id: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DeduplicatedMemory":
+        return cls(
+            id=str(data.get("id", "")),
+            kind=str(data.get("kind", "")),
+            survivor_id=str(data.get("survivor_id", "")),
+            deleted_at=int(data.get("deleted_at", 0) or 0),
+            restorable_until=int(data.get("restorable_until", 0) or 0),
+            session_id=data.get("session_id"),
+        )
+
+
+@dataclass
+class DeduplicatedListResponse:
+    """``GET /v1/memory/deduplicated?agent_id=`` (server v0.12.3+): the agent's
+    restorable deleted memories, newest first."""
+
+    agent_id: str
+    memories: list[DeduplicatedMemory]
+    count: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DeduplicatedListResponse":
+        memories = [
+            DeduplicatedMemory.from_dict(m)
+            for m in data.get("memories") or []
+            if isinstance(m, dict)
+        ]
+        return cls(
+            agent_id=str(data.get("agent_id", "")),
+            memories=memories,
+            count=int(data.get("count", len(memories)) or 0),
         )
 
 
@@ -3648,14 +3817,27 @@ class MemoryExportResponse:
 
 @dataclass
 class AuditEvent:
-    """A single business-event entry from the audit log (OBS-1)."""
+    """A single business-event entry from the audit log (OBS-1).
 
-    id: str
+    The server sends ``id``, ``event_type``, ``agent_id``, ``timestamp`` (Unix
+    milliseconds) and, when they apply, ``memory_id``, ``session_id``,
+    ``importance`` and (v0.12.3+) ``reason``: why the event happened, e.g.
+    ``"absorbed into mem_…"`` for a ``deduplicated`` memory or ``"merged into
+    mem_…"`` for a ``consolidated`` one. ``namespace`` and ``details`` are kept
+    for compatibility and are filled only by servers that send them.
+    """
+
+    id: int | str
     event_type: str
     agent_id: str | None
     namespace: str | None
     timestamp: int
+    """Unix milliseconds."""
     details: dict[str, Any]
+    memory_id: str | None = None
+    session_id: str | None = None
+    importance: float | None = None
+    reason: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditEvent":
@@ -3665,7 +3847,11 @@ class AuditEvent:
             agent_id=data.get("agent_id"),
             namespace=data.get("namespace"),
             timestamp=data.get("timestamp", 0),
-            details=data.get("details", {}),
+            details=data.get("details") or {},
+            memory_id=data.get("memory_id"),
+            session_id=data.get("session_id"),
+            importance=data.get("importance"),
+            reason=data.get("reason"),
         )
 
 
@@ -3675,13 +3861,16 @@ class AuditListResponse:
 
     events: list[AuditEvent]
     total: int
+    """How many events this page holds (the server's ``count``)."""
     cursor: str | None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditListResponse":
+        events = [AuditEvent.from_dict(e) for e in data.get("events", [])]
+        total = data.get("count", data.get("total"))
         return cls(
-            events=[AuditEvent.from_dict(e) for e in data.get("events", [])],
-            total=data.get("total", 0),
+            events=events,
+            total=int(total) if total is not None else len(events),
             cursor=data.get("cursor"),
         )
 

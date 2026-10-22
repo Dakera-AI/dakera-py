@@ -30,9 +30,10 @@ import os
 import random
 import time
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Literal
 
 try:
     import httpx
@@ -50,6 +51,7 @@ from dakera._util import (
     _create_namespace_key_body,
     _dakera_event,
     _document_fields,
+    _event_time,
     _export_response,
     _import_upload,
     _key_update_body,
@@ -103,6 +105,7 @@ from dakera.models import (
     CreateNamespaceKeyResponse,
     CrossAgentNetworkResponse,
     DakeraEvent,
+    DeduplicatedListResponse,
     DeleteDocumentResponse,
     DerivationDrainResponse,
     DerivationStatus,
@@ -1395,6 +1398,8 @@ class AsyncDakeraClient:
         valid_from: int | None = None,
         lang: str | None = None,
         attachment_ref: str | None = None,
+        *,
+        event_time: int | float | str | datetime | None = None,
     ) -> dict[str, Any]:
         """Store a memory for an agent.
 
@@ -1426,12 +1431,26 @@ class AsyncDakeraClient:
                 this agent's namespace (``_dakera_agent_{agent_id}``) with
                 :meth:`upload_attachment`. Server v0.12+, needs
                 ``DAKERA_ATTACHMENTS``.
+            event_time: When the memory's event happened, for history written
+                after the fact (an import, a backfill, a replayed conversation):
+                Unix seconds, an RFC 3339 string or a timezone-aware
+                ``datetime``. Server v0.12.3+: recorded as metadata
+                ``_dakera_event_time`` (integer seconds) and as the event date;
+                recency, ``since``/``until`` and the temporal links read it
+                instead of the ingest time, while ``created_at``, TTL and decay
+                keep the ingest time. Out of range (before 1970, after 2286) is
+                a ``400``. Older servers ignore it.
 
         Returns:
             The stored memory. From server v0.12.2, when the memory went into a
             started session the dict also carries ``session_state``
             (``"active"`` or ``"ended"``): storing into an ended session still
-            succeeds, so check it if your agent keeps a session open.
+            succeeds, so check it if your agent keeps a session open. From
+            server v0.12.3, a text longer than the embedding model reads adds
+            ``truncated: True`` with ``content_tokens``, ``embedded_tokens``,
+            ``max_tokens`` and ``windows`` (the vector covers only the first
+            ``embedded_tokens``), and request fields the server ignored are
+            listed in ``warnings``.
 
         The server limits ``content`` in UTF-8 **bytes** (v0.12.2:
         ``DAKERA_MAX_MEMORY_CONTENT_BYTES``, default 100000) and refuses reserved
@@ -1458,6 +1477,8 @@ class AsyncDakeraClient:
             data["lang"] = lang
         if attachment_ref is not None:
             data["attachment_ref"] = attachment_ref
+        if event_time is not None:
+            data["event_time"] = _event_time(event_time)
         data["agent_id"] = agent_id
         response = await self._request("POST", "/v1/memory/store", data=data)
         return _store_memory_result(response)
@@ -1487,6 +1508,7 @@ class AsyncDakeraClient:
         neighborhood_mode: NeighborhoodMode | None = None,
         include_summaries: bool | None = None,
         session_id: str | None = None,
+        rerank_candidates: int | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -1545,6 +1567,14 @@ class AsyncDakeraClient:
                 recalled (server v0.12.3+). Omitted = the server's choice
                 (``DAKERA_RECALL_EXCLUDE_SUMMARIES``, default: they may).
             session_id: Recall within this session only.
+            rerank_candidates: Rerank at most this many retrieved candidates
+                with the cross-encoder (the best by retrieval score; the rest
+                stay below them in retrieval order). Omitted = the whole pool
+                up to the server's cap (``DAKERA_RERANK_MAX_CANDIDATES``); a
+                value above the cap is lowered to it and reported as
+                ``rerank_report.capped`` (server v0.12.3+). Must be at least 1
+                (``0`` is a ``400`` on v0.12.3; pass ``rerank=False`` to turn
+                reranking off).
 
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
@@ -1552,7 +1582,17 @@ class AsyncDakeraClient:
             Each associated memory includes a ``depth`` field (KG-3). The
             first ``k`` results of a ``top_k=k`` recall are the first ``k``
             of a ``top_k=10`` recall for ``k <= 10`` (server v0.12.3+).
+            ``rerank_report`` says what the cross-encoder did and ``warnings``
+            lists request fields the server ignored (v0.12.3+). An agent that
+            has stored nothing yet answers with no memories (servers before
+            v0.12.3 answered ``404 NAMESPACE_NOT_FOUND``).
         """
+        if rerank_candidates is not None and (
+            isinstance(rerank_candidates, bool) or rerank_candidates < 1
+        ):
+            raise ValueError(
+                "rerank_candidates must be a positive integer; pass rerank=False to skip reranking"
+            )
         data: dict[str, Any] = {"query": query, "top_k": top_k}
         if memory_type is not None:
             data["memory_type"] = memory_type
@@ -1592,16 +1632,19 @@ class AsyncDakeraClient:
             data["tags"] = tags
         if session_id is not None:
             data["session_id"] = session_id
+        if rerank_candidates is not None:
+            data["rerank_candidates"] = rerank_candidates
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
-    async def get_memory(self, agent_id: str, memory_id: str) -> dict[str, Any]:
-        """Get a specific memory."""
+    async def get_memory(self, agent_id: str | None, memory_id: str) -> dict[str, Any]:
+        """Get a specific memory. See :meth:`DakeraClient.get_memory`."""
+        params = {"agent_id": agent_id} if agent_id is not None else None
         return await self._request(
-            "GET", f"/v1/memory/get/{memory_id}", params={"agent_id": agent_id}
+            "GET", f"/v1/memory/get/{_path_segment(memory_id)}", params=params
         )
 
     async def update_memory(
@@ -1621,6 +1664,11 @@ class AsyncDakeraClient:
 
         ``lang`` (server v0.12+) is the language of the content; when it differs
         from the recorded one the text-derived data is re-derived.
+
+        Returns the updated memory. From server v0.12.3, when new ``content``
+        is longer than the embedding model reads, it also carries
+        ``truncated: True``, ``content_tokens``, ``embedded_tokens``,
+        ``max_tokens`` and ``windows``.
         """
         data: dict[str, Any] = {}
         if content is not None:
@@ -2772,6 +2820,35 @@ class AsyncDakeraClient:
             data["memory_type"] = memory_type
         return await self._request("POST", "/v1/knowledge/deduplicate", data=data)
 
+    async def list_deduplicated(self, agent_id: str) -> DeduplicatedListResponse:
+        """The agent's memories that deduplication or consolidation deleted and
+        that can still be restored (server v0.12.3+), newest first.
+
+        Calls ``GET /v1/memory/deduplicated?agent_id=``. Each entry names the
+        memory it was folded or merged into (``survivor_id``) and until when it
+        can be restored (``restorable_until``, the server's
+        ``trash_retention_hours`` after the deletion). Read scope.
+        """
+        result = await self._request(
+            "GET", "/v1/memory/deduplicated", params={"agent_id": agent_id}
+        )
+        return DeduplicatedListResponse.from_dict(result)
+
+    async def restore_deduplicated(self, agent_id: str, memory_id: str) -> dict[str, Any]:
+        """Put back a memory that deduplication or consolidation deleted (server
+        v0.12.3+), exactly as it was stored, under its own id, and return it.
+
+        Calls ``POST /v1/memory/deduplicated/{id}/restore?agent_id=``. Raises
+        :class:`NotFoundError` when it has no restorable copy and
+        :class:`DakeraError` with status ``409`` when the agent holds a memory
+        with that id again. Write scope.
+        """
+        return await self._request(
+            "POST",
+            f"/v1/memory/deduplicated/{_path_segment(memory_id)}/restore",
+            params={"agent_id": agent_id},
+        )
+
     # =========================================================================
     # KG-2: Graph Query & Export Operations
     # =========================================================================
@@ -3112,10 +3189,32 @@ class AsyncDakeraClient:
         dedup_threshold: float | None = None,
         dedup_interval_hours: int | None = None,
         consolidation_interval_hours: int | None = None,
+        *,
+        dedup_mode: Literal["off", "report", "merge"] | str | None = None,
+        dedup_cross_session: bool | None = None,
+        consolidate_cross_session: bool | None = None,
+        trash_retention_hours: int | None = None,
     ) -> dict[str, Any]:
         """Update AutoPilot configuration at runtime (PILOT-2).
 
         All parameters are optional — omit any to keep its current value.
+
+        Server v0.12.3+ (older servers ignore them):
+
+        Args:
+            dedup_mode: ``"off"`` (the server default: no dedup pass),
+                ``"report"`` (find duplicate groups and report them, change
+                nothing) or ``"merge"`` (fold and delete duplicates).
+            dedup_cross_session: Let dedup fold memories of different sessions
+                (default ``False``).
+            consolidate_cross_session: Let the server's consolidation merge
+                memories of different sessions (default ``False``).
+            trash_retention_hours: Hours a memory deleted by dedup or
+                consolidation stays restorable (``0``–``8760``; ``0`` = no
+                copy). See :meth:`list_deduplicated`.
+
+        The answer's ``config`` (and :meth:`autopilot_status`'s) carries the
+        same four fields on v0.12.3+.
         """
         data: dict[str, Any] = {}
         if enabled is not None:
@@ -3126,6 +3225,14 @@ class AsyncDakeraClient:
             data["dedup_interval_hours"] = dedup_interval_hours
         if consolidation_interval_hours is not None:
             data["consolidation_interval_hours"] = consolidation_interval_hours
+        if dedup_mode is not None:
+            data["dedup_mode"] = dedup_mode
+        if dedup_cross_session is not None:
+            data["dedup_cross_session"] = dedup_cross_session
+        if consolidate_cross_session is not None:
+            data["consolidate_cross_session"] = consolidate_cross_session
+        if trash_retention_hours is not None:
+            data["trash_retention_hours"] = trash_retention_hours
         return await self._request("PUT", "/v1/admin/autopilot/config", data=data)
 
     async def autopilot_trigger(self, action: str) -> dict[str, Any]:
@@ -3713,7 +3820,8 @@ class AsyncDakeraClient:
         limit: int | None = None,
         cursor: str | None = None,
     ) -> AuditListResponse:
-        """List business-event audit log entries (OBS-1)."""
+        """List business-event audit log entries (OBS-1); ``from_ts`` / ``to_ts``
+        are Unix milliseconds, both inclusive. See :meth:`DakeraClient.list_audit_events`."""
         params: dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id

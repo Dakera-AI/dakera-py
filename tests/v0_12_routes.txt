@@ -3,6 +3,7 @@
 # v0.12.2 adds: POST /v1/agents, PATCH /admin/keys/{}, PATCH /v1/namespaces/{}/keys/{}, GET /v1/auth/whoami,
 # POST /v1/sessions/{}/touch, GET /admin/derivations/status, POST /admin/derivations/drain (and their /v1/admin mounts).
 # v0.12.3 adds the document routes: /v1/memory/documents[/{}][/jobs/{}], POST /v1/namespaces/{}/attachments/{}/document.
+# v0.12.3 also adds GET /v1/memory/deduplicated and POST /v1/memory/deduplicated/{}/restore.
 # Path params are normalised to {}. Regenerate when the server router changes.
 DELETE /admin/backups/{}
 DELETE /admin/keys/{}
@@ -124,6 +125,7 @@ GET /v1/kpis
 GET /v1/memories/{}/feedback
 GET /v1/memories/{}/graph
 GET /v1/memories/{}/path
+GET /v1/memory/deduplicated
 GET /v1/memory/documents
 GET /v1/memory/documents/jobs/{}
 GET /v1/memory/documents/{}
@@ -221,6 +223,7 @@ POST /v1/memories/store/batch
 POST /v1/memories/{}/feedback
 POST /v1/memories/{}/links
 POST /v1/memory/consolidate
+POST /v1/memory/deduplicated/{}/restore
 POST /v1/memory/documents
 POST /v1/memory/feedback
 POST /v1/memory/forget

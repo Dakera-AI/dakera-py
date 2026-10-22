@@ -46,6 +46,12 @@ class ErrorCode(enum.Enum):
     API_KEY_NOT_FOUND = "API_KEY_NOT_FOUND"  # 404
     JOB_NOT_FOUND = "JOB_NOT_FOUND"  # 404
     CROSS_ORIGIN_REQUEST_REFUSED = "CROSS_ORIGIN_REQUEST_REFUSED"  # 403
+    # v0.12.3: with authentication off, a request whose Host is not a local,
+    # private or allowed name (DAKERA_ALLOWED_HOSTS) is refused (DNS rebinding).
+    HOST_NOT_ALLOWED = "HOST_NOT_ALLOWED"  # 421
+    # v0.12.3 document import job failures
+    UNPROCESSABLE_CONTENT = "UNPROCESSABLE_CONTENT"  # 422: content cannot be processed
+    EXTRACTION_TIMEOUT = "EXTRACTION_TIMEOUT"  # 504: document extraction ran too long
     # Fallback for unrecognised codes
     UNKNOWN = "UNKNOWN"
 
@@ -190,8 +196,9 @@ class RateLimitError(DakeraError):
         status_code: int | None = None,
         response_body: Any | None = None,
         retry_after: int | None = None,
+        code: ErrorCode | None = None,
     ) -> None:
-        super().__init__(message, status_code, response_body)
+        super().__init__(message, status_code, response_body, code)
         self.retry_after = retry_after
 
 
@@ -297,11 +304,14 @@ def error_from_response(
     if status_code == 413:
         return PayloadTooLargeError(message("Payload too large"), **kw)
     if status_code == 429:
+        # v0.12.3 also answers 429 (RATE_LIMIT_EXCEEDED) when an admission queue
+        # stays full; `details` names the queue.
         return RateLimitError(
-            "Rate limit exceeded",
+            message("Rate limit exceeded"),
             status_code=status_code,
             response_body=body,
             retry_after=int(retry_after) if retry_after is not None else None,
+            code=code,
         )
     if status_code == 501:
         return FeatureNotAvailableError(message("Not implemented"), **kw)
@@ -311,4 +321,6 @@ def error_from_response(
         )
     if status_code >= 500:
         return ServerError(message("Server error"), **kw)
-    return DakeraError(f"Unexpected status code: {status_code}", **kw)
+    # Any other status (e.g. 421 HOST_NOT_ALLOWED, 422 for an unknown admin-request
+    # field or unprocessable document content) keeps the server's message.
+    return DakeraError(message(f"Unexpected status code: {status_code}"), **kw)

@@ -174,6 +174,21 @@ the new request fields are sent only when you set them, the new response fields 
   sends only the fields the server reads (`create_key(permissions=, expires_at=)`
   and `create_backup(include_data=)` are deprecated and never sent).
 - `ops_shutdown()` needs a global `super_admin` key (`admin` gets `403`).
+- **Event time**: `store_memory(..., event_time=)` and `BatchStoreMemoryItem(event_time=)`
+  record when something happened (Unix seconds, RFC 3339 or an aware `datetime`), so
+  imported or replayed history is ranked and filtered by its own dates.
+- **Ranking**: each recall result carries `rank_score`, non-increasing down the list;
+  `recall(..., rerank_candidates=N)` bounds the reranker's work and
+  `response.rerank_report` says what it did (`capped` when the server's cap applied).
+- **Long text**: a store whose text is longer than the embedding model reads returns
+  `truncated`, `content_tokens` and `embedded_tokens` (batch: `response.truncated`).
+- **Ignored fields**: store, batch store, recall and batch recall answers list request
+  fields the server did not use in `warnings`.
+- **Restorable deduplicated memories**: `list_deduplicated(agent_id)` and
+  `restore_deduplicated(agent_id, memory_id)`; `autopilot_update_config(dedup_mode=,
+  trash_retention_hours=, ...)` controls automatic deduplication.
+- `get_memory(None, memory_id)` finds a memory without its agent id; session ids may
+  contain `:`; recalling an agent that has stored nothing returns no memories.
 
 ```python
 response = client.recall("my-agent", "which port does the API use?", top_k=3,
