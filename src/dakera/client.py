@@ -1767,10 +1767,10 @@ class DakeraClient:
         self,
         agent_id: str,
         query: str,
-        top_k: int = 5,
+        top_k: int | None = None,
         memory_type: str | None = None,
         min_importance: float | None = None,
-        include_associated: bool = False,
+        include_associated: bool | None = None,
         associated_memories_cap: int | None = None,
         associated_memories_depth: int | None = None,
         associated_memories_min_weight: float | None = None,
@@ -1795,17 +1795,21 @@ class DakeraClient:
         Args:
             agent_id: The agent whose memories to recall.
             query: Semantic query text.
-            top_k: Number of primary results to return (default: 5).
+            top_k: Number of primary results to return. Omitted = the
+                server default (10).
             memory_type: Filter by memory type.
             min_importance: Minimum importance threshold.
             tags: Only memories carrying at least one of these tags.
             include_associated: COG-2 — traverse KG from recalled memories
                 and include associatively linked memories in
-                ``associated_memories`` (default: False).
+                ``associated_memories``. ``None`` (default) = the server
+                default (``DAKERA_RECALL_INCLUDE_ASSOCIATED``, on since server
+                v0.12.4); pass ``False`` to turn it off or ``True`` to turn it
+                on explicitly.
             associated_memories_cap: COG-2 — max associated memories to
                 return (default: 10, max: 10).
             associated_memories_depth: KG-3 — traversal depth 1–3
-                (default: 1).  Requires ``include_associated=True``.
+                (default: 1).  Requires associated memories to be on.
             associated_memories_min_weight: KG-3 — minimum edge weight for
                 KG traversal (default: 0.0).
             since: CE-7 — only recall memories created at or after this
@@ -1858,7 +1862,7 @@ class DakeraClient:
 
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
-            ``associated_memories`` when ``include_associated`` is True.
+            ``associated_memories`` when associated memories are on.
             Each associated memory includes a ``depth`` field (KG-3). The
             first ``k`` results of a ``top_k=k`` recall are the first ``k``
             of a ``top_k=10`` recall for ``k <= 10`` (server v0.12.3+).
@@ -1873,13 +1877,15 @@ class DakeraClient:
             raise ValueError(
                 "rerank_candidates must be a positive integer; pass rerank=False to skip reranking"
             )
-        data: dict[str, Any] = {"query": query, "top_k": top_k}
+        data: dict[str, Any] = {"query": query}
+        if top_k is not None:
+            data["top_k"] = top_k
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
             data["min_importance"] = min_importance
-        if include_associated:
-            data["include_associated"] = True
+        if include_associated is not None:
+            data["include_associated"] = include_associated
         if associated_memories_cap is not None:
             data["associated_memories_cap"] = associated_memories_cap
         if associated_memories_depth is not None:
@@ -4221,11 +4227,22 @@ class DakeraClient:
             from_ts: Lower bound, Unix milliseconds (inclusive).
             to_ts: Upper bound, Unix milliseconds (inclusive).
             limit: Maximum number of events to return.
-            cursor: Pagination cursor from a previous response.
+            cursor: Not supported: ``GET /v1/audit`` has no cursor
+                pagination, so passing one raises ``ValueError`` (earlier SDKs
+                sent it and the server ignored it). Page by time range with
+                ``from_ts`` / ``to_ts`` instead.
 
         Returns:
-            :class:`AuditListResponse` with events and optional next cursor.
+            :class:`AuditListResponse` with the events and their ``total``.
+
+        Raises:
+            ValueError: ``cursor`` is set.
         """
+        if cursor is not None:
+            raise ValueError(
+                "list_audit_events(cursor=...): GET /v1/audit has no cursor pagination; "
+                "narrow the query with from_ts/to_ts and limit instead"
+            )
         params: dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
@@ -4237,8 +4254,6 @@ class DakeraClient:
             params["to"] = to_ts
         if limit is not None:
             params["limit"] = limit
-        if cursor is not None:
-            params["cursor"] = cursor
         result = self._request("GET", "/v1/audit", params=params)
         return AuditListResponse.from_dict(result)
 
@@ -4430,10 +4445,11 @@ class DakeraClient:
 
         Calls ``GET /v1/namespaces/{namespace}/memory_policy``.
 
-        When no explicit policy has been configured the server returns the
-        COG-1 defaults (working=4 h, episodic=30 d, semantic=365 d,
-        procedural=730 d; exponential/power_law/logarithmic/flat decay;
-        spaced-repetition factor 1.0).
+        When no explicit policy has been stored the server answers what the
+        namespace's memories get without one: no TTL by memory type (all four
+        ``*_ttl_seconds`` are ``None``), the server's decay curve for every
+        type, no spaced repetition (factor ``0.0``), and consolidation,
+        store-time dedup and rate limits off.
 
         Args:
             namespace: Namespace to inspect.

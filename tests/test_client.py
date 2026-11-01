@@ -706,6 +706,23 @@ class TestCog2AssociativeRecall:
         assert result.associated_memories is None
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert "include_associated" not in req_body
+        # top_k is left to the server default (10) unless the caller sets it
+        assert "top_k" not in req_body
+
+    def test_recall_include_associated_false_is_sent(self, client, mock_responses):
+        """recall(include_associated=False) sends false so the server default (on) is overridden."""
+        import responses as resp_lib
+
+        mock_responses.add(
+            resp_lib.POST,
+            "http://localhost:3000/v1/memory/recall",
+            json={"memories": []},
+            status=200,
+        )
+        client.recall("agent-1", "test query", top_k=3, include_associated=False)
+        req_body = json.loads(mock_responses.calls[0].request.body)
+        assert req_body["include_associated"] is False
+        assert req_body["top_k"] == 3
 
     def test_recall_associated_memories_cap(self, client, mock_responses):
         """recall() with associated_memories_cap sends cap in request body."""

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`MemoryPolicy` defaults match the server**: the four `*_ttl_seconds` now default to
+  `None` (the server's default is no TTL by memory type; the SDK claimed and sent 4 h /
+  30 d / 365 d / 730 d) and `dedup_threshold` to `0.95` (was `0.92`); `to_dict()` still
+  leaves out `None` TTLs. The `get_memory_policy()` docstring describes what a namespace
+  without a stored policy gets.
+- **`recall(top_k=)`** (sync and async) is no longer sent unless set, so the server
+  default (10) applies instead of the SDK's 5.
+- **`recall(include_associated=)`** (sync and async) defaults to `None` (the server
+  default, on since server v0.12.4) and is sent whenever set, so `False` now turns
+  associated memories off (it used to be dropped).
+- **`list_audit_events(cursor=)`** (sync and async) raises `ValueError`: `GET /v1/audit`
+  has no cursor pagination and ignored it. `AuditListResponse.cursor` is always `None`.
+
 ## [0.14.1] - 2026-10-22
 
 Dakera server **v0.12.3** support (Dakera-AI/dakera#917, #920; engine PR

@@ -3862,7 +3862,10 @@ class AuditListResponse:
     events: list[AuditEvent]
     total: int
     """How many events this page holds (the server's ``count``)."""
-    cursor: str | None
+    cursor: str | None = None
+    """Always ``None``: ``GET /v1/audit`` has no cursor pagination (narrow a
+    query with ``from_ts`` / ``to_ts`` and ``limit`` instead). Kept for
+    compatibility."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditListResponse":
@@ -3871,7 +3874,6 @@ class AuditListResponse:
         return cls(
             events=events,
             total=int(total) if total is not None else len(events),
-            cursor=data.get("cursor"),
         )
 
 
@@ -4150,14 +4152,18 @@ class MemoryPolicy:
     """
 
     # Differential TTLs -------------------------------------------------------
-    working_ttl_seconds: int | None = 14_400
-    """Default TTL for ``working`` memories in seconds (default: 4 h)."""
-    episodic_ttl_seconds: int | None = 2_592_000
-    """Default TTL for ``episodic`` memories in seconds (default: 30 d)."""
-    semantic_ttl_seconds: int | None = 31_536_000
-    """Default TTL for ``semantic`` memories in seconds (default: 365 d)."""
-    procedural_ttl_seconds: int | None = 63_072_000
-    """Default TTL for ``procedural`` memories in seconds (default: 730 d)."""
+    working_ttl_seconds: int | None = None
+    """TTL in seconds for ``working`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
+    episodic_ttl_seconds: int | None = None
+    """TTL in seconds for ``episodic`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
+    semantic_ttl_seconds: int | None = None
+    """TTL in seconds for ``semantic`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
+    procedural_ttl_seconds: int | None = None
+    """TTL in seconds for ``procedural`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
 
     # Decay curves ------------------------------------------------------------
     working_decay: str = "exponential"
@@ -4204,8 +4210,8 @@ class MemoryPolicy:
     new memory and drops it if a near-duplicate already exists (threshold
     controlled by ``dedup_threshold``).
     """
-    dedup_threshold: float = 0.92
-    """Similarity threshold for store-time deduplication (default: ``0.92``).
+    dedup_threshold: float = 0.95
+    """Similarity threshold for store-time deduplication (default: ``0.95``).
 
     Memories with cosine similarity ≥ this value are considered duplicates
     and the incoming memory is dropped.  Only active when ``dedup_on_store``
@@ -4265,7 +4271,7 @@ class MemoryPolicy:
             rate_limit_stores_per_minute=data.get("rate_limit_stores_per_minute"),
             rate_limit_recalls_per_minute=data.get("rate_limit_recalls_per_minute"),
             dedup_on_store=bool(data.get("dedup_on_store", False)),
-            dedup_threshold=float(data.get("dedup_threshold", 0.92)),
+            dedup_threshold=float(data.get("dedup_threshold", 0.95)),
         )
 
 

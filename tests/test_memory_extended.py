@@ -757,8 +757,7 @@ class TestAuditLog:
                         "timestamp": 1747500100,
                     },
                 ],
-                "total": 2,
-                "cursor": "cursor-abc",
+                "count": 2,
             },
             status=200,
         )
@@ -766,14 +765,21 @@ class TestAuditLog:
             agent_id="agent-1", event_type="memory.stored", limit=50
         )
         assert len(result.events) == 2
-        assert result.cursor == "cursor-abc"
+        assert result.total == 2
+        assert result.cursor is None
+
+    def test_list_audit_events_cursor_raises(self, client, mock_responses):
+        """GET /v1/audit has no cursor pagination: cursor= raises before any request."""
+        with pytest.raises(ValueError, match="no cursor pagination"):
+            client.list_audit_events(cursor="abc")
+        assert len(mock_responses.calls) == 0
 
     def test_list_audit_events_with_time_range(self, client, mock_responses):
         """Test listing audit events with time range."""
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/audit",
-            json={"events": [], "total": 0, "cursor": None},
+            json={"events": [], "count": 0},
             status=200,
         )
         result = client.list_audit_events(from_ts=1747000000, to_ts=1747500000)
@@ -983,6 +989,27 @@ class TestMemoryPolicy:
         result = client.set_memory_policy("test-ns", policy)
         assert result.working_ttl_seconds == 28800
         assert result.working_decay == "linear"
+
+    def test_memory_policy_defaults_match_server(self):
+        """Server defaults: no TTL by type, store-time dedup threshold 0.95."""
+        from dakera.models import MemoryPolicy
+
+        policy = MemoryPolicy()
+        assert policy.working_ttl_seconds is None
+        assert policy.episodic_ttl_seconds is None
+        assert policy.semantic_ttl_seconds is None
+        assert policy.procedural_ttl_seconds is None
+        assert policy.dedup_threshold == pytest.approx(0.95)
+        body = policy.to_dict()
+        for field in (
+            "working_ttl_seconds",
+            "episodic_ttl_seconds",
+            "semantic_ttl_seconds",
+            "procedural_ttl_seconds",
+        ):
+            assert field not in body
+        assert body["dedup_threshold"] == pytest.approx(0.95)
+        assert MemoryPolicy.from_dict({}).dedup_threshold == pytest.approx(0.95)
 
 
 class TestNamespaceKeys:
