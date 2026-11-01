@@ -1841,14 +1841,19 @@ class AsyncDakeraClient:
         """Merge memories of an agent into one — ``POST /v1/memory/consolidate`` (CE-6).
 
         The merged memory is stored and the sources are forgotten. Without
-        ``memory_ids`` the server picks up to 5 memories of the agent's most
-        common type.
+        ``memory_ids`` (or with an empty list) the server auto-detects: it
+        takes the most important memory that has neighbours at cosine
+        similarity >= ``threshold`` (same memory type; same session unless
+        cross-session consolidation is configured) and merges it with up to 4
+        of them. It answers ``400`` when no memories are that similar.
 
         Args:
             agent_id: Agent whose memories to consolidate.
             memory_type: Deprecated: not read by the server and not sent (use
                 ``memory_ids`` to choose the memories).
-            threshold: Similarity threshold (0–1).
+            threshold: Cosine similarity a neighbour needs for auto-detection,
+                in (0, 1] (server default 0.85). Not used when ``memory_ids``
+                names memories.
             dry_run: The server has no dry run for this route: ``True`` raises
                 ``ValueError`` instead of merging (earlier SDKs sent it and the
                 server merged anyway).
@@ -2793,7 +2798,12 @@ class AsyncDakeraClient:
         target_type: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Summarize memories for an agent."""
+        """Summarize memories into one new summary memory (``POST /v1/knowledge/summarize``).
+
+        Returns:
+            Dict with ``summary_memory`` (the stored summary memory) and
+            ``source_count``; :meth:`SummarizeResponse.from_dict` parses it.
+        """
         # The server needs at least two memory ids and has no dry run: it
         # always writes the summary memory.
         if dry_run:

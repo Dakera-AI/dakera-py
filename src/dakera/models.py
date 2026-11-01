@@ -1615,18 +1615,21 @@ class RerankReport:
 
 @dataclass
 class ConsolidateResponse:
-    """Response from memory consolidation."""
+    """Response from ``POST /v1/memory/consolidate``."""
 
-    consolidated_count: int
-    removed_count: int
-    new_memories: list[str]
+    consolidated_memory: "Memory"
+    """The merged memory the server stored."""
+    source_memory_ids: list[str]
+    """Ids of the memories that were merged (and forgotten)."""
+    memories_removed: int
+    """How many source memories were forgotten."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ConsolidateResponse":
         return cls(
-            consolidated_count=data.get("consolidated_count", 0),
-            removed_count=data.get("removed_count", 0),
-            new_memories=data.get("new_memories", []),
+            consolidated_memory=Memory.from_dict(data["consolidated_memory"]),
+            source_memory_ids=list(data.get("source_memory_ids", [])),
+            memories_removed=int(data.get("memories_removed", 0)),
         )
 
 
@@ -1884,18 +1887,18 @@ class KnowledgeGraphResponse:
 
 @dataclass
 class SummarizeResponse:
-    """Response from summarization."""
+    """Response from ``POST /v1/knowledge/summarize``."""
 
-    summary: str
+    summary_memory: "Memory"
+    """The summary memory the server stored."""
     source_count: int
-    new_memory_id: str | None = None
+    """How many memories were summarized."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SummarizeResponse":
         return cls(
-            summary=data["summary"],
-            source_count=data.get("source_count", 0),
-            new_memory_id=data.get("new_memory_id"),
+            summary_memory=Memory.from_dict(data["summary_memory"]),
+            source_count=int(data.get("source_count", 0)),
         )
 
 

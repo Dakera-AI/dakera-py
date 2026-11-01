@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   associated memories off (it used to be dropped).
 - **`list_audit_events(cursor=)`** (sync and async) raises `ValueError`: `GET /v1/audit`
   has no cursor pagination and ignored it. `AuditListResponse.cursor` is always `None`.
+- **`ConsolidateResponse`** is the server's `{consolidated_memory, source_memory_ids,
+  memories_removed}` (`consolidated_memory` a `Memory`) instead of `consolidated_count` /
+  `removed_count` / `new_memories`, and **`SummarizeResponse`** is `{summary_memory,
+  source_count}` (`summary_memory` a `Memory`) instead of `summary` / `new_memory_id`; the
+  server never sent the old fields.
+- `consolidate()` docstring (sync and async): without `memory_ids` (or with an empty list) the
+  server takes the most important memory with neighbours at cosine >= `threshold` (same type;
+  same session unless cross-session consolidation is configured) and merges it with up to 4 of
+  them, answering `400` when none are that similar.
 
 ## [0.14.1] - 2026-10-22
 

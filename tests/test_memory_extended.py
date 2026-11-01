@@ -5,7 +5,13 @@ import json
 import pytest
 import responses
 
-from dakera import DakeraClient, NotFoundError, ServerError, ValidationError
+from dakera import (
+    ConsolidateResponse,
+    DakeraClient,
+    NotFoundError,
+    ServerError,
+    ValidationError,
+)
 
 
 @pytest.fixture
@@ -243,20 +249,27 @@ class TestConsolidation:
             responses.POST,
             "http://localhost:3000/v1/memory/consolidate",
             json={
-                "consolidated_count": 5,
-                "removed_count": 12,
-                "new_memories": ["mem-new-1", "mem-new-2"],
+                "consolidated_memory": {
+                    "id": "mem-merged",
+                    "content": "merged",
+                    "memory_type": "semantic",
+                    "importance": 0.7,
+                },
+                "source_memory_ids": ["m1", "m2"],
+                "memories_removed": 2,
             },
             status=200,
         )
-        result = client.consolidate(
-            "agent-1", memory_type="episodic", threshold=0.85, dry_run=False
-        )
-        assert result["consolidated_count"] == 5
-        assert result["removed_count"] == 12
+        result = client.consolidate("agent-1", threshold=0.85, memory_ids=["m1", "m2"])
+        assert result["memories_removed"] == 2
+        parsed = ConsolidateResponse.from_dict(result)
+        assert parsed.consolidated_memory.id == "mem-merged"
+        assert parsed.source_memory_ids == ["m1", "m2"]
+        assert parsed.memories_removed == 2
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["agent_id"] == "agent-1"
         assert req_body["threshold"] == 0.85
+        assert req_body["memory_ids"] == ["m1", "m2"]
 
     def test_consolidate_agent(self, client, mock_responses):
         """Test agent-scoped consolidation."""
