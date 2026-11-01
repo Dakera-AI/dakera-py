@@ -3837,13 +3837,8 @@ class AsyncDakeraClient:
         cursor: str | None = None,
     ) -> AuditListResponse:
         """List business-event audit log entries (OBS-1); ``from_ts`` / ``to_ts``
-        are Unix milliseconds, both inclusive. ``cursor`` raises ``ValueError``: the
-        server has no cursor pagination. See :meth:`DakeraClient.list_audit_events`."""
-        if cursor is not None:
-            raise ValueError(
-                "list_audit_events(cursor=...): GET /v1/audit has no cursor pagination; "
-                "narrow the query with from_ts/to_ts and limit instead"
-            )
+        are Unix milliseconds, both inclusive; ``cursor`` is the previous page's
+        ``cursor``. See :meth:`DakeraClient.list_audit_events`."""
         params: dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
@@ -3855,6 +3850,8 @@ class AsyncDakeraClient:
             params["to"] = to_ts
         if limit is not None:
             params["limit"] = limit
+        if cursor is not None:
+            params["cursor"] = cursor
         result = await self._request("GET", "/v1/audit", params=params)
         return AuditListResponse.from_dict(result)
 

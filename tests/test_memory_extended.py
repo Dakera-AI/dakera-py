@@ -781,11 +781,17 @@ class TestAuditLog:
         assert result.total == 2
         assert result.cursor is None
 
-    def test_list_audit_events_cursor_raises(self, client, mock_responses):
-        """GET /v1/audit has no cursor pagination: cursor= raises before any request."""
-        with pytest.raises(ValueError, match="no cursor pagination"):
-            client.list_audit_events(cursor="abc")
-        assert len(mock_responses.calls) == 0
+    def test_list_audit_events_cursor_pages(self, client, mock_responses):
+        """cursor= is sent; the next page's cursor is the server's next_cursor."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/audit",
+            json={"events": [], "count": 0, "next_cursor": "1747000000.42"},
+            status=200,
+        )
+        result = client.list_audit_events(cursor="1747000001.7", limit=1)
+        assert "cursor=1747000001.7" in mock_responses.calls[0].request.url
+        assert result.cursor == "1747000000.42"
 
     def test_list_audit_events_with_time_range(self, client, mock_responses):
         """Test listing audit events with time range."""

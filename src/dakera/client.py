@@ -2732,7 +2732,9 @@ class DakeraClient:
 
         Args:
             agent_id: The agent.
-            memory_type: Sent as a query parameter (not applied by v0.12 servers).
+            memory_type: Only memories of this type (``episodic``, ``semantic``,
+                ``procedural``, ``working``). Applied by servers from 0.12.4
+                (earlier ones list every type).
             limit: Page size (server default 50, at most 1000).
             offset: Memories to skip.
             include_derived: Server v0.12.2+ lists the agent's memories only;
@@ -4237,22 +4239,15 @@ class DakeraClient:
             from_ts: Lower bound, Unix milliseconds (inclusive).
             to_ts: Upper bound, Unix milliseconds (inclusive).
             limit: Maximum number of events to return.
-            cursor: Not supported: ``GET /v1/audit`` has no cursor
-                pagination, so passing one raises ``ValueError`` (earlier SDKs
-                sent it and the server ignored it). Page by time range with
-                ``from_ts`` / ``to_ts`` instead.
+            cursor: The ``cursor`` of the previous page's response: the
+                events after it (older), in the same order — newest first.
+                Needs a server from 0.12.4 (an older one ignores it and
+                answers the first page again, without a ``cursor``).
 
         Returns:
-            :class:`AuditListResponse` with the events and their ``total``.
-
-        Raises:
-            ValueError: ``cursor`` is set.
+            :class:`AuditListResponse` with the events, their ``total`` and
+            the ``cursor`` of the next page (``None`` on the last).
         """
-        if cursor is not None:
-            raise ValueError(
-                "list_audit_events(cursor=...): GET /v1/audit has no cursor pagination; "
-                "narrow the query with from_ts/to_ts and limit instead"
-            )
         params: dict[str, Any] = {}
         if agent_id is not None:
             params["agent_id"] = agent_id
@@ -4264,6 +4259,8 @@ class DakeraClient:
             params["to"] = to_ts
         if limit is not None:
             params["limit"] = limit
+        if cursor is not None:
+            params["cursor"] = cursor
         result = self._request("GET", "/v1/audit", params=params)
         return AuditListResponse.from_dict(result)
 

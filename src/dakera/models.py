@@ -3866,9 +3866,8 @@ class AuditListResponse:
     total: int
     """How many events this page holds (the server's ``count``)."""
     cursor: str | None = None
-    """Always ``None``: ``GET /v1/audit`` has no cursor pagination (narrow a
-    query with ``from_ts`` / ``to_ts`` and ``limit`` instead). Kept for
-    compatibility."""
+    """Pass to ``list_audit_events(cursor=...)`` for the next page (the
+    server's ``next_cursor``); ``None`` on the last page."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditListResponse":
@@ -3877,6 +3876,7 @@ class AuditListResponse:
         return cls(
             events=events,
             total=int(total) if total is not None else len(events),
+            cursor=data.get("next_cursor"),
         )
 
 
