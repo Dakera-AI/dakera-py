@@ -2315,7 +2315,8 @@ class AsyncDakeraClient:
         auto_summarize: bool | None = None,
     ) -> dict[str, Any]:
         """End a session (server v0.12.2+: Write scope; an idle-ended session
-        answers its persisted state)."""
+        answers its persisted state; v0.12.4+: ``summary_pending`` when the
+        ``auto_summarize`` summary could not be stored yet)."""
         data: dict[str, Any] = {}
         if summary is not None:
             data["summary"] = summary

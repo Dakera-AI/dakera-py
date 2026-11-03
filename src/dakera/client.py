@@ -2623,7 +2623,9 @@ class DakeraClient:
         Server v0.12.2+: needs Write scope (a Read key gets ``403``). Ending a
         session the server already ended (idle) returns its persisted state
         (``ended_reason`` / ``summary`` are kept); a ``summary`` above the
-        content limit is a ``400``.
+        content limit is a ``400``. Server v0.12.4+: ``summary_pending`` is in
+        the answer when the ``auto_summarize`` summary memory could not be
+        stored yet (the server stores it later; the session is ended).
         """
         data: dict[str, Any] = {}
         if summary is not None:
