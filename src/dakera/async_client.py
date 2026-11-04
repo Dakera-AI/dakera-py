@@ -53,6 +53,9 @@ from dakera._util import (
     _document_fields,
     _event_time,
     _export_response,
+    _forget_body,
+    _get_memory_params,
+    _import_params,
     _import_upload,
     _key_update_body,
     _listing_params,
@@ -129,6 +132,8 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    ForgetDetectResponse,
+    ForgetResponse,
     FullTextIndexStats,
     # CE-54
     FulltextReindexResponse,
@@ -1509,6 +1514,8 @@ class AsyncDakeraClient:
         include_summaries: bool | None = None,
         session_id: str | None = None,
         rerank_candidates: int | None = None,
+        rerank_head: int | None = None,
+        importance_weighted: bool | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
@@ -1640,15 +1647,27 @@ class AsyncDakeraClient:
             data["session_id"] = session_id
         if rerank_candidates is not None:
             data["rerank_candidates"] = rerank_candidates
+        if rerank_head is not None:
+            if isinstance(rerank_head, bool) or rerank_head < 0:
+                raise ValueError("rerank_head must be a non-negative integer")
+            data["rerank_head"] = rerank_head
+        if importance_weighted is not None:
+            data["importance_weighted"] = importance_weighted
         data["agent_id"] = agent_id
         result = await self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
-    async def get_memory(self, agent_id: str | None, memory_id: str) -> dict[str, Any]:
+    async def get_memory(
+        self,
+        agent_id: str | None,
+        memory_id: str,
+        *,
+        projection_days: int | None = None,
+    ) -> dict[str, Any]:
         """Get a specific memory. See :meth:`DakeraClient.get_memory`."""
-        params = {"agent_id": agent_id} if agent_id is not None else None
+        params = _get_memory_params(agent_id, projection_days)
         return await self._request(
             "GET", f"/v1/memory/get/{_path_segment(memory_id)}", params=params
         )
@@ -1696,10 +1715,65 @@ class AsyncDakeraClient:
             params={"agent_id": agent_id},
         )
 
-    async def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
-        """Delete a memory."""
-        data = {"agent_id": agent_id, "memory_ids": [memory_id]}
+    async def forget(
+        self, agent_id: str, memory_id: str, *, restorable: bool | None = None
+    ) -> dict[str, Any]:
+        """Delete a memory. See :meth:`DakeraClient.forget`."""
+        data: dict[str, Any] = {"agent_id": agent_id, "memory_ids": [memory_id]}
+        if restorable is not None:
+            data["restorable"] = restorable
         return await self._request("POST", "/v1/memory/forget", data=data)
+
+    async def forget_memories(
+        self,
+        agent_id: str,
+        *,
+        memory_ids: list[str] | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        tags: list[str] | None = None,
+        below_importance: float | None = None,
+        about: str | None = None,
+        request: str | None = None,
+        until: int | None = None,
+        min_score: float | None = None,
+        limit: int | None = None,
+        restorable: bool | None = None,
+        dry_run: bool | None = None,
+    ) -> ForgetResponse:
+        """Forget memories (``POST /v1/memory/forget``).
+
+        See :meth:`DakeraClient.forget_memories`.
+        """
+        data = _forget_body(
+            agent_id,
+            memory_ids=memory_ids,
+            memory_type=memory_type,
+            session_id=session_id,
+            tags=tags,
+            below_importance=below_importance,
+            about=about,
+            request=request,
+            until=until,
+            min_score=min_score,
+            limit=limit,
+            restorable=restorable,
+            dry_run=dry_run,
+        )
+        result = await self._request("POST", "/v1/memory/forget", data=data)
+        return ForgetResponse.from_dict(result or {})
+
+    async def detect_forget_requests(self, texts: list[str]) -> ForgetDetectResponse:
+        """Read messages as requests to forget. See :meth:`DakeraClient.detect_forget_requests`."""
+        if isinstance(texts, str):
+            raise TypeError("texts must be a list of messages, not a string")
+        texts = list(texts)
+        if not 1 <= len(texts) <= 64:
+            raise ValueError("texts must hold between 1 and 64 messages")
+        result = await self._request(
+            "POST", "/v1/memory/forget/detect", data={"texts": texts}, idempotent=True
+        )
+        return ForgetDetectResponse.from_dict(result or {})
 
     async def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
         """Bulk-recall memories using filter predicates (CE-2).
@@ -2197,6 +2271,13 @@ class AsyncDakeraClient:
     async def get_namespace_extractor(self, namespace: str) -> dict[str, Any]:
         """Get the extractor provider configuration for a namespace."""
         return await self._request("GET", f"/v1/namespaces/{namespace}/extractor")
+
+    async def get_namespace_ner_config(self, namespace: str) -> dict[str, Any]:
+        """The entity-extraction config in effect for a namespace.
+
+        See :meth:`DakeraClient.get_namespace_ner_config`.
+        """
+        return await self._request("GET", f"/v1/namespaces/{namespace}/config")
 
     async def configure_namespace_ner(
         self,
@@ -3211,6 +3292,7 @@ class AsyncDakeraClient:
         dedup_cross_session: bool | None = None,
         consolidate_cross_session: bool | None = None,
         trash_retention_hours: int | None = None,
+        consolidation_mode: Literal["off", "report", "merge"] | str | None = None,
     ) -> dict[str, Any]:
         """Update AutoPilot configuration at runtime (PILOT-2).
 
@@ -3250,6 +3332,8 @@ class AsyncDakeraClient:
             data["consolidate_cross_session"] = consolidate_cross_session
         if trash_retention_hours is not None:
             data["trash_retention_hours"] = trash_retention_hours
+        if consolidation_mode is not None:
+            data["consolidation_mode"] = consolidation_mode
         return await self._request("PUT", "/v1/admin/autopilot/config", data=data)
 
     async def autopilot_trigger(self, action: str) -> dict[str, Any]:
@@ -3739,6 +3823,8 @@ class AsyncDakeraClient:
         format: str = "jsonl",
         agent_id: str | None = None,
         namespace: str | None = None,
+        *,
+        run_async: bool = False,
     ) -> MemoryImportResponse:
         """Import memories into an agent — ``POST /v1/import`` (DX-1).
 
@@ -3756,6 +3842,11 @@ class AsyncDakeraClient:
                 the server; needs Write scope on its namespace).
             namespace: Deprecated: not read by the server and not sent (the
                 target is the agent's namespace).
+            run_async: Server v0.12.4+: answer at once (``202``) with the job
+                (``status == "running"``) and import in the background; follow
+                it with :meth:`import_job_status` or :meth:`wait_for_import_job`.
+                Use it for a large file a proxy's timeout could cut. An older
+                server ignores it and imports before answering.
 
         Returns:
             :class:`MemoryImportResponse`: the import job's status
@@ -3772,7 +3863,7 @@ class AsyncDakeraClient:
         result = await self._request(
             "POST",
             "/v1/import",
-            params={"agent_id": agent_id, "format": format},
+            params=_import_params(agent_id, format, run_async),
             content=body,
             headers=headers,
         )
@@ -4349,8 +4440,29 @@ class AsyncDakeraClient:
 
     async def import_job_status(self, job_id: str) -> ImportJobStatus:
         """GET /v1/import/{job_id}/status — check import job progress."""
-        data = await self._request("GET", f"/v1/import/{job_id}/status")
+        data = await self._request("GET", f"/v1/import/{_path_segment(job_id)}/status")
         return ImportJobStatus.from_dict(data)
+
+    async def wait_for_import_job(
+        self, job_id: str, timeout: float = 600.0, poll_interval: float = 1.0
+    ) -> ImportJobStatus:
+        """Poll an import job (``import_memories(..., run_async=True)``) until it is
+        ``done`` or ``failed`` and return its final status.
+
+        Polls every ``poll_interval`` seconds (at least 0.1). Raises
+        :class:`~dakera.exceptions.TimeoutError` after ``timeout`` seconds; the
+        job keeps running on the server.
+        """
+        interval = max(poll_interval, _MIN_POLL_INTERVAL)
+        deadline = time.monotonic() + timeout
+        while True:
+            job = await self.import_job_status(job_id)
+            if job.status != "running":
+                return job
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"import job {job_id} not done after {timeout:g}s")
+            await asyncio.sleep(min(interval, remaining))
 
     async def download_backup(self, backup_id: str) -> bytes:
         """GET /admin/backups/{id}/download — download a backup as gzip bytes."""

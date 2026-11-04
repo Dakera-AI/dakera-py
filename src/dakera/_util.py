@@ -145,6 +145,79 @@ def _create_backup_body(
     return body
 
 
+def _import_params(agent_id: str, fmt: str, run_async: bool) -> dict[str, Any]:
+    """Query of ``POST /v1/import``; ``async=true`` (server v0.12.4+) only when asked."""
+    params: dict[str, Any] = {"agent_id": agent_id, "format": fmt}
+    if run_async:
+        params["async"] = "true"
+    return params
+
+
+def _get_memory_params(agent_id: str | None, projection_days: int | None) -> dict[str, Any] | None:
+    """Query of ``GET /v1/memory/get/{id}`` (``projection_days``: server v0.12.4+)."""
+    params: dict[str, Any] = {}
+    if agent_id is not None:
+        params["agent_id"] = agent_id
+    if projection_days is not None:
+        if isinstance(projection_days, bool) or not 1 <= projection_days <= 365:
+            raise ValueError("projection_days must be between 1 and 365")
+        params["projection_days"] = projection_days
+    return params or None
+
+
+_FORGET_TEXT_MAX_CHARS = 8000
+
+
+def _forget_body(
+    agent_id: str,
+    *,
+    memory_ids: list[str] | None,
+    memory_type: str | None,
+    session_id: str | None,
+    tags: list[str] | None,
+    below_importance: float | None,
+    about: str | None,
+    request: str | None,
+    until: int | None,
+    min_score: float | None,
+    limit: int | None,
+    restorable: bool | None,
+    dry_run: bool | None,
+) -> dict[str, Any]:
+    """Body of ``POST /v1/memory/forget``; only the fields given are sent.
+
+    Checks what the server would refuse with ``400`` before sending: ``about``
+    with ``request``, ``min_score`` outside ``[0, 1]``, ``limit`` outside
+    ``1..50`` and an ``about`` / ``request`` above 8000 characters.
+    """
+    if about is not None and request is not None:
+        raise ValueError("pass about or request, not both")
+    for name, text in (("about", about), ("request", request)):
+        if text is not None and len(text) > _FORGET_TEXT_MAX_CHARS:
+            raise ValueError(f"{name} is at most {_FORGET_TEXT_MAX_CHARS} characters")
+    if min_score is not None and not 0.0 <= min_score <= 1.0:
+        raise ValueError("min_score must be between 0 and 1")
+    if limit is not None and (isinstance(limit, bool) or not 1 <= limit <= 50):
+        raise ValueError("limit must be between 1 and 50")
+    data: dict[str, Any] = {"agent_id": agent_id}
+    optional: dict[str, Any] = {
+        "memory_ids": list(memory_ids) if memory_ids is not None else None,
+        "memory_type": memory_type,
+        "session_id": session_id,
+        "tags": list(tags) if tags is not None else None,
+        "below_importance": below_importance,
+        "about": about,
+        "request": request,
+        "until": until,
+        "min_score": min_score,
+        "limit": limit,
+        "restorable": restorable,
+        "dry_run": dry_run,
+    }
+    data.update({k: v for k, v in optional.items() if v is not None})
+    return data
+
+
 def _import_upload(data: Any, fmt: str) -> tuple[bytes, dict[str, str]]:
     """Multipart body and headers of ``POST /v1/import``.
 
@@ -358,6 +431,7 @@ _STORE_RESULT_KEYS = (
     "tokens_estimated",
     "windows",
     "warnings",
+    "forget_request",
 )
 
 
@@ -371,7 +445,10 @@ def _store_memory_result(response: Any) -> Any:
     from v0.12.3 the truncation report (``truncated``, ``content_tokens``,
     ``embedded_tokens``, ``max_tokens``, ``tokens_estimated``, ``windows``)
     when the text is longer than the embedding model reads, and ``warnings``
-    when the server ignored request fields it does not know.
+    when the server ignored request fields it does not know; from v0.12.4
+    ``forget_request`` (``{probability, threshold, is_request, sentence?}``,
+    see :class:`~dakera.models.ForgetIntent`) when the text reads as a request
+    to forget something said.
     """
     if isinstance(response, dict) and isinstance(response.get("memory"), dict):
         memory = dict(response["memory"])
