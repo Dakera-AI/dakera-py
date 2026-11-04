@@ -153,6 +153,50 @@ asyncio.run(main())
 
 ---
 
+## What's new for Dakera server v0.12.4
+
+Version 0.15.0 of this SDK adds support for Dakera server **v0.12.4**; the features
+below need server **v0.12.4 or later**. It stays **compatible with v0.12.0 – v0.12.3
+servers**: new request fields are sent only when set, and new response fields are `None`
+(or empty) from an older server.
+
+- **Forget by meaning.** `forget_memories(agent_id, about="I love sushi")` forgets what a
+  description is about; `forget_memories(agent_id, request="Oublie ce que je t'ai dit sur
+  mon travail")` forgets what a user's request to forget means, in any language, after the
+  server checks that it is one (`response.intent`). `dry_run=True` answers the ids without
+  forgetting; `restorable=True` sends the memories to the agent's trash
+  (`list_deduplicated()`, `restore_deduplicated()`).
+- `detect_forget_requests(texts)` tells which of a user's messages ask to forget something;
+  a store whose text reads as one says so in `forget_request` (`forget_requests` on a
+  batch store).
+- **Recall** answers the agent's standing instructions that fit the query in
+  `instructions`, and names the parts it could not serve in `degraded`. `rerank_head=` and
+  `importance_weighted=` are sent only when set, so the server's defaults apply (associated
+  memories are on by default from v0.12.4; pass `include_associated=False` to turn them
+  off).
+- `get_memory(..., projection_days=30)` adds the memory's projected importance per day;
+  `import_memories(..., run_async=True)` plus `wait_for_import_job()` imports a large file
+  in the background; `list_audit_events(cursor=)` pages through the audit log;
+  `get_namespace_ner_config()` shows the entity-extraction settings in effect and where
+  they come from.
+
+```python
+from dakera import DakeraClient
+
+client = DakeraClient("http://localhost:3000", api_key="dk-...")
+
+for text, reading in zip(messages, client.detect_forget_requests(messages).results):
+    if reading.is_request:
+        done = client.forget_memories("my-agent", request=text, restorable=True)
+        print("forgot", done.forgotten_ids)
+
+response = client.recall("my-agent", "how should I answer?")
+for instruction in response.instructions or []:
+    print("standing instruction:", instruction.content)
+if response.is_degraded:
+    print("partial recall:", response.degraded)
+```
+
 ## What's new for Dakera server v0.12.3
 
 Version 0.14.1 of this SDK adds support for Dakera server **v0.12.3**; the features
