@@ -19,6 +19,7 @@ import requests
 import urllib3
 
 from dakera._util import (
+    _FORGET_V0124_MIN,
     _MIN_POLL_INTERVAL,
     _attachment_body,
     _audit_export_response,
@@ -29,6 +30,10 @@ from dakera._util import (
     _document_fields,
     _event_time,
     _export_response,
+    _forget_body,
+    _forget_new_fields_with_filter,
+    _get_memory_params,
+    _import_params,
     _import_upload,
     _key_update_body,
     _listing_params,
@@ -38,6 +43,7 @@ from dakera._util import (
     _path_segment,
     _redacted_repr,
     _retry_safe,
+    _server_too_old,
     _SSEDecoder,
     _store_memory_result,
 )
@@ -51,6 +57,7 @@ from dakera.exceptions import (
     ServerError,
     ServiceUnavailableError,
     TimeoutError,
+    ValidationError,
     error_from_response,
     parse_retry_after,
 )
@@ -105,6 +112,8 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    ForgetDetectResponse,
+    ForgetResponse,
     FullTextIndexStats,
     # CE-54
     FulltextReindexResponse,
@@ -1767,10 +1776,10 @@ class DakeraClient:
         self,
         agent_id: str,
         query: str,
-        top_k: int = 5,
+        top_k: int | None = None,
         memory_type: str | None = None,
         min_importance: float | None = None,
-        include_associated: bool = False,
+        include_associated: bool | None = None,
         associated_memories_cap: int | None = None,
         associated_memories_depth: int | None = None,
         associated_memories_min_weight: float | None = None,
@@ -1789,23 +1798,29 @@ class DakeraClient:
         include_summaries: bool | None = None,
         session_id: str | None = None,
         rerank_candidates: int | None = None,
+        rerank_head: int | None = None,
+        importance_weighted: bool | None = None,
     ) -> RecallResponse:
         """Recall memories for an agent.
 
         Args:
             agent_id: The agent whose memories to recall.
             query: Semantic query text.
-            top_k: Number of primary results to return (default: 5).
+            top_k: Number of primary results to return. Omitted = the
+                server default (10).
             memory_type: Filter by memory type.
             min_importance: Minimum importance threshold.
             tags: Only memories carrying at least one of these tags.
             include_associated: COG-2 — traverse KG from recalled memories
                 and include associatively linked memories in
-                ``associated_memories`` (default: False).
+                ``associated_memories``. ``None`` (default) = the server
+                default (``DAKERA_RECALL_INCLUDE_ASSOCIATED``, on since server
+                v0.12.4); pass ``False`` to turn it off or ``True`` to turn it
+                on explicitly.
             associated_memories_cap: COG-2 — max associated memories to
                 return (default: 10, max: 10).
             associated_memories_depth: KG-3 — traversal depth 1–3
-                (default: 1).  Requires ``include_associated=True``.
+                (default: 1).  Requires associated memories to be on.
             associated_memories_min_weight: KG-3 — minimum edge weight for
                 KG traversal (default: 0.0).
             since: CE-7 — only recall memories created at or after this
@@ -1855,15 +1870,28 @@ class DakeraClient:
                 ``rerank_report.capped`` (server v0.12.3+). Must be at least 1
                 (``0`` is a ``400`` on v0.12.3; pass ``rerank=False`` to turn
                 reranking off).
+            rerank_head: With reranking and a ``top_k`` above it, the first
+                ``rerank_head`` results are the cross-encoder's order, followed
+                by the same recall without the cross-encoder, then the reranked
+                remainder (each memory once). ``0`` returns the reranked list
+                alone. Omitted = the server default (``DAKERA_RERANK_HEAD``,
+                10). Server v0.12.4+; older servers ignore it.
+            importance_weighted: ``True`` ranks with the flat relevance /
+                importance weights; ``False`` lets the query-type weights apply.
+                Omitted = the server default (``False`` from server v0.12.4,
+                ``True`` before).
 
         Returns:
             :class:`RecallResponse` with ``memories`` and optionally
-            ``associated_memories`` when ``include_associated`` is True.
+            ``associated_memories`` when associated memories are on.
             Each associated memory includes a ``depth`` field (KG-3). The
             first ``k`` results of a ``top_k=k`` recall are the first ``k``
             of a ``top_k=10`` recall for ``k <= 10`` (server v0.12.3+).
             ``rerank_report`` says what the cross-encoder did and ``warnings``
-            lists request fields the server ignored (v0.12.3+). An agent that
+            lists request fields the server ignored (v0.12.3+). From server
+            v0.12.4, ``instructions`` holds the agent's standing instructions
+            that fit the query and ``degraded`` names the parts of the recall
+            that could not be served (empty when complete). An agent that
             has stored nothing yet answers with no memories (servers before
             v0.12.3 answered ``404 NAMESPACE_NOT_FOUND``).
         """
@@ -1873,13 +1901,15 @@ class DakeraClient:
             raise ValueError(
                 "rerank_candidates must be a positive integer; pass rerank=False to skip reranking"
             )
-        data: dict[str, Any] = {"query": query, "top_k": top_k}
+        data: dict[str, Any] = {"query": query}
+        if top_k is not None:
+            data["top_k"] = top_k
         if memory_type is not None:
             data["memory_type"] = memory_type
         if min_importance is not None:
             data["min_importance"] = min_importance
-        if include_associated:
-            data["include_associated"] = True
+        if include_associated is not None:
+            data["include_associated"] = include_associated
         if associated_memories_cap is not None:
             data["associated_memories_cap"] = associated_memories_cap
         if associated_memories_depth is not None:
@@ -1914,13 +1944,25 @@ class DakeraClient:
             data["session_id"] = session_id
         if rerank_candidates is not None:
             data["rerank_candidates"] = rerank_candidates
+        if rerank_head is not None:
+            if isinstance(rerank_head, bool) or rerank_head < 0:
+                raise ValueError("rerank_head must be a non-negative integer")
+            data["rerank_head"] = rerank_head
+        if importance_weighted is not None:
+            data["importance_weighted"] = importance_weighted
         data["agent_id"] = agent_id
         result = self._request("POST", "/v1/memory/recall", data=data)
         if isinstance(result, dict):
             return RecallResponse.from_dict(result)
         return RecallResponse(memories=result)
 
-    def get_memory(self, agent_id: str | None, memory_id: str) -> dict[str, Any]:
+    def get_memory(
+        self,
+        agent_id: str | None,
+        memory_id: str,
+        *,
+        projection_days: int | None = None,
+    ) -> dict[str, Any]:
         """Get a specific memory.
 
         Args:
@@ -1930,8 +1972,13 @@ class DakeraClient:
                 holding the same id is a ``400`` that names them (pass
                 ``agent_id`` then). Older servers need ``agent_id``.
             memory_id: The memory's id.
+            projection_days: ``N`` (1–365, server v0.12.4+): the answer also
+                carries ``strength_projection``, ``[{"day", "importance"}]`` for
+                day 0 (today) to ``N``: the memory's importance on each day if
+                nothing touches it, under its namespace's decay policy. Older
+                servers ignore it (no ``strength_projection``).
         """
-        params = {"agent_id": agent_id} if agent_id is not None else None
+        params = _get_memory_params(agent_id, projection_days)
         return self._request("GET", f"/v1/memory/get/{_path_segment(memory_id)}", params=params)
 
     def update_memory(
@@ -1977,10 +2024,157 @@ class DakeraClient:
             params={"agent_id": agent_id},
         )
 
-    def forget(self, agent_id: str, memory_id: str) -> dict[str, Any]:
-        """Delete a memory."""
-        data = {"agent_id": agent_id, "memory_ids": [memory_id]}
+    def forget(
+        self, agent_id: str, memory_id: str, *, restorable: bool | None = None
+    ) -> dict[str, Any]:
+        """Delete a memory.
+
+        With ``restorable=True`` (server v0.12.4+) the memory goes to the
+        agent's trash (kind ``"deletion"``), restorable with
+        :meth:`restore_deduplicated` until the trash retention passes. An older
+        server would delete it for good, so ``restorable`` first checks the
+        server version (see :meth:`forget_memories`) and raises
+        :class:`~dakera.exceptions.ValidationError` on an older server.
+        """
+        data: dict[str, Any] = {"agent_id": agent_id, "memory_ids": [memory_id]}
+        if restorable is not None:
+            data["restorable"] = restorable
+        self._guard_forget(data, "forget")
         return self._request("POST", "/v1/memory/forget", data=data)
+
+    def forget_memories(
+        self,
+        agent_id: str,
+        *,
+        memory_ids: list[str] | None = None,
+        memory_type: str | None = None,
+        session_id: str | None = None,
+        tags: list[str] | None = None,
+        below_importance: float | None = None,
+        about: str | None = None,
+        request: str | None = None,
+        until: int | None = None,
+        min_score: float | None = None,
+        limit: int | None = None,
+        restorable: bool | None = None,
+        dry_run: bool | None = None,
+    ) -> ForgetResponse:
+        """Forget an agent's memories — ``POST /v1/memory/forget``.
+
+        Select by ``memory_ids`` and/or the filters (``memory_type``,
+        ``session_id``, ``tags``, ``below_importance``), or (server v0.12.4+)
+        by meaning:
+
+        * ``about``: what to forget, as what was said (``"I love sushi"``,
+          not ``"Please forget that I love sushi"``). The server recalls
+          candidates and forgets those its cross-encoder scores at least
+          ``min_score`` against ``about`` (default 0.5), most relevant first,
+          at most ``limit`` (default 10, at most 50). ``503`` when the reranker
+          is unavailable; nothing matching forgets nothing.
+        * ``request``: a user's request to forget as said, in any language
+          (``"Oublie ce que je t'ai dit sur mon travail"``). The server first
+          checks that it is one (``intent`` in the answer) and forgets only
+          then. ``503`` when its models are unavailable. Not with ``about``.
+
+        With ``about`` / ``request``, ``until`` (Unix seconds) keeps memories
+        stored after that instant out of reach and ``memory_ids`` / the filters
+        narrow the candidates. ``restorable=True`` sends the memories to the
+        agent's trash (see :meth:`list_deduplicated`); ``dry_run=True``
+        answers ``forgotten_ids`` and forgets nothing. ``about`` / ``request``
+        are at most 8000 characters.
+
+        Safety: a server before v0.12.4 ignores ``about``, ``request``,
+        ``until``, ``min_score``, ``limit``, ``restorable`` and ``dry_run`` and
+        forgets every memory ``memory_ids`` and the filters select (a
+        ``dry_run`` would delete). When one of those fields is combined with
+        ``memory_ids`` or a filter, the SDK first reads the server version from
+        :meth:`capabilities` (cached) and raises
+        :class:`~dakera.exceptions.ValidationError`, sending nothing, unless the
+        server is v0.12.4 or later. A server that advertises no readable
+        version, or has no capabilities route, counts as older. Without
+        ``memory_ids`` or a filter no check is made: an older server refuses
+        such a body with ``400``.
+
+        Returns:
+            :class:`ForgetResponse` (``deleted_count``; ``forgotten_ids`` with
+            ``about``, ``request`` or ``dry_run``; ``intent`` with ``request``).
+
+        Raises:
+            ValueError: both ``about`` and ``request``, or ``min_score`` /
+                ``limit`` out of range.
+            ValidationError: a v0.12.4 field with ``memory_ids`` or a filter,
+                and the server is older than v0.12.4 (nothing was sent).
+        """
+        data = _forget_body(
+            agent_id,
+            memory_ids=memory_ids,
+            memory_type=memory_type,
+            session_id=session_id,
+            tags=tags,
+            below_importance=below_importance,
+            about=about,
+            request=request,
+            until=until,
+            min_score=min_score,
+            limit=limit,
+            restorable=restorable,
+            dry_run=dry_run,
+        )
+        self._guard_forget(data, "forget_memories")
+        result = self._request("POST", "/v1/memory/forget", data=data)
+        return ForgetResponse.from_dict(result or {})
+
+    def _require_server(self, minimum: tuple[int, int, int], what: str, why: str) -> None:
+        """Raise :class:`~dakera.exceptions.ValidationError`, before anything is
+        sent, unless the server is at least ``minimum``.
+
+        The version is read from :meth:`capabilities` (cached on this client). A
+        server without the capabilities route (``404``) predates v0.12, and one
+        that advertises no readable version counts as too old: refusing is the
+        safe side. Any other failure to read the capabilities is raised as is.
+        """
+        version: str | None = None
+        try:
+            version = (self.capabilities()).server_version or None
+        except NotFoundError:
+            version = None
+        message = _server_too_old(version, minimum, what, why)
+        if message is not None:
+            raise ValidationError(message, code=ErrorCode.INVALID_REQUEST)
+
+    def _guard_forget(self, data: dict[str, Any], what: str) -> None:
+        """A forget body that combines a v0.12.4-only field with ``memory_ids`` or
+        a filter goes only to a v0.12.4+ server: an older one ignores the field
+        and forgets every memory the filters select (a ``dry_run`` would delete)."""
+        new = _forget_new_fields_with_filter(data)
+        if new:
+            self._require_server(
+                _FORGET_V0124_MIN,
+                f"{what}({', '.join(new)}) with memory_ids or a filter",
+                "an older server ignores these fields and would forget every memory "
+                "the filters select",
+            )
+
+    def detect_forget_requests(self, texts: list[str]) -> ForgetDetectResponse:
+        """Whether each message asks to forget something said, in any language —
+        ``POST /v1/memory/forget/detect`` (server v0.12.4+, Read scope).
+
+        Reads no memory: check a user's messages here and forget with
+        :meth:`forget_memories` (``request=``) the ones that are requests.
+        1–64 messages of at most 8000 characters each.
+
+        Returns:
+            :class:`ForgetDetectResponse` with one result per message, in order.
+        """
+        if isinstance(texts, str):
+            raise TypeError("texts must be a list of messages, not a string")
+        texts = list(texts)
+        if not 1 <= len(texts) <= 64:
+            raise ValueError("texts must hold between 1 and 64 messages")
+        result = self._request(
+            "POST", "/v1/memory/forget/detect", data={"texts": texts}, idempotent=True
+        )
+        return ForgetDetectResponse.from_dict(result or {})
 
     def batch_recall(self, request: BatchRecallRequest) -> BatchRecallResponse:
         """Bulk-recall memories using filter predicates (CE-2).
@@ -2142,14 +2336,19 @@ class DakeraClient:
         """Merge memories of an agent into one — ``POST /v1/memory/consolidate`` (CE-6).
 
         The merged memory is stored and the sources are forgotten. Without
-        ``memory_ids`` the server picks up to 5 memories of the agent's most
-        common type.
+        ``memory_ids`` (or with an empty list) the server auto-detects: it
+        takes the most important memory that has neighbours at cosine
+        similarity >= ``threshold`` (same memory type; same session unless
+        cross-session consolidation is configured) and merges it with up to 4
+        of them. It answers ``400`` when no memories are that similar.
 
         Args:
             agent_id: Agent whose memories to consolidate.
             memory_type: Deprecated: not read by the server and not sent (use
                 ``memory_ids`` to choose the memories).
-            threshold: Similarity threshold (0–1).
+            threshold: Cosine similarity a neighbour needs for auto-detection,
+                in (0, 1] (server default 0.85). Not used when ``memory_ids``
+                names memories.
             dry_run: The server has no dry run for this route: ``True`` raises
                 ``ValueError`` instead of merging (earlier SDKs sent it and the
                 server merged anyway).
@@ -2484,6 +2683,21 @@ class DakeraClient:
         """
         return self._request("GET", f"/v1/namespaces/{namespace}/extractor")
 
+    def get_namespace_ner_config(self, namespace: str) -> dict[str, Any]:
+        """The entity-extraction config in effect for a namespace —
+        ``GET /v1/namespaces/{namespace}/config``.
+
+        Returns:
+            Dict with ``namespace``, ``extract_entities``, ``entity_types`` and
+            (server v0.12.4+) ``source``: ``"namespace"`` when the namespace
+            set them, ``"server_default"`` when it never did and runs the
+            server's default (entity extraction is on by default from server
+            v0.12.4). The first :meth:`configure_namespace_ner` /
+            :meth:`replace_namespace_ner_config` makes the namespace's own
+            setting hold.
+        """
+        return self._request("GET", f"/v1/namespaces/{namespace}/config")
+
     def configure_namespace_ner(
         self,
         namespace: str,
@@ -2612,7 +2826,15 @@ class DakeraClient:
         Server v0.12.2+: needs Write scope (a Read key gets ``403``). Ending a
         session the server already ended (idle) returns its persisted state
         (``ended_reason`` / ``summary`` are kept); a ``summary`` above the
-        content limit is a ``400``.
+        content limit is a ``400``. Server v0.12.4+: ``summary_pending`` is in
+        the answer when the ``auto_summarize`` summary memory could not be
+        stored yet (the server stores it later; the session is ended).
+
+        ``auto_summarize`` (honoured from server v0.12.4; earlier servers
+        ignored it): omitted = the summary memory is stored for a session with
+        more than 3 memories; ``True`` = for any session with memories;
+        ``False`` = never. From server v0.12.4 the summary is the whole session
+        when it fits, else its most central sentences in the order said.
         """
         data: dict[str, Any] = {}
         if summary is not None:
@@ -2721,7 +2943,9 @@ class DakeraClient:
 
         Args:
             agent_id: The agent.
-            memory_type: Sent as a query parameter (not applied by v0.12 servers).
+            memory_type: Only memories of this type (``episodic``, ``semantic``,
+                ``procedural``, ``working``). Applied by servers from 0.12.4
+                (earlier ones list every type).
             limit: Page size (server default 50, at most 1000).
             offset: Memories to skip.
             include_derived: Server v0.12.2+ lists the agent's memories only;
@@ -2754,7 +2978,11 @@ class DakeraClient:
         active_only: bool | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """Get sessions for an agent."""
+        """Get sessions for an agent.
+
+        ``active_only=True`` lists only sessions not yet ended (applied by servers
+        from 0.12.4; earlier ones list every session).
+        """
         params: dict[str, Any] = {}
         if active_only is not None:
             params["active_only"] = str(active_only).lower()
@@ -3175,7 +3403,12 @@ class DakeraClient:
         target_type: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Summarize memories."""
+        """Summarize memories into one new summary memory (``POST /v1/knowledge/summarize``).
+
+        Returns:
+            Dict with ``summary_memory`` (the stored summary memory) and
+            ``source_count``; :meth:`SummarizeResponse.from_dict` parses it.
+        """
         # The server needs at least two memory ids and has no dry run: it
         # always writes the summary memory.
         if dry_run:
@@ -3200,7 +3433,10 @@ class DakeraClient:
 
         Server v0.12.2+ adds ``duplicates_skipped_changed`` (duplicates not
         merged because a record changed between the scan and the write) and
-        caps a merged tag union at 50 tags.
+        caps a merged tag union at 50 tags. Server v0.12.4+ lists the groups
+        whose merge failed in ``groups_failed`` (``[{canonical_id,
+        duplicate_ids, reason}]``; their duplicates are still stored);
+        :meth:`DeduplicateResponse.from_dict` parses the answer.
         """
         data: dict[str, Any] = {"agent_id": agent_id, "dry_run": dry_run}
         if threshold is not None:
@@ -3211,7 +3447,9 @@ class DakeraClient:
 
     def list_deduplicated(self, agent_id: str) -> DeduplicatedListResponse:
         """The agent's memories that deduplication or consolidation deleted and
-        that can still be restored (server v0.12.3+), newest first.
+        that can still be restored (server v0.12.3+), newest first. From server
+        v0.12.4 the list also holds memories forgotten with ``restorable=True``
+        (kind ``"deletion"``) and each entry's ``content``.
 
         Calls ``GET /v1/memory/deduplicated?agent_id=``. Each entry names the
         memory it was folded or merged into (``survivor_id``) and until when it
@@ -3337,7 +3575,11 @@ class DakeraClient:
         period: str | None = None,
         namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Get analytics overview."""
+        """Get analytics overview.
+
+        ``period`` and ``namespace`` are honoured from server v0.12.4 (earlier
+        servers ignored them); an unknown ``namespace`` is a ``404``.
+        """
         params: dict[str, Any] = {}
         if period is not None:
             params["period"] = period
@@ -3350,7 +3592,11 @@ class DakeraClient:
         period: str | None = None,
         namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Get latency analytics."""
+        """Get latency analytics.
+
+        ``period`` and ``namespace`` are honoured from server v0.12.4 (earlier
+        servers ignored them); an unknown ``namespace`` is a ``404``.
+        """
         params: dict[str, Any] = {}
         if period is not None:
             params["period"] = period
@@ -3363,7 +3609,11 @@ class DakeraClient:
         period: str | None = None,
         namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Get throughput analytics."""
+        """Get throughput analytics.
+
+        ``period`` and ``namespace`` are honoured from server v0.12.4 (earlier
+        servers ignored them); an unknown ``namespace`` is a ``404``.
+        """
         params: dict[str, Any] = {}
         if period is not None:
             params["period"] = period
@@ -3375,7 +3625,11 @@ class DakeraClient:
         self,
         namespace: str | None = None,
     ) -> dict[str, Any]:
-        """Get storage analytics."""
+        """Get storage analytics.
+
+        ``namespace`` restricts the breakdown and totals to that namespace from
+        server v0.12.4 (``404`` when unknown; earlier servers ignored it).
+        """
         params: dict[str, Any] = {}
         if namespace is not None:
             params["namespace"] = namespace
@@ -3576,6 +3830,7 @@ class DakeraClient:
         dedup_cross_session: bool | None = None,
         consolidate_cross_session: bool | None = None,
         trash_retention_hours: int | None = None,
+        consolidation_mode: Literal["off", "report", "merge"] | str | None = None,
     ) -> dict[str, Any]:
         """Update AutoPilot configuration at runtime (PILOT-2).
 
@@ -3584,9 +3839,10 @@ class DakeraClient:
         Server v0.12.3+ (older servers ignore them):
 
         Args:
-            dedup_mode: ``"off"`` (the server default: no dedup pass),
-                ``"report"`` (find duplicate groups and report them, change
-                nothing) or ``"merge"`` (fold and delete duplicates).
+            dedup_mode: ``"off"`` (no dedup pass), ``"report"`` (find
+                duplicate groups and report them, change nothing; the server
+                default from v0.12.4, ``"off"`` before) or ``"merge"`` (fold and
+                delete duplicates).
             dedup_cross_session: Let dedup fold memories of different sessions
                 (default ``False``).
             consolidate_cross_session: Let the server's consolidation merge
@@ -3594,9 +3850,16 @@ class DakeraClient:
             trash_retention_hours: Hours a memory deleted by dedup or
                 consolidation stays restorable (``0``–``8760``; ``0`` = no
                 copy). See :meth:`list_deduplicated`.
+            consolidation_mode: Server v0.12.4+: ``"off"``, ``"report"`` (the
+                default: find the groups consolidation would merge, change
+                nothing) or ``"merge"`` (merge them, as every earlier server
+                did).
 
         The answer's ``config`` (and :meth:`autopilot_status`'s) carries the
-        same four fields on v0.12.3+.
+        same fields on v0.12.3+ (``consolidation_mode`` on v0.12.4+). From
+        v0.12.4 the status's ``last_dedup`` / ``last_consolidation`` carry
+        ``failures`` when a pass could not do everything, and
+        :meth:`autopilot_trigger` answers ``success: False`` with ``failures``.
         """
         data: dict[str, Any] = {}
         if enabled is not None:
@@ -3615,6 +3878,8 @@ class DakeraClient:
             data["consolidate_cross_session"] = consolidate_cross_session
         if trash_retention_hours is not None:
             data["trash_retention_hours"] = trash_retention_hours
+        if consolidation_mode is not None:
+            data["consolidation_mode"] = consolidation_mode
         return self._request("PUT", "/v1/admin/autopilot/config", data=data)
 
     def autopilot_trigger(self, action: str) -> dict[str, Any]:
@@ -3664,7 +3929,9 @@ class DakeraClient:
         """Get decay engine activity counters and last-cycle snapshot (DECAY-2).
 
         Returns cumulative totals (memories decayed/deleted, cycles run) and
-        per-cycle statistics from the most recent run. Requires Admin scope.
+        per-cycle statistics from the most recent run. From server v0.12.4,
+        ``cycles_failed`` counts the cycles that could not do everything and
+        the last cycle's ``failures`` says what. Requires Admin scope.
         """
         return self._request("GET", "/v1/admin/decay/stats")
 
@@ -3754,11 +4021,31 @@ class DakeraClient:
         return self._request("GET", f"/admin/keys/{key_id}")
 
     def delete_key(self, key_id: str) -> dict[str, Any]:
-        """Delete an API key."""
+        """Revoke (delete) an API key.
+
+        Server v0.12.4+: the status says whether the change is stored: ``200``
+        stored; ``202`` applied and logged, stored by the server later (the
+        answer is returned as success); ``409``
+        (:class:`~dakera.exceptions.ConflictError`) a later change of the same
+        record took over first; ``503``
+        (:class:`~dakera.exceptions.ServiceUnavailableError`, retried with the
+        client's retry policy) not even logged. ``success`` is ``True`` only
+        for a ``2xx``.
+        """
         return self._request("DELETE", f"/admin/keys/{key_id}")
 
     def deactivate_key(self, key_id: str) -> dict[str, Any]:
-        """Deactivate an API key."""
+        """Deactivate an API key.
+
+        Server v0.12.4+: the status says whether the change is stored: ``200``
+        stored; ``202`` applied and logged, stored by the server later (the
+        answer is returned as success); ``409``
+        (:class:`~dakera.exceptions.ConflictError`) a later change of the same
+        record took over first; ``503``
+        (:class:`~dakera.exceptions.ServiceUnavailableError`, retried with the
+        client's retry policy) not even logged. ``success`` is ``True`` only
+        for a ``2xx``.
+        """
         return self._request("POST", f"/admin/keys/{key_id}/deactivate")
 
     def update_key(
@@ -3991,7 +4278,9 @@ class DakeraClient:
 
         Returns:
             :class:`~dakera.models.CrossAgentNetworkResponse` with ``agents``,
-            ``nodes``, ``edges``, and ``stats`` fields.
+            ``nodes``, ``edges``, and ``stats`` fields, and (server v0.12.4+)
+            ``unavailable``: agents left out because their memories could not
+            be read.
 
         Example::
 
@@ -4067,7 +4356,11 @@ class DakeraClient:
             key_id: The key to revoke.
 
         Returns:
-            Dict with ``success`` and ``message`` fields.
+            Dict with ``success`` and ``message`` fields. Server v0.12.4+:
+            ``200`` when the revocation is stored, ``202`` when it is logged
+            and stored later (returned as success), ``409``
+            (:class:`~dakera.exceptions.ConflictError`) when a later change of
+            the key took over, ``503`` when it could not even be logged.
         """
         return self._request("DELETE", f"/v1/namespaces/{namespace}/keys/{key_id}")
 
@@ -4115,6 +4408,8 @@ class DakeraClient:
         format: str = "jsonl",
         agent_id: str | None = None,
         namespace: str | None = None,
+        *,
+        run_async: bool = False,
     ) -> MemoryImportResponse:
         """Import memories into an agent — ``POST /v1/import`` (DX-1).
 
@@ -4132,6 +4427,11 @@ class DakeraClient:
                 the server; needs Write scope on its namespace).
             namespace: Deprecated: not read by the server and not sent (the
                 target is the agent's namespace).
+            run_async: Server v0.12.4+: answer at once (``202``) with the job
+                (``status == "running"``) and import in the background; follow
+                it with :meth:`import_job_status` or :meth:`wait_for_import_job`.
+                Use it for a large file a proxy's timeout could cut. An older
+                server ignores it and imports before answering.
 
         Returns:
             :class:`MemoryImportResponse`: the import job's status
@@ -4148,7 +4448,7 @@ class DakeraClient:
         result = self._request(
             "POST",
             "/v1/import",
-            params={"agent_id": agent_id, "format": format},
+            params=_import_params(agent_id, format, run_async),
             content=body,
             headers=headers,
         )
@@ -4221,10 +4521,14 @@ class DakeraClient:
             from_ts: Lower bound, Unix milliseconds (inclusive).
             to_ts: Upper bound, Unix milliseconds (inclusive).
             limit: Maximum number of events to return.
-            cursor: Pagination cursor from a previous response.
+            cursor: The ``cursor`` of the previous page's response: the
+                events after it (older), in the same order — newest first.
+                Needs a server from 0.12.4 (an older one ignores it and
+                answers the first page again, without a ``cursor``).
 
         Returns:
-            :class:`AuditListResponse` with events and optional next cursor.
+            :class:`AuditListResponse` with the events, their ``total`` and
+            the ``cursor`` of the next page (``None`` on the last).
         """
         params: dict[str, Any] = {}
         if agent_id is not None:
@@ -4430,10 +4734,11 @@ class DakeraClient:
 
         Calls ``GET /v1/namespaces/{namespace}/memory_policy``.
 
-        When no explicit policy has been configured the server returns the
-        COG-1 defaults (working=4 h, episodic=30 d, semantic=365 d,
-        procedural=730 d; exponential/power_law/logarithmic/flat decay;
-        spaced-repetition factor 1.0).
+        When no explicit policy has been stored the server answers what the
+        namespace's memories get without one: no TTL by memory type (all four
+        ``*_ttl_seconds`` are ``None``), the server's decay curve for every
+        type, no spaced repetition (factor ``0.0``), and consolidation,
+        store-time dedup and rate limits off.
 
         Args:
             namespace: Namespace to inspect.
@@ -4556,7 +4861,17 @@ class DakeraClient:
         return self._request("GET", "/v1/admin/quotas/default")
 
     def admin_set_default_quota(self, config: dict[str, Any] | None) -> dict[str, Any]:
-        """PUT /admin/quotas/default — set default quota configuration."""
+        """PUT /admin/quotas/default — set default quota configuration.
+
+        Server v0.12.4+: the status says whether the change is stored: ``200``
+        stored; ``202`` applied and logged, stored by the server later (the
+        answer is returned as success); ``409``
+        (:class:`~dakera.exceptions.ConflictError`) a later change of the same
+        record took over first; ``503``
+        (:class:`~dakera.exceptions.ServiceUnavailableError`, retried with the
+        client's retry policy) not even logged. ``success`` is ``True`` only
+        for a ``2xx``.
+        """
         return self._request("PUT", "/v1/admin/quotas/default", data={"config": config})
 
     def admin_get_quota(self, namespace: str) -> dict[str, Any]:
@@ -4564,11 +4879,31 @@ class DakeraClient:
         return self._request("GET", f"/v1/admin/quotas/{namespace}")
 
     def admin_set_quota(self, namespace: str, config: dict[str, Any]) -> dict[str, Any]:
-        """PUT /admin/quotas/{namespace} — set namespace quota."""
+        """PUT /admin/quotas/{namespace} — set namespace quota.
+
+        Server v0.12.4+: the status says whether the change is stored: ``200``
+        stored; ``202`` applied and logged, stored by the server later (the
+        answer is returned as success); ``409``
+        (:class:`~dakera.exceptions.ConflictError`) a later change of the same
+        record took over first; ``503``
+        (:class:`~dakera.exceptions.ServiceUnavailableError`, retried with the
+        client's retry policy) not even logged. ``success`` is ``True`` only
+        for a ``2xx``.
+        """
         return self._request("PUT", f"/v1/admin/quotas/{namespace}", data={"config": config})
 
     def admin_delete_quota(self, namespace: str) -> dict[str, Any]:
-        """DELETE /admin/quotas/{namespace} — remove namespace quota."""
+        """DELETE /admin/quotas/{namespace} — remove namespace quota.
+
+        Server v0.12.4+: the status says whether the change is stored: ``200``
+        stored; ``202`` applied and logged, stored by the server later (the
+        answer is returned as success); ``409``
+        (:class:`~dakera.exceptions.ConflictError`) a later change of the same
+        record took over first; ``503``
+        (:class:`~dakera.exceptions.ServiceUnavailableError`, retried with the
+        client's retry policy) not even logged. ``success`` is ``True`` only
+        for a ``2xx``.
+        """
         return self._request("DELETE", f"/v1/admin/quotas/{namespace}")
 
     def admin_check_quota(
@@ -4744,7 +5079,13 @@ class DakeraClient:
         return TtlStatsResponse.from_dict(data)
 
     def ttl_cleanup(self, namespace: str | None = None) -> TtlCleanupResponse:
-        """POST /admin/ttl/cleanup — remove expired vectors, optionally scoped to a namespace."""
+        """POST /admin/ttl/cleanup — remove expired vectors, optionally scoped to a namespace.
+
+        Server v0.12.4+: a sweep that could not run is an error (a failed
+        namespace listing, or the failed sweep of a named ``namespace``); in a
+        sweep of all, the namespaces that failed are in ``failed`` with
+        ``success`` ``False``.
+        """
         body: dict[str, Any] = {}
         if namespace is not None:
             body["namespace"] = namespace
@@ -4771,8 +5112,29 @@ class DakeraClient:
 
     def import_job_status(self, job_id: str) -> ImportJobStatus:
         """GET /v1/import/{job_id}/status — check import job progress."""
-        data = self._request("GET", f"/v1/import/{job_id}/status")
+        data = self._request("GET", f"/v1/import/{_path_segment(job_id)}/status")
         return ImportJobStatus.from_dict(data)
+
+    def wait_for_import_job(
+        self, job_id: str, timeout: float = 600.0, poll_interval: float = 1.0
+    ) -> ImportJobStatus:
+        """Poll an import job (``import_memories(..., run_async=True)``) until it is
+        ``done`` or ``failed`` and return its final status.
+
+        Polls every ``poll_interval`` seconds (at least 0.1). Raises
+        :class:`~dakera.exceptions.TimeoutError` after ``timeout`` seconds; the
+        job keeps running on the server.
+        """
+        interval = max(poll_interval, _MIN_POLL_INTERVAL)
+        deadline = time.monotonic() + timeout
+        while True:
+            job = self.import_job_status(job_id)
+            if job.status != "running":
+                return job
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"import job {job_id} not done after {timeout:g}s")
+            time.sleep(min(interval, remaining))
 
     def download_backup(self, backup_id: str) -> bytes:
         """GET /admin/backups/{id}/download — download a backup as gzip bytes."""

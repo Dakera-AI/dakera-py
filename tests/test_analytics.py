@@ -5,7 +5,7 @@ import json
 import pytest
 import responses
 
-from dakera import DakeraClient, NotFoundError, ServerError
+from dakera import DakeraClient, NotFoundError, ServerError, SummarizeResponse
 
 
 @pytest.fixture
@@ -236,14 +236,20 @@ class TestKnowledgeSummarize:
             responses.POST,
             "http://localhost:3000/v1/knowledge/summarize",
             json={
-                "summary": "Agent prefers concise responses.",
-                "source_count": 5,
-                "confidence": 0.92,
+                "summary_memory": {
+                    "id": "mem-sum",
+                    "content": "Agent prefers concise responses.",
+                    "memory_type": "semantic",
+                    "importance": 0.6,
+                },
+                "source_count": 2,
             },
             status=200,
         )
         result = client.summarize("agent-1", memory_ids=["m1", "m2"], target_type="semantic")
-        assert result["summary"] == "Agent prefers concise responses."
+        assert result["summary_memory"]["content"] == "Agent prefers concise responses."
+        parsed = SummarizeResponse.from_dict(result)
+        assert parsed.summary_memory.id == "mem-sum" and parsed.source_count == 2
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["agent_id"] == "agent-1"
         assert req_body["memory_ids"] == ["m1", "m2"]

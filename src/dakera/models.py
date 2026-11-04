@@ -243,6 +243,12 @@ class WarmCacheRequest:
     ttl_hint_seconds: int | None = None
     access_pattern: AccessPatternHint = AccessPatternHint.RANDOM
     max_vectors: int | None = None
+    query_vector: list[float] | None = None
+    """Warm the records nearest this vector (server v0.12.4+)."""
+    min_score_threshold: float | None = None
+    """With ``query_vector``: keep the records at or above this similarity."""
+    recently_accessed_within: int | None = None
+    """Keep memories used within this many seconds."""
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -258,6 +264,12 @@ class WarmCacheRequest:
             result["ttl_hint_seconds"] = self.ttl_hint_seconds
         if self.max_vectors is not None:
             result["max_vectors"] = self.max_vectors
+        if self.query_vector is not None:
+            result["query_vector"] = list(self.query_vector)
+        if self.min_score_threshold is not None:
+            result["min_score_threshold"] = self.min_score_threshold
+        if self.recently_accessed_within is not None:
+            result["recently_accessed_within"] = self.recently_accessed_within
         return result
 
 
@@ -1429,9 +1441,11 @@ class RecalledMemory:
     first. ``None`` when none matched (and from servers up to v0.12.2)."""
     retrieval: str | None = None
     """How the item got into the response when it is not a ranked result:
-    ``"neighborhood"`` for neighbourhood context returned inline. Its ``score`` is
+    ``"neighborhood"`` for neighbourhood context returned inline (its ``score`` is
     then the raw similarity of a different search and is NOT comparable with the
-    ranked results' scores. ``None`` for ranked results and on older servers."""
+    ranked results' scores), ``"instruction"`` for a standing instruction (server
+    v0.12.4+, see :attr:`RecallResponse.instructions`). ``None`` for ranked
+    results and on older servers."""
     context_of: str | None = None
     """On a ``RecallResponse.context_memories`` entry: the id of the ranked memory
     it is context for."""
@@ -1550,6 +1564,22 @@ class RecallResponse:
     """Request fields the server ignored because it does not know them (server
     v0.12.3+), e.g. ``["unknown field 'when' ignored"]``. Empty when every field
     was used, and from older servers."""
+    instructions: list["RecalledMemory"] | None = None
+    """The agent's standing instructions that best fit the query (server
+    v0.12.4+): at most 3 memories tagged ``dakera-instruction``, best first, each
+    with ``retrieval == "instruction"``. Only for a recall that does not narrow
+    its results (no ``tags``, ``memory_type``, ``session_id``, ``since``,
+    ``until`` or ``min_importance``). ``None`` when the server sends none."""
+    degraded: list[str] = field(default_factory=list)
+    """Parts of the recall the server could not serve because a read failed,
+    each with why (server v0.12.4+), e.g. ``"graph: ..."`` (scored without the
+    knowledge-graph signal) or ``"associated_memories: ..."``. Empty when the
+    recall is complete, and from older servers."""
+
+    @property
+    def is_degraded(self) -> bool:
+        """Whether the server could not serve every part of this recall."""
+        return bool(self.degraded)
 
     @property
     def ranked(self) -> list["RecalledMemory"]:
@@ -1582,6 +1612,8 @@ class RecallResponse:
             search_time_ms=data.get("search_time_ms"),
             late_interaction_first_stage=data.get("late_interaction_first_stage"),
             warnings=_str_list(data.get("warnings")),
+            instructions=cls._parse_list(data.get("instructions")),
+            degraded=_str_list(data.get("degraded")),
         )
 
 
@@ -1614,19 +1646,135 @@ class RerankReport:
 
 
 @dataclass
-class ConsolidateResponse:
-    """Response from memory consolidation."""
+class ForgetIntent:
+    """How the server read a message as a request to forget (server v0.12.4+).
 
-    consolidated_count: int
-    removed_count: int
-    new_memories: list[str]
+    ``intent`` of a forget with ``request=``, ``forget_request`` of a store, and
+    each entry of a batch store's ``forget_requests``.
+    """
+
+    probability: float
+    """The probability that the message asks to forget something said."""
+    threshold: float
+    """The probability at or above which a message counts as a request."""
+    is_request: bool
+    """Whether it reads as a request (only then does a forget act on it)."""
+    sentence: str | None = None
+    """The sentence of a long message that read as the request, when one
+    sentence decided rather than the whole message."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ForgetIntent":
+        return cls(
+            probability=float(data.get("probability", 0.0) or 0.0),
+            threshold=float(data.get("threshold", 0.0) or 0.0),
+            is_request=bool(data.get("is_request", False)),
+            sentence=data.get("sentence"),
+        )
+
+
+@dataclass
+class ForgetResponse:
+    """Response from ``POST /v1/memory/forget``."""
+
+    deleted_count: int
+    """How many memories were forgotten (``0`` on a dry run)."""
+    forgotten_ids: list[str] | None = None
+    """With ``about`` (most relevant first), ``request`` or ``dry_run`` (server
+    v0.12.4+): the ids forgotten, or that would be. ``None`` otherwise."""
+    intent: ForgetIntent | None = None
+    """With ``request`` (server v0.12.4+): how the message was read. Nothing is
+    forgotten unless ``intent.is_request``."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ForgetResponse":
+        intent = data.get("intent")
+        ids = data.get("forgotten_ids")
+        return cls(
+            deleted_count=int(data.get("deleted_count", 0) or 0),
+            forgotten_ids=_str_list(ids) if ids is not None else None,
+            intent=ForgetIntent.from_dict(intent) if isinstance(intent, dict) else None,
+        )
+
+
+@dataclass
+class StoredForgetRequest:
+    """A stored memory whose text reads as a request to forget (a batch store's
+    ``forget_requests[]``, server v0.12.4+)."""
+
+    id: str
+    """The stored memory's id."""
+    intent: ForgetIntent
+    """How its text was read."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "StoredForgetRequest":
+        return cls(id=str(data.get("id", "")), intent=ForgetIntent.from_dict(data))
+
+
+@dataclass
+class ForgetDetectResult:
+    """One message's reading in :class:`ForgetDetectResponse`."""
+
+    probability: float
+    is_request: bool
+    """The message reads as a request (``probability >= threshold``), or one of
+    its sentences does (``sentence`` is then set)."""
+    sentence: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ForgetDetectResult":
+        return cls(
+            probability=float(data.get("probability", 0.0) or 0.0),
+            is_request=bool(data.get("is_request", False)),
+            sentence=data.get("sentence"),
+        )
+
+
+@dataclass
+class ForgetDetectResponse:
+    """Response from ``POST /v1/memory/forget/detect`` (server v0.12.4+)."""
+
+    model: str
+    """The detector's encoder."""
+    threshold: float
+    """A message at or above this probability is a request to forget."""
+    sentence_threshold: float
+    """A sentence of a long message at or above this probability makes it one."""
+    results: list[ForgetDetectResult]
+    """One per message, in the order sent."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ForgetDetectResponse":
+        return cls(
+            model=str(data.get("model", "")),
+            threshold=float(data.get("threshold", 0.0) or 0.0),
+            sentence_threshold=float(data.get("sentence_threshold", 0.0) or 0.0),
+            results=[
+                ForgetDetectResult.from_dict(r)
+                for r in data.get("results") or []
+                if isinstance(r, dict)
+            ],
+        )
+
+
+@dataclass
+class ConsolidateResponse:
+    """Response from ``POST /v1/memory/consolidate``."""
+
+    consolidated_memory: "Memory"
+    """The merged memory the server stored."""
+    source_memory_ids: list[str]
+    """Ids of the memories that were merged (and forgotten)."""
+    memories_removed: int
+    """How many source memories were forgotten."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ConsolidateResponse":
         return cls(
-            consolidated_count=data.get("consolidated_count", 0),
-            removed_count=data.get("removed_count", 0),
-            new_memories=data.get("new_memories", []),
+            consolidated_memory=Memory.from_dict(data["consolidated_memory"]),
+            source_memory_ids=list(data.get("source_memory_ids", [])),
+            memories_removed=int(data.get("memories_removed", 0)),
         )
 
 
@@ -1884,18 +2032,18 @@ class KnowledgeGraphResponse:
 
 @dataclass
 class SummarizeResponse:
-    """Response from summarization."""
+    """Response from ``POST /v1/knowledge/summarize``."""
 
-    summary: str
+    summary_memory: "Memory"
+    """The summary memory the server stored."""
     source_count: int
-    new_memory_id: str | None = None
+    """How many memories were summarized."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SummarizeResponse":
         return cls(
-            summary=data["summary"],
-            source_count=data.get("source_count", 0),
-            new_memory_id=data.get("new_memory_id"),
+            summary_memory=Memory.from_dict(data["summary_memory"]),
+            source_count=int(data.get("source_count", 0)),
         )
 
 
@@ -1911,6 +2059,9 @@ class DeduplicateResponse:
     """Duplicates not merged because a record changed (edited, expired,
     forgotten) between the scan and the write (server v0.12.2+; ``0`` on a dry
     run)."""
+    groups_failed: list["DuplicateGroupFailure"] = field(default_factory=list)
+    """Groups whose merge failed (server v0.12.4+); their duplicates are still
+    stored. Empty when every group merged, and from older servers."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DeduplicateResponse":
@@ -1920,6 +2071,30 @@ class DeduplicateResponse:
             groups=data.get("groups", []),
             duplicates_merged=data.get("duplicates_merged"),
             duplicates_skipped_changed=data.get("duplicates_skipped_changed"),
+            groups_failed=[
+                DuplicateGroupFailure.from_dict(g)
+                for g in data.get("groups_failed") or []
+                if isinstance(g, dict)
+            ],
+        )
+
+
+@dataclass
+class DuplicateGroupFailure:
+    """A duplicate group whose merge failed (``groups_failed[]``, server v0.12.4+)."""
+
+    canonical_id: str
+    """The memory the duplicates were to be folded into."""
+    duplicate_ids: list[str]
+    """The duplicates, still stored."""
+    reason: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DuplicateGroupFailure":
+        return cls(
+            canonical_id=str(data.get("canonical_id", "")),
+            duplicate_ids=_str_list(data.get("duplicate_ids")),
+            reason=str(data.get("reason", "")),
         )
 
 
@@ -1951,9 +2126,17 @@ class CompressResponse:
     """Originals actually deprecated (only those of written summaries)."""
     summary_ids: list[str] = field(default_factory=list)
     deprecated_ids: list[str] = field(default_factory=list)
+    """Originals actually deprecated (server v0.12.4+: only those written; earlier
+    servers listed every planned one)."""
     summaries_skipped: list["CompressSkippedSummary"] = field(default_factory=list)
     """Summaries refused by validation or not storable (server v0.12.2+); the
     originals of their clusters are not deprecated."""
+    deprecation_skipped: list[str] = field(default_factory=list)
+    """Originals left as they were because they changed since the pass read them
+    (server v0.12.4+)."""
+    deprecation_error: str | None = None
+    """A deprecation write that failed (server v0.12.4+): the summaries then stand
+    beside their originals until the next compression. ``None`` when none failed."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompressResponse":
@@ -1974,6 +2157,8 @@ class CompressResponse:
                 for s in data.get("summaries_skipped") or []
                 if isinstance(s, dict)
             ],
+            deprecation_skipped=_str_list(data.get("deprecation_skipped")),
+            deprecation_error=data.get("deprecation_error"),
         )
 
 
@@ -2395,6 +2580,9 @@ class CrossAgentNetworkResponse:
     edges: list[AgentNetworkEdge]
     stats: AgentNetworkStats
     node_count: int = 0
+    unavailable: list["AgentUnavailable"] = field(default_factory=list)
+    """Agents left out because their memories could not be read (server
+    v0.12.4+; earlier servers dropped them silently). Empty when none."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CrossAgentNetworkResponse":
@@ -2404,7 +2592,24 @@ class CrossAgentNetworkResponse:
             edges=[AgentNetworkEdge.from_dict(e) for e in data.get("edges", [])],
             stats=AgentNetworkStats.from_dict(data["stats"]),
             node_count=int(data.get("node_count", 0)),
+            unavailable=[
+                AgentUnavailable.from_dict(u)
+                for u in data.get("unavailable") or []
+                if isinstance(u, dict)
+            ],
         )
+
+
+@dataclass
+class AgentUnavailable:
+    """An agent a cross-agent view could not read (``unavailable[]``, server v0.12.4+)."""
+
+    agent_id: str
+    reason: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentUnavailable":
+        return cls(agent_id=str(data.get("agent_id", "")), reason=str(data.get("reason", "")))
 
 
 # ===========================================================================
@@ -2704,6 +2909,15 @@ class BatchStoreMemoryResponse:
     warnings: list[str] = field(default_factory=list)
     """Request fields the server ignored (server v0.12.3+), e.g.
     ``"unknown field 'memories[].when' ignored (in 3 items)"``; empty otherwise."""
+    forget_requests: list["StoredForgetRequest"] = field(default_factory=list)
+    """Stored memories whose text reads as a request to forget something said
+    (server v0.12.4+), so the caller can act on them, e.g. with
+    :meth:`DakeraClient.forget_memories` (``request=``). Empty when none, and
+    from older servers."""
+    duplicates: list["BatchDuplicate"] = field(default_factory=list)
+    """Items not stored because the namespace's memory policy deduplicates on
+    store (``dedup_on_store``) and they are near a stored memory or an earlier
+    item of the batch (server v0.12.4+). Empty when none."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "BatchStoreMemoryResponse":
@@ -2718,6 +2932,33 @@ class BatchStoreMemoryResponse:
                 if isinstance(t, dict)
             ],
             warnings=_str_list(data.get("warnings")),
+            forget_requests=[
+                StoredForgetRequest.from_dict(f)
+                for f in data.get("forget_requests") or []
+                if isinstance(f, dict)
+            ],
+            duplicates=[
+                BatchDuplicate.from_dict(d)
+                for d in data.get("duplicates") or []
+                if isinstance(d, dict)
+            ],
+        )
+
+
+@dataclass
+class BatchDuplicate:
+    """A batch item not stored as a near-duplicate (``duplicates[]``, server v0.12.4+)."""
+
+    index: int
+    """The item's position in the request."""
+    existing_id: str
+    """The stored memory it duplicates."""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BatchDuplicate":
+        return cls(
+            index=int(data.get("index", 0) or 0),
+            existing_id=str(data.get("existing_id", "")),
         )
 
 
@@ -2761,14 +3002,19 @@ class DeduplicatedMemory:
     id: str
     """The deleted memory's id; restore it under this id."""
     kind: str
-    """What deleted it: ``"deduplication"`` or ``"consolidation"``."""
+    """What deleted it: ``"deduplication"``, ``"consolidation"`` or (server
+    v0.12.4+) ``"deletion"`` (a forget with ``restorable=True``)."""
     survivor_id: str
-    """The memory it was folded (deduplication) or merged (consolidation) into."""
+    """The memory it was folded (deduplication) or merged (consolidation) into;
+    empty for a ``"deletion"``."""
     deleted_at: int
     """When it was deleted (Unix seconds)."""
     restorable_until: int
     """Until when it can be restored (Unix seconds); purged after."""
     session_id: str | None = None
+    content: str | None = None
+    """Its text (server v0.12.4+), so a list of restorable memories can show what
+    each one was. ``None`` when it cannot be read back, and from older servers."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DeduplicatedMemory":
@@ -2779,6 +3025,7 @@ class DeduplicatedMemory:
             deleted_at=int(data.get("deleted_at", 0) or 0),
             restorable_until=int(data.get("restorable_until", 0) or 0),
             session_id=data.get("session_id"),
+            content=data.get("content"),
         )
 
 
@@ -2851,6 +3098,9 @@ class GraphEdge:
     """Edge weight (0.0–1.0). For ``related_to`` this is the cosine similarity score."""
     created_at: int
     """Unix timestamp of edge creation."""
+    label: str | None = None
+    """The label a client gave the link (``linked_by`` edges), when it has one
+    (server v0.12.4+ stores and returns it)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphEdge":
@@ -2861,6 +3111,7 @@ class GraphEdge:
             edge_type=EdgeType(data["edge_type"]),
             weight=data.get("weight", 0.0),
             created_at=data.get("created_at", 0),
+            label=data.get("label"),
         )
 
 
@@ -3000,6 +3251,8 @@ class GraphLinkResponse:
     """Target memory ID."""
     edge_type: str = ""
     """Edge type the server recorded (``linked_by``)."""
+    label: str | None = None
+    """The link's label (server v0.12.4+; earlier servers dropped it)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GraphLinkResponse":
@@ -3013,6 +3266,7 @@ class GraphLinkResponse:
                     "edge_type": data.get("edge_type", EdgeType.LINKED_BY.value),
                     "weight": data.get("weight", 1.0),
                     "created_at": data.get("created_at", 0),
+                    "label": data.get("label"),
                 }
             )
         return cls(
@@ -3020,6 +3274,7 @@ class GraphLinkResponse:
             from_id=edge.source_id,
             to_id=edge.target_id,
             edge_type=str(edge.edge_type.value),
+            label=edge.label,
         )
 
 
@@ -3196,11 +3451,20 @@ class EntityExtractionResponse:
     """Response from POST /v1/memories/extract."""
 
     entities: list[ExtractedEntity]
+    extractor: str | None = None
+    """Which extractor produced ``entities`` (server v0.12.4+): ``"gliner"`` (the
+    neural pass ran, on top of the rules) or ``"rule_based"``. ``None`` from
+    older servers."""
+    warnings: list[str] = field(default_factory=list)
+    """What the caller must know about the result (server v0.12.4+): the neural
+    pass failed (rule-based entities only) or covered part of the text."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EntityExtractionResponse":
         return cls(
             entities=[ExtractedEntity.from_dict(e) for e in data.get("entities", [])],
+            extractor=data.get("extractor"),
+            warnings=_str_list(data.get("warnings")),
         )
 
 
@@ -3862,7 +4126,9 @@ class AuditListResponse:
     events: list[AuditEvent]
     total: int
     """How many events this page holds (the server's ``count``)."""
-    cursor: str | None
+    cursor: str | None = None
+    """Pass to ``list_audit_events(cursor=...)`` for the next page (the
+    server's ``next_cursor``); ``None`` on the last page."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AuditListResponse":
@@ -3871,7 +4137,7 @@ class AuditListResponse:
         return cls(
             events=events,
             total=int(total) if total is not None else len(events),
-            cursor=data.get("cursor"),
+            cursor=data.get("next_cursor"),
         )
 
 
@@ -4145,19 +4411,23 @@ class MemoryPolicy:
     :meth:`DakeraClient.set_memory_policy` (and their async equivalents).
 
     .. note::
-        ``consolidated_count`` is read-only — the server manages this field.
-        Any value you set locally is sent to the API but silently ignored.
+        ``consolidated_count`` and ``stored`` are read-only — the server manages
+        them. ``consolidated_count`` is sent but ignored; ``stored`` is not sent.
     """
 
     # Differential TTLs -------------------------------------------------------
-    working_ttl_seconds: int | None = 14_400
-    """Default TTL for ``working`` memories in seconds (default: 4 h)."""
-    episodic_ttl_seconds: int | None = 2_592_000
-    """Default TTL for ``episodic`` memories in seconds (default: 30 d)."""
-    semantic_ttl_seconds: int | None = 31_536_000
-    """Default TTL for ``semantic`` memories in seconds (default: 365 d)."""
-    procedural_ttl_seconds: int | None = 63_072_000
-    """Default TTL for ``procedural`` memories in seconds (default: 730 d)."""
+    working_ttl_seconds: int | None = None
+    """TTL in seconds for ``working`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
+    episodic_ttl_seconds: int | None = None
+    """TTL in seconds for ``episodic`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
+    semantic_ttl_seconds: int | None = None
+    """TTL in seconds for ``semantic`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
+    procedural_ttl_seconds: int | None = None
+    """TTL in seconds for ``procedural`` memories stored without one.
+    ``None`` (the server default) = they never expire by type."""
 
     # Decay curves ------------------------------------------------------------
     working_decay: str = "exponential"
@@ -4204,13 +4474,19 @@ class MemoryPolicy:
     new memory and drops it if a near-duplicate already exists (threshold
     controlled by ``dedup_threshold``).
     """
-    dedup_threshold: float = 0.92
-    """Similarity threshold for store-time deduplication (default: ``0.92``).
+    dedup_threshold: float = 0.95
+    """Similarity threshold for store-time deduplication (default: ``0.95``).
 
     Memories with cosine similarity ≥ this value are considered duplicates
     and the incoming memory is dropped.  Only active when ``dedup_on_store``
     is ``True``.
     """
+
+    # Read-only ----------------------------------------------------------------
+    stored: bool | None = None
+    """Read-only (server v0.12.4+): ``True`` when the namespace has a stored
+    policy; ``False`` when it has none and the answer is what its memories get
+    without one. ``None`` from older servers and on a policy built locally."""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-serialisable dict, omitting ``None`` TTL fields."""
@@ -4265,7 +4541,8 @@ class MemoryPolicy:
             rate_limit_stores_per_minute=data.get("rate_limit_stores_per_minute"),
             rate_limit_recalls_per_minute=data.get("rate_limit_recalls_per_minute"),
             dedup_on_store=bool(data.get("dedup_on_store", False)),
-            dedup_threshold=float(data.get("dedup_threshold", 0.92)),
+            dedup_threshold=float(data.get("dedup_threshold", 0.95)),
+            stored=data.get("stored"),
         )
 
 
@@ -4410,9 +4687,13 @@ class TtlCleanupResponse:
     """Response from POST /admin/ttl/cleanup."""
 
     success: bool
+    """``False`` when a namespace could not be swept (server v0.12.4+; see ``failed``)."""
     vectors_removed: int
     namespaces_cleaned: list[str]
     message: str
+    failed: list["NamespaceUnavailable"] = field(default_factory=list)
+    """Namespaces whose sweep failed, with why (server v0.12.4+). Empty when every
+    namespace was swept."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TtlCleanupResponse":
@@ -4422,6 +4703,7 @@ class TtlCleanupResponse:
             vectors_removed=int(data["vectors_removed"]),
             namespaces_cleaned=list(data.get("namespaces_cleaned", [])),
             message=str(data["message"]),
+            failed=NamespaceUnavailable.list_from(data.get("failed")),
         )
 
 
@@ -4789,6 +5071,11 @@ class DerivationStatus:
     reconciler: DerivationReconciler = field(default_factory=DerivationReconciler)
     counters: dict[str, int] = field(default_factory=dict)
     """Per-process counters since start (``derived``, ``adopted``, ...)."""
+    entity_tagging: dict[str, Any] | None = None
+    """The background entity tagging of stored memories on this node (server
+    v0.12.4+): ``mode``, ``pending``, ``sweep_namespaces`` and counters since
+    start (``tagged``, ``retried``, ``failed``, ``extractor_gave_up``, ...).
+    ``settled`` is ``True`` only once it is done. ``None`` from older servers."""
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -4822,6 +5109,11 @@ class DerivationStatus:
                 for k, v in counters.items()
                 if isinstance(v, (int, float)) and not isinstance(v, bool)
             },
+            entity_tagging=(
+                dict(data["entity_tagging"])
+                if isinstance(data.get("entity_tagging"), dict)
+                else None
+            ),
             raw=dict(data),
         )
 

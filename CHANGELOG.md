@@ -7,6 +7,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - Unreleased
+
+Dakera server **v0.12.4** support, checked against the server's request and response types.
+The new features need server **v0.12.4 or later**; the SDK keeps working with v0.12.0 –
+v0.12.3 servers: new request fields are sent only when set and new response fields are `None`
+(or empty) from an older server. `ConsolidateResponse` and `SummarizeResponse` change shape
+(see Fixed): code reading their old fields must move to the new ones.
+
+### Added
+
+- **Forget by meaning.** `forget_memories(agent_id, *, memory_ids=, memory_type=,
+  session_id=, tags=, below_importance=, about=, request=, until=, min_score=, limit=,
+  restorable=, dry_run=)` (sync and async) calls `POST /v1/memory/forget` with every
+  selector and returns `ForgetResponse` (`deleted_count`, `forgotten_ids`, `intent`).
+  `about` forgets what a description is about (the server's cross-encoder scores each
+  candidate, `min_score` default 0.5, `limit` default 10, at most 50); `request` forgets
+  what a user's request to forget means, in any language, after checking that it is one
+  (`intent`: `ForgetIntent` with `probability`, `threshold`, `is_request`, `sentence`).
+  `until` keeps memories stored after the request out of reach; `dry_run` answers the ids
+  and forgets nothing. `about` with `request`, `min_score` outside `[0, 1]`, `limit`
+  outside `1..50` and texts above 8000 characters raise `ValueError` before sending.
+  **Safety on older servers:** a server before v0.12.4 ignores `about`, `request`,
+  `until`, `min_score`, `limit`, `restorable` and `dry_run` and forgets every memory
+  `memory_ids` and the filters select (a dry run would delete). When one of those fields
+  is combined with `memory_ids` or a filter, `forget_memories()` and
+  `forget(restorable=True)` first read the server version from `capabilities()` (cached)
+  and raise `ValidationError`, sending nothing, unless the server is v0.12.4 or later; a
+  server with no readable version or no capabilities route counts as older. Without a
+  filter no check is made (an older server refuses such a body with `400`).
+- **`detect_forget_requests(texts)`** (sync and async, `POST /v1/memory/forget/detect`):
+  whether each of 1–64 messages asks to forget something said; returns
+  `ForgetDetectResponse` (`model`, `threshold`, `sentence_threshold`, `results` of
+  `ForgetDetectResult`). Reads no memory.
+- **Restorable forgets:** `forget(agent_id, memory_id, restorable=True)` and
+  `forget_memories(..., restorable=True)` send the memories to the agent's trash;
+  `list_deduplicated()` lists them with kind `"deletion"`, and `DeduplicatedMemory.content`
+  carries each entry's text.
+- **Requests to forget read on store:** `store_memory()` returns `forget_request` when the
+  text reads as one; `BatchStoreMemoryResponse.forget_requests` (`StoredForgetRequest`:
+  `id`, `intent`) and `.duplicates` (`BatchDuplicate`: `index`, `existing_id`, items not
+  stored because the namespace deduplicates on store).
+- **Recall:** `recall(rerank_head=, importance_weighted=)` (sync and async; sent only when
+  set, `rerank_head=0` returns the reranked list alone). `RecallResponse.instructions`
+  (the agent's standing instructions that fit the query, `retrieval == "instruction"`),
+  `RecallResponse.degraded` (parts of the recall the server could not serve) and
+  `RecallResponse.is_degraded`.
+- **`get_memory(..., projection_days=N)`** (1–365): the answer carries
+  `strength_projection` (`[{day, importance}]`), the memory's importance for the next N
+  days under its namespace's decay policy.
+- **Async import:** `import_memories(..., run_async=True)` answers `202` with the running
+  job; `wait_for_import_job(job_id, timeout=, poll_interval=)` (sync and async) polls
+  `import_job_status()` until it is `done` or `failed`.
+- **`get_namespace_ner_config(namespace)`** (sync and async, `GET
+  /v1/namespaces/{ns}/config`): the entity-extraction settings in effect, with `source`
+  (`"namespace"` or `"server_default"`; entity extraction is on by default from server
+  v0.12.4).
+- `MemoryPolicy.stored` (read-only, not sent): whether the namespace has a stored policy.
+- `GraphEdge.label` and `GraphLinkResponse.label`: the label a link was created with.
+- `EntityExtractionResponse.extractor` (`"gliner"` / `"rule_based"`) and `.warnings`.
+- Failures the server now reports instead of hiding: `DeduplicateResponse.groups_failed`
+  (`DuplicateGroupFailure`), `CrossAgentNetworkResponse.unavailable` (`AgentUnavailable`),
+  `CompressResponse.deprecation_skipped` / `.deprecation_error` (and `deprecated_ids` lists
+  only what was written), `TtlCleanupResponse.failed` (with `success` `False`).
+- Admin: `autopilot_update_config(consolidation_mode=)` (`"off"`, `"report"` — the server
+  default — or `"merge"`); `WarmCacheRequest.query_vector`, `.min_score_threshold` and
+  `.recently_accessed_within`; `DerivationStatus.entity_tagging`.
+
+### Changed
+
+- Docstrings describe server v0.12.4 behaviour: `end_session(auto_summarize=)` is honoured
+  (omitted: a summary for sessions of more than 3 memories; `True`: any; `False`: never)
+  and the answer may carry `summary_pending`; `agent_memories(memory_type=)` and
+  `agent_sessions(active_only=)` filter; the analytics methods' `period` / `namespace` are
+  honoured (an unknown namespace is a `404`); key revocation / deactivation and quota
+  changes answer `200` (stored), `202` (logged, stored later; returned as success), `409`
+  (`ConflictError`: a later change took over) or `503`; autopilot dedup reports by
+  default; decay stats carry `cycles_failed` / `failures`.
+- The route snapshot test (`tests/v0_12_routes.txt`) covers the v0.12.4 router.
+
+### Fixed
+
+- **`MemoryPolicy` defaults match the server**: the four `*_ttl_seconds` now default to
+  `None` (the server's default is no TTL by memory type; the SDK claimed and sent 4 h /
+  30 d / 365 d / 730 d) and `dedup_threshold` to `0.95` (was `0.92`); `to_dict()` still
+  leaves out `None` TTLs. The `get_memory_policy()` docstring describes what a namespace
+  without a stored policy gets.
+- **`recall(top_k=)`** (sync and async) is no longer sent unless set, so the server
+  default (10) applies instead of the SDK's 5.
+- **`recall(include_associated=)`** (sync and async) defaults to `None` (the server
+  default, on since server v0.12.4) and is sent whenever set, so `False` now turns
+  associated memories off (it used to be dropped).
+- **`list_audit_events(cursor=)`** (sync and async) pages for real: the server's
+  `next_cursor` is read into `AuditListResponse.cursor` (`None` on the last page) and
+  sent back as `cursor=` (server v0.12.4+; it used to read a `cursor` field the server
+  never sent).
+- **`ConsolidateResponse`** is the server's `{consolidated_memory, source_memory_ids,
+  memories_removed}` (`consolidated_memory` a `Memory`) instead of `consolidated_count` /
+  `removed_count` / `new_memories`, and **`SummarizeResponse`** is `{summary_memory,
+  source_count}` (`summary_memory` a `Memory`) instead of `summary` / `new_memory_id`; the
+  server never sent the old fields.
+- `consolidate()` docstring (sync and async): without `memory_ids` (or with an empty list) the
+  server takes the most important memory with neighbours at cosine >= `threshold` (same type;
+  same session unless cross-session consolidation is configured) and merges it with up to 4 of
+  them, answering `400` when none are that similar.
+- `import_job_status()` escapes the job id in the path.
+
 ## [0.14.1] - 2026-10-22
 
 Dakera server **v0.12.3** support (Dakera-AI/dakera#917, #920; engine PR

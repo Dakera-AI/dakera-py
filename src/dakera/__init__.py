@@ -51,6 +51,7 @@ from dakera.models import (
     AgentNetworkStats,
     AgentStats,
     AgentSummary,
+    AgentUnavailable,
     AnalyticsOverview,
     AttachmentCapabilities,
     AttachmentContent,
@@ -62,6 +63,7 @@ from dakera.models import (
     AuditExportResponse,
     AuditListResponse,
     AuthCapabilities,
+    BatchDuplicate,
     BatchForgetRequest,
     BatchForgetResponse,
     BatchMemoryFilter,
@@ -106,6 +108,7 @@ from dakera.models import (
     DocumentJob,
     DocumentListResponse,
     DocumentSummary,
+    DuplicateGroupFailure,
     EdgeType,
     EmbeddingModel,
     EntityExtractionResponse,
@@ -123,6 +126,10 @@ from dakera.models import (
     FeedbackResponse,
     FeedbackSignal,
     FilterDict,
+    ForgetDetectResponse,
+    ForgetDetectResult,
+    ForgetIntent,
+    ForgetResponse,
     # CE-54: fulltext reindex
     FulltextReindexNamespaceResult,
     FulltextReindexResponse,
@@ -202,6 +209,7 @@ from dakera.models import (
     SessionTouchResponse,
     StalenessConfig,
     StorageTierOverview,
+    StoredForgetRequest,
     StoreMemoryRequest,
     SummarizeResponse,
     TifScore,
@@ -238,7 +246,7 @@ with contextlib.suppress(ImportError):
 
     _optional_exports += ["DakeraCostStorage", "DakeraDecisionStore", "DakeraDelegationHelper"]
 
-__version__ = "0.14.1"
+__version__ = "0.15.0"
 __all__ = [
     # Clients
     "DakeraClient",
@@ -445,6 +453,14 @@ __all__ = [
     # CE-79: filter builder helpers
     "F",
     "FilterDict",
+    "AgentUnavailable",
+    "BatchDuplicate",
+    "DuplicateGroupFailure",
+    "ForgetDetectResponse",
+    "ForgetDetectResult",
+    "ForgetIntent",
+    "ForgetResponse",
+    "StoredForgetRequest",
     # Server v0.12.2: agents, keys, whoami, sessions lifecycle, derived data
     "CreateAgentResponse",
     "KeyInfo",

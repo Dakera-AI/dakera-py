@@ -5,7 +5,13 @@ import json
 import pytest
 import responses
 
-from dakera import DakeraClient, NotFoundError, ServerError, ValidationError
+from dakera import (
+    ConsolidateResponse,
+    DakeraClient,
+    NotFoundError,
+    ServerError,
+    ValidationError,
+)
 
 
 @pytest.fixture
@@ -243,20 +249,27 @@ class TestConsolidation:
             responses.POST,
             "http://localhost:3000/v1/memory/consolidate",
             json={
-                "consolidated_count": 5,
-                "removed_count": 12,
-                "new_memories": ["mem-new-1", "mem-new-2"],
+                "consolidated_memory": {
+                    "id": "mem-merged",
+                    "content": "merged",
+                    "memory_type": "semantic",
+                    "importance": 0.7,
+                },
+                "source_memory_ids": ["m1", "m2"],
+                "memories_removed": 2,
             },
             status=200,
         )
-        result = client.consolidate(
-            "agent-1", memory_type="episodic", threshold=0.85, dry_run=False
-        )
-        assert result["consolidated_count"] == 5
-        assert result["removed_count"] == 12
+        result = client.consolidate("agent-1", threshold=0.85, memory_ids=["m1", "m2"])
+        assert result["memories_removed"] == 2
+        parsed = ConsolidateResponse.from_dict(result)
+        assert parsed.consolidated_memory.id == "mem-merged"
+        assert parsed.source_memory_ids == ["m1", "m2"]
+        assert parsed.memories_removed == 2
         req_body = json.loads(mock_responses.calls[0].request.body)
         assert req_body["agent_id"] == "agent-1"
         assert req_body["threshold"] == 0.85
+        assert req_body["memory_ids"] == ["m1", "m2"]
 
     def test_consolidate_agent(self, client, mock_responses):
         """Test agent-scoped consolidation."""
@@ -757,8 +770,7 @@ class TestAuditLog:
                         "timestamp": 1747500100,
                     },
                 ],
-                "total": 2,
-                "cursor": "cursor-abc",
+                "count": 2,
             },
             status=200,
         )
@@ -766,14 +778,27 @@ class TestAuditLog:
             agent_id="agent-1", event_type="memory.stored", limit=50
         )
         assert len(result.events) == 2
-        assert result.cursor == "cursor-abc"
+        assert result.total == 2
+        assert result.cursor is None
+
+    def test_list_audit_events_cursor_pages(self, client, mock_responses):
+        """cursor= is sent; the next page's cursor is the server's next_cursor."""
+        mock_responses.add(
+            responses.GET,
+            "http://localhost:3000/v1/audit",
+            json={"events": [], "count": 0, "next_cursor": "1747000000.42"},
+            status=200,
+        )
+        result = client.list_audit_events(cursor="1747000001.7", limit=1)
+        assert "cursor=1747000001.7" in mock_responses.calls[0].request.url
+        assert result.cursor == "1747000000.42"
 
     def test_list_audit_events_with_time_range(self, client, mock_responses):
         """Test listing audit events with time range."""
         mock_responses.add(
             responses.GET,
             "http://localhost:3000/v1/audit",
-            json={"events": [], "total": 0, "cursor": None},
+            json={"events": [], "count": 0},
             status=200,
         )
         result = client.list_audit_events(from_ts=1747000000, to_ts=1747500000)
@@ -983,6 +1008,27 @@ class TestMemoryPolicy:
         result = client.set_memory_policy("test-ns", policy)
         assert result.working_ttl_seconds == 28800
         assert result.working_decay == "linear"
+
+    def test_memory_policy_defaults_match_server(self):
+        """Server defaults: no TTL by type, store-time dedup threshold 0.95."""
+        from dakera.models import MemoryPolicy
+
+        policy = MemoryPolicy()
+        assert policy.working_ttl_seconds is None
+        assert policy.episodic_ttl_seconds is None
+        assert policy.semantic_ttl_seconds is None
+        assert policy.procedural_ttl_seconds is None
+        assert policy.dedup_threshold == pytest.approx(0.95)
+        body = policy.to_dict()
+        for field in (
+            "working_ttl_seconds",
+            "episodic_ttl_seconds",
+            "semantic_ttl_seconds",
+            "procedural_ttl_seconds",
+        ):
+            assert field not in body
+        assert body["dedup_threshold"] == pytest.approx(0.95)
+        assert MemoryPolicy.from_dict({}).dedup_threshold == pytest.approx(0.95)
 
 
 class TestNamespaceKeys:
