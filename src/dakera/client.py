@@ -19,6 +19,7 @@ import requests
 import urllib3
 
 from dakera._util import (
+    _FORGET_V0124_MIN,
     _MIN_POLL_INTERVAL,
     _attachment_body,
     _audit_export_response,
@@ -30,6 +31,7 @@ from dakera._util import (
     _event_time,
     _export_response,
     _forget_body,
+    _forget_new_fields_with_filter,
     _get_memory_params,
     _import_params,
     _import_upload,
@@ -41,6 +43,7 @@ from dakera._util import (
     _path_segment,
     _redacted_repr,
     _retry_safe,
+    _server_too_old,
     _SSEDecoder,
     _store_memory_result,
 )
@@ -54,6 +57,7 @@ from dakera.exceptions import (
     ServerError,
     ServiceUnavailableError,
     TimeoutError,
+    ValidationError,
     error_from_response,
     parse_retry_after,
 )
@@ -2027,12 +2031,15 @@ class DakeraClient:
 
         With ``restorable=True`` (server v0.12.4+) the memory goes to the
         agent's trash (kind ``"deletion"``), restorable with
-        :meth:`restore_deduplicated` until the trash retention passes; older
-        servers delete it for good.
+        :meth:`restore_deduplicated` until the trash retention passes. An older
+        server would delete it for good, so ``restorable`` first checks the
+        server version (see :meth:`forget_memories`) and raises
+        :class:`~dakera.exceptions.ValidationError` on an older server.
         """
         data: dict[str, Any] = {"agent_id": agent_id, "memory_ids": [memory_id]}
         if restorable is not None:
             data["restorable"] = restorable
+        self._guard_forget(data, "forget")
         return self._request("POST", "/v1/memory/forget", data=data)
 
     def forget_memories(
@@ -2076,6 +2083,18 @@ class DakeraClient:
         answers ``forgotten_ids`` and forgets nothing. ``about`` / ``request``
         are at most 8000 characters.
 
+        Safety: a server before v0.12.4 ignores ``about``, ``request``,
+        ``until``, ``min_score``, ``limit``, ``restorable`` and ``dry_run`` and
+        forgets every memory ``memory_ids`` and the filters select (a
+        ``dry_run`` would delete). When one of those fields is combined with
+        ``memory_ids`` or a filter, the SDK first reads the server version from
+        :meth:`capabilities` (cached) and raises
+        :class:`~dakera.exceptions.ValidationError`, sending nothing, unless the
+        server is v0.12.4 or later. A server that advertises no readable
+        version, or has no capabilities route, counts as older. Without
+        ``memory_ids`` or a filter no check is made: an older server refuses
+        such a body with ``400``.
+
         Returns:
             :class:`ForgetResponse` (``deleted_count``; ``forgotten_ids`` with
             ``about``, ``request`` or ``dry_run``; ``intent`` with ``request``).
@@ -2083,6 +2102,8 @@ class DakeraClient:
         Raises:
             ValueError: both ``about`` and ``request``, or ``min_score`` /
                 ``limit`` out of range.
+            ValidationError: a v0.12.4 field with ``memory_ids`` or a filter,
+                and the server is older than v0.12.4 (nothing was sent).
         """
         data = _forget_body(
             agent_id,
@@ -2099,8 +2120,40 @@ class DakeraClient:
             restorable=restorable,
             dry_run=dry_run,
         )
+        self._guard_forget(data, "forget_memories")
         result = self._request("POST", "/v1/memory/forget", data=data)
         return ForgetResponse.from_dict(result or {})
+
+    def _require_server(self, minimum: tuple[int, int, int], what: str, why: str) -> None:
+        """Raise :class:`~dakera.exceptions.ValidationError`, before anything is
+        sent, unless the server is at least ``minimum``.
+
+        The version is read from :meth:`capabilities` (cached on this client). A
+        server without the capabilities route (``404``) predates v0.12, and one
+        that advertises no readable version counts as too old: refusing is the
+        safe side. Any other failure to read the capabilities is raised as is.
+        """
+        version: str | None = None
+        try:
+            version = (self.capabilities()).server_version or None
+        except NotFoundError:
+            version = None
+        message = _server_too_old(version, minimum, what, why)
+        if message is not None:
+            raise ValidationError(message, code=ErrorCode.INVALID_REQUEST)
+
+    def _guard_forget(self, data: dict[str, Any], what: str) -> None:
+        """A forget body that combines a v0.12.4-only field with ``memory_ids`` or
+        a filter goes only to a v0.12.4+ server: an older one ignores the field
+        and forgets every memory the filters select (a ``dry_run`` would delete)."""
+        new = _forget_new_fields_with_filter(data)
+        if new:
+            self._require_server(
+                _FORGET_V0124_MIN,
+                f"{what}({', '.join(new)}) with memory_ids or a filter",
+                "an older server ignores these fields and would forget every memory "
+                "the filters select",
+            )
 
     def detect_forget_requests(self, texts: list[str]) -> ForgetDetectResponse:
         """Whether each message asks to forget something said, in any language —

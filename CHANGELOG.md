@@ -28,6 +28,14 @@ v0.12.3 servers: new request fields are sent only when set and new response fiel
   `until` keeps memories stored after the request out of reach; `dry_run` answers the ids
   and forgets nothing. `about` with `request`, `min_score` outside `[0, 1]`, `limit`
   outside `1..50` and texts above 8000 characters raise `ValueError` before sending.
+  **Safety on older servers:** a server before v0.12.4 ignores `about`, `request`,
+  `until`, `min_score`, `limit`, `restorable` and `dry_run` and forgets every memory
+  `memory_ids` and the filters select (a dry run would delete). When one of those fields
+  is combined with `memory_ids` or a filter, `forget_memories()` and
+  `forget(restorable=True)` first read the server version from `capabilities()` (cached)
+  and raise `ValidationError`, sending nothing, unless the server is v0.12.4 or later; a
+  server with no readable version or no capabilities route counts as older. Without a
+  filter no check is made (an older server refuses such a body with `400`).
 - **`detect_forget_requests(texts)`** (sync and async, `POST /v1/memory/forget/detect`):
   whether each of 1–64 messages asks to forget something said; returns
   `ForgetDetectResponse` (`model`, `threshold`, `sentence_threshold`, `results` of

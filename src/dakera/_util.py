@@ -218,6 +218,46 @@ def _forget_body(
     return data
 
 
+# Forget fields a server before v0.12.4 ignores, and the selectors every server applies.
+_FORGET_V0124_FIELDS = ("about", "request", "until", "min_score", "limit", "restorable", "dry_run")
+_FORGET_FILTER_FIELDS = ("memory_ids", "memory_type", "session_id", "tags", "below_importance")
+_FORGET_V0124_MIN = (0, 12, 4)
+
+
+def _forget_new_fields_with_filter(body: dict[str, Any]) -> list[str]:
+    """The v0.12.4-only fields of a forget body that is also selected by
+    ``memory_ids`` or a filter; ``[]`` when there are none (or no filter).
+
+    A server before v0.12.4 ignores those fields and forgets every memory the
+    filters select (a ``dry_run`` would delete), so such a body may only go to a
+    v0.12.4+ server. Without a filter an older server refuses the body (``400``).
+    """
+    new = [k for k in _FORGET_V0124_FIELDS if k in body]
+    if new and any(k in body for k in _FORGET_FILTER_FIELDS):
+        return new
+    return []
+
+
+def _parse_server_version(version: str | None) -> tuple[int, int, int] | None:
+    """``(major, minor, patch)`` of a server version such as ``0.12.4``; ``None``
+    when it is missing or unreadable."""
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", (version or "").strip())
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _server_too_old(
+    version: str | None, minimum: tuple[int, int, int], what: str, why: str
+) -> str | None:
+    """``None`` when ``version`` is at least ``minimum``; otherwise the message of
+    the error to raise. An unknown version counts as too old (the safe side)."""
+    parsed = _parse_server_version(version)
+    if parsed is not None and parsed >= minimum:
+        return None
+    shown = f"v{version}" if version else "unknown (no server version advertised)"
+    need = ".".join(str(n) for n in minimum)
+    return f"{what} needs Dakera server v{need}+ (this server: {shown}); {why}"
+
+
 def _import_upload(data: Any, fmt: str) -> tuple[bytes, dict[str, str]]:
     """Multipart body and headers of ``POST /v1/import``.
 

@@ -23,7 +23,12 @@ from dakera import (
     ForgetResponse,
     RecallResponse,
 )
-from dakera.exceptions import ConflictError, ServiceUnavailableError
+from dakera.exceptions import (
+    AuthenticationError,
+    ConflictError,
+    ServiceUnavailableError,
+    ValidationError,
+)
 from dakera.models import (
     BatchStoreMemoryResponse,
     CompressResponse,
@@ -73,6 +78,11 @@ def _async(handler, retries: int = 1):
 
 
 INTENT = {"probability": 0.97, "threshold": 0.5, "is_request": True}
+
+
+def caps(version: str) -> dict:
+    """A minimal ``GET /v1/capabilities`` answer of a server at ``version``."""
+    return {"server_version": version}
 
 
 # ---------------------------------------------------------------------------
@@ -156,9 +166,10 @@ class TestForget:
             client.forget_memories("agent-1", **kwargs)
 
     def test_forget_restorable(self, rsps, client):
+        rsps.add(responses.GET, f"{BASE}/v1/capabilities", json=caps("0.12.4"))
         rsps.add(responses.POST, f"{BASE}/v1/memory/forget", json={"deleted_count": 1})
         client.forget("agent-1", "m1", restorable=True)
-        assert json.loads(rsps.calls[0].request.body) == {
+        assert json.loads(rsps.calls[1].request.body) == {
             "agent_id": "agent-1",
             "memory_ids": ["m1"],
             "restorable": True,
@@ -219,6 +230,8 @@ class TestForget:
         seen = []
 
         def handler(request):
+            if request.url.path == "/v1/capabilities":
+                return httpx.Response(200, json=caps("0.12.4"))
             seen.append((request.url.path, json.loads(request.content)))
             if request.url.path.endswith("/detect"):
                 return httpx.Response(
@@ -245,6 +258,139 @@ class TestForget:
         assert seen[2][1]["restorable"] is True
         with pytest.raises(ValueError):
             await c.forget_memories("agent-1", about="a", request="b")
+
+
+# ---------------------------------------------------------------------------
+# forget: v0.12.4 fields with a filter go only to a v0.12.4+ server
+# ---------------------------------------------------------------------------
+
+
+GUARDED = [
+    {"memory_ids": ["m1"], "dry_run": True},
+    {"session_id": "s1", "about": "sushi"},
+    {"tags": ["t"], "request": "forget my job"},
+    {"memory_type": "working", "restorable": True},
+    {"below_importance": 0.2, "until": 1_790_000_000},
+    {"memory_ids": ["m1"], "about": "sushi", "min_score": 0.7, "limit": 3},
+]
+
+
+class TestForgetVersionGuard:
+    @pytest.mark.parametrize("kwargs", GUARDED)
+    @pytest.mark.parametrize("version", ["0.12.4", "0.12.5", "0.13.0", "v1.0.0"])
+    def test_new_server_sends(self, rsps, client, kwargs, version):
+        rsps.add(responses.GET, f"{BASE}/v1/capabilities", json=caps(version))
+        rsps.add(responses.POST, f"{BASE}/v1/memory/forget", json={"deleted_count": 0})
+        client.forget_memories("agent-1", **kwargs)
+        assert json.loads(rsps.calls[1].request.body) == {"agent_id": "agent-1", **kwargs}
+
+    @pytest.mark.parametrize("kwargs", GUARDED)
+    @pytest.mark.parametrize("version", ["0.12.3", "0.12.0", "0.11.108", "", "dev"])
+    def test_old_or_unknown_server_refused_nothing_sent(self, rsps, client, kwargs, version):
+        rsps.add(responses.GET, f"{BASE}/v1/capabilities", json=caps(version))
+        with pytest.raises(ValidationError, match="v0.12.4"):
+            client.forget_memories("agent-1", **kwargs)
+        assert [c.request.method for c in rsps.calls] == ["GET"]
+
+    def test_server_without_capabilities_route_refused(self, rsps, client):
+        rsps.add(
+            responses.GET,
+            f"{BASE}/v1/capabilities",
+            status=404,
+            json={"error": "not found", "code": "NOT_FOUND"},
+        )
+        with pytest.raises(ValidationError):
+            client.forget_memories("agent-1", memory_ids=["m1"], dry_run=True)
+        assert len(rsps.calls) == 1
+
+    def test_capabilities_failure_is_raised_nothing_sent(self, rsps, client):
+        rsps.add(
+            responses.GET,
+            f"{BASE}/v1/capabilities",
+            status=401,
+            json={"error": "unauthorized", "code": "UNAUTHORIZED"},
+        )
+        with pytest.raises(AuthenticationError):
+            client.forget_memories("agent-1", memory_ids=["m1"], dry_run=True)
+        assert len(rsps.calls) == 1
+
+    def test_forget_restorable_refused_on_old_server(self, rsps, client):
+        rsps.add(responses.GET, f"{BASE}/v1/capabilities", json=caps("0.12.3"))
+        with pytest.raises(ValidationError):
+            client.forget("agent-1", "m1", restorable=True)
+        assert len(rsps.calls) == 1
+
+    def test_capabilities_are_cached(self, rsps, client):
+        rsps.add(responses.GET, f"{BASE}/v1/capabilities", json=caps("0.12.4"))
+        rsps.add(responses.POST, f"{BASE}/v1/memory/forget", json={"deleted_count": 0})
+        rsps.add(responses.POST, f"{BASE}/v1/memory/forget", json={"deleted_count": 0})
+        client.forget_memories("agent-1", memory_ids=["m1"], dry_run=True)
+        client.forget_memories("agent-1", session_id="s", about="x")
+        assert [c.request.method for c in rsps.calls] == ["GET", "POST", "POST"]
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"about": "sushi", "dry_run": True, "limit": 3},
+            {"request": "forget my job", "restorable": True, "until": 1},
+            {"memory_ids": ["m1"]},
+            {"session_id": "s1", "tags": ["t"]},
+        ],
+    )
+    def test_no_check_without_a_filter_or_new_field(self, rsps, client, kwargs):
+        rsps.add(responses.POST, f"{BASE}/v1/memory/forget", json={"deleted_count": 0})
+        client.forget_memories("agent-1", **kwargs)
+        assert [c.request.url for c in rsps.calls] == [f"{BASE}/v1/memory/forget"]
+
+    def test_plain_forget_needs_no_check(self, rsps, client):
+        rsps.add(responses.POST, f"{BASE}/v1/memory/forget", json={"deleted_count": 1})
+        client.forget("agent-1", "m1")
+        assert len(rsps.calls) == 1
+
+    async def test_async_old_server_refused(self):
+        paths = []
+
+        def handler(request):
+            paths.append((request.method, request.url.path))
+            if request.url.path == "/v1/capabilities":
+                return httpx.Response(200, json=caps("0.12.3"))
+            return httpx.Response(200, json={"deleted_count": 1})
+
+        c = _async(handler)
+        with pytest.raises(ValidationError):
+            await c.forget_memories("agent-1", memory_ids=["m1"], dry_run=True)
+        with pytest.raises(ValidationError):
+            await c.forget("agent-1", "m1", restorable=True)
+        assert paths == [("GET", "/v1/capabilities")]
+        # Without a filter nothing is checked and the body is sent.
+        await c.forget_memories("agent-1", about="sushi", dry_run=True)
+        assert paths[-1] == ("POST", "/v1/memory/forget")
+
+    async def test_async_new_server_sends(self):
+        sent = []
+
+        def handler(request):
+            if request.url.path == "/v1/capabilities":
+                return httpx.Response(200, json=caps("0.12.4"))
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json={"deleted_count": 0, "forgotten_ids": ["m1"]})
+
+        resp = await _async(handler).forget_memories(
+            "agent-1", memory_ids=["m1"], about="x", dry_run=True
+        )
+        assert sent == [
+            {"agent_id": "agent-1", "memory_ids": ["m1"], "about": "x", "dry_run": True}
+        ]
+        assert resp.forgotten_ids == ["m1"]
+
+    async def test_async_server_without_capabilities_route_refused(self):
+        def handler(request):
+            if request.url.path == "/v1/capabilities":
+                return httpx.Response(404, json={"error": "not found", "code": "NOT_FOUND"})
+            raise AssertionError("forget must not be sent")
+
+        with pytest.raises(ValidationError):
+            await _async(handler).forget_memories("agent-1", tags=["t"], restorable=True)
 
 
 # ---------------------------------------------------------------------------
